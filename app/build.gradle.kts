@@ -168,6 +168,8 @@ kotlin {
 }
 
 dependencies {
+    implementation("li.joye.yakuyomi:engine:0.1.0") // Yakuyomi 翻譯引擎（composite build：includeBuild 替換）
+
     implementation(projects.i18n)
     implementation(projects.core.archive)
     implementation(projects.core.common)

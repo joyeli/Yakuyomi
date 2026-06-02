@@ -22,6 +22,9 @@ dependencyResolutionManagement {
     }
 }
 
+// Yakuyomi：以 composite build 接入翻譯引擎（submodule yakuyomi-engine）→ app 依賴 li.joye.yakuyomi:engine
+includeBuild("yakuyomi-engine")
+
 enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
 rootProject.name = "Mihon"
