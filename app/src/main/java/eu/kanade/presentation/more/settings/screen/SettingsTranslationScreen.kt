@@ -4,8 +4,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.remember
 import eu.kanade.presentation.more.settings.Preference
+import kotlinx.collections.immutable.persistentMapOf
 import tachiyomi.domain.translation.service.TranslationPreferences
 import tachiyomi.i18n.MR
+import tachiyomi.presentation.core.i18n.stringResource
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
@@ -30,14 +32,60 @@ object SettingsTranslationScreen : SearchableSettings {
                 // static subtitle so the key value is never rendered in the list
                 subtitle = "Translation LLM key — OpenAI-compatible, DeepSeek by default",
             ),
-            Preference.PreferenceItem.EditTextPreference(
+            Preference.PreferenceItem.ListPreference(
                 preference = prefs.targetLangName,
-                title = "Target language",
+                entries = persistentMapOf(
+                    TranslationPreferences.DEFAULT_TARGET_LANG to stringResource(MR.strings.pref_translation_lang_trad_chinese),
+                    "Japanese" to stringResource(MR.strings.pref_translation_lang_japanese),
+                    "Simplified Chinese" to stringResource(MR.strings.pref_translation_lang_simp_chinese),
+                    "English" to stringResource(MR.strings.pref_translation_lang_english),
+                    "Korean" to stringResource(MR.strings.pref_translation_lang_korean),
+                    "Spanish" to stringResource(MR.strings.pref_translation_lang_spanish),
+                    "French" to stringResource(MR.strings.pref_translation_lang_french),
+                    "German" to stringResource(MR.strings.pref_translation_lang_german),
+                    "Portuguese" to stringResource(MR.strings.pref_translation_lang_portuguese),
+                    "Russian" to stringResource(MR.strings.pref_translation_lang_russian),
+                ),
+                title = stringResource(MR.strings.pref_translation_target_lang),
             ),
-            Preference.PreferenceItem.EditTextPreference(
+            Preference.PreferenceItem.ListPreference(
                 preference = prefs.sourceLangName,
-                title = "Source language",
-                subtitle = "Prompt label; blank = let the LLM infer. Actual source = whatever the OCR model reads (BYOM).",
+                entries = persistentMapOf(
+                    "" to stringResource(MR.strings.pref_translation_lang_auto_detect),
+                    TranslationPreferences.DEFAULT_SOURCE_LANG to stringResource(MR.strings.pref_translation_lang_japanese),
+                    TranslationPreferences.DEFAULT_TARGET_LANG to stringResource(MR.strings.pref_translation_lang_trad_chinese),
+                    "Simplified Chinese" to stringResource(MR.strings.pref_translation_lang_simp_chinese),
+                    "English" to stringResource(MR.strings.pref_translation_lang_english),
+                    "Korean" to stringResource(MR.strings.pref_translation_lang_korean),
+                    "Spanish" to stringResource(MR.strings.pref_translation_lang_spanish),
+                    "French" to stringResource(MR.strings.pref_translation_lang_french),
+                    "German" to stringResource(MR.strings.pref_translation_lang_german),
+                    "Portuguese" to stringResource(MR.strings.pref_translation_lang_portuguese),
+                    "Russian" to stringResource(MR.strings.pref_translation_lang_russian),
+                ),
+                title = stringResource(MR.strings.pref_translation_source_lang),
+                subtitle = stringResource(MR.strings.pref_translation_source_lang_subtitle),
+                subtitleProvider = { _, _ -> stringResource(MR.strings.pref_translation_source_lang_subtitle) },
+            ),
+            Preference.PreferenceItem.ListPreference(
+                preference = prefs.orientation,
+                entries = persistentMapOf(
+                    "auto" to stringResource(MR.strings.pref_translation_orientation_auto),
+                    "vertical" to stringResource(MR.strings.pref_translation_orientation_vertical),
+                    "horizontal" to stringResource(MR.strings.pref_translation_orientation_horizontal),
+                ),
+                title = stringResource(MR.strings.pref_translation_orientation),
+            ),
+            Preference.PreferenceItem.ListPreference(
+                preference = prefs.inpaintMethod,
+                entries = persistentMapOf(
+                    "boxfill" to stringResource(MR.strings.pref_translation_inpaint_boxfill),
+                    "auto_whole" to stringResource(MR.strings.pref_translation_inpaint_auto_whole),
+                    "lama_whole" to stringResource(MR.strings.pref_translation_inpaint_lama_whole),
+                    "auto_tile" to stringResource(MR.strings.pref_translation_inpaint_auto_tile),
+                    "lama_tile" to stringResource(MR.strings.pref_translation_inpaint_lama_tile),
+                ),
+                title = stringResource(MR.strings.pref_translation_inpaint_method),
             ),
         )
     }

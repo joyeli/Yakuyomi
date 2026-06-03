@@ -7,8 +7,11 @@ import androidx.core.net.toUri
 import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.BuildConfig
 import li.joye.yakuyomi.engine.EngineConfig
+import li.joye.yakuyomi.engine.InpainterConfig
 import li.joye.yakuyomi.engine.ModelSet
 import li.joye.yakuyomi.engine.PageResult
+import li.joye.yakuyomi.engine.RenderConfig
+import li.joye.yakuyomi.engine.TextOrientation
 import li.joye.yakuyomi.engine.TranslatorConfig
 import li.joye.yakuyomi.engine.Yakuyomi
 import logcat.LogPriority
@@ -89,7 +92,28 @@ class PageTranslator(private val context: Context) {
         if (target != TranslationPreferences.DEFAULT_TARGET_LANG) {
             translatorCfg = translatorCfg.copy(sampleSource = "", sampleTarget = "")
         }
-        val cfg = EngineConfig(translator = translatorCfg)
+
+        // 排版方向
+        val orient = when (translationPreferences.orientation.get()) {
+            "vertical" -> TextOrientation.VERTICAL
+            "horizontal" -> TextOrientation.HORIZONTAL
+            else -> TextOrientation.AUTO
+        }
+
+        // 去字方法
+        val (method, whole) = when (translationPreferences.inpaintMethod.get()) {
+            "boxfill" -> "boxfill" to true
+            "auto_whole" -> "auto" to true
+            "lama_whole" -> "lama" to true
+            "lama_tile" -> "lama" to false
+            else -> "auto" to false // auto_tile（預設）
+        }
+
+        val cfg = EngineConfig(
+            translator = translatorCfg,
+            inpainter = InpainterConfig(method = method, wholeImage = whole),
+            render = RenderConfig(orientation = orient),
+        )
 
         var translated = 0
         try {

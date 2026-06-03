@@ -20,9 +20,17 @@ class TranslationPreferences(preferenceStore: PreferenceStore) {
     /** 來源語言標註（進 prompt；留空＝讓 LLM 自己判。實際來源由 OCR 模型決定＝BYOM）。 */
     val sourceLangName = preferenceStore.getString("translation_source_lang", DEFAULT_SOURCE_LANG)
 
+    /** 排版方向（auto/vertical/horizontal），對應引擎 RenderConfig.orientation。 */
+    val orientation = preferenceStore.getString("translation_orientation", DEFAULT_ORIENTATION)
+
+    /** 去字方法（boxfill/auto_whole/lama_whole/auto_tile/lama_tile），對應引擎 InpainterConfig。 */
+    val inpaintMethod = preferenceStore.getString("translation_inpaint_method", DEFAULT_INPAINT_METHOD)
+
     companion object {
         /** 預設目標＝台灣繁中。非此值時 PageTranslator 不放引擎內建的日→繁中 few-shot（避免範例語言衝突）。 */
         const val DEFAULT_TARGET_LANG = "Traditional Chinese (Taiwan, 台灣慣用的繁體中文用語)"
         const val DEFAULT_SOURCE_LANG = "Japanese"
+        const val DEFAULT_ORIENTATION = "auto"
+        const val DEFAULT_INPAINT_METHOD = "auto_tile"
     }
 }
