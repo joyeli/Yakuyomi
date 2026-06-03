@@ -15,11 +15,14 @@ class TranslationPreferences(preferenceStore: PreferenceStore) {
     val apiKey = preferenceStore.getString("translation_api_key", "")
 
     /** 目標語言（LLM 直接照這個翻）；預設台灣繁中，對齊引擎 TranslatorConfig.toLangName。 */
-    val targetLangName = preferenceStore.getString(
-        "translation_target_lang",
-        "Traditional Chinese (Taiwan, 台灣慣用的繁體中文用語)",
-    )
+    val targetLangName = preferenceStore.getString("translation_target_lang", DEFAULT_TARGET_LANG)
 
     /** 來源語言標註（進 prompt；留空＝讓 LLM 自己判。實際來源由 OCR 模型決定＝BYOM）。 */
-    val sourceLangName = preferenceStore.getString("translation_source_lang", "Japanese")
+    val sourceLangName = preferenceStore.getString("translation_source_lang", DEFAULT_SOURCE_LANG)
+
+    companion object {
+        /** 預設目標＝台灣繁中。非此值時 PageTranslator 不放引擎內建的日→繁中 few-shot（避免範例語言衝突）。 */
+        const val DEFAULT_TARGET_LANG = "Traditional Chinese (Taiwan, 台灣慣用的繁體中文用語)"
+        const val DEFAULT_SOURCE_LANG = "Japanese"
+    }
 }

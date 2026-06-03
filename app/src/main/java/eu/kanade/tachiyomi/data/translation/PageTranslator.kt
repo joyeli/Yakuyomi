@@ -79,13 +79,17 @@ class PageTranslator(private val context: Context) {
 
         val alphabet = context.assets.open(ALPHABET).bufferedReader().use { it.readLines() }
         val models = ModelSet(ensureLocal(detU), ensureLocal(ocrU), ensureLocal(lamaU))
-        // 語言對從設定頁讀（預設日→繁中）；其餘引擎設定用預設
-        val cfg = EngineConfig(
-            translator = TranslatorConfig(
-                toLangName = translationPreferences.targetLangName.get(),
-                fromLangName = translationPreferences.sourceLangName.get(),
-            ),
+        // 語言對從設定頁讀（預設日→繁中）。改了目標語言就清掉引擎內建的日→繁中 few-shot，
+        // 免得範例語言（繁中）跟新目標衝突、把輸出帶偏。
+        val target = translationPreferences.targetLangName.get()
+        var translatorCfg = TranslatorConfig(
+            toLangName = target,
+            fromLangName = translationPreferences.sourceLangName.get(),
         )
+        if (target != TranslationPreferences.DEFAULT_TARGET_LANG) {
+            translatorCfg = translatorCfg.copy(sampleSource = "", sampleTarget = "")
+        }
+        val cfg = EngineConfig(translator = translatorCfg)
 
         var translated = 0
         try {
