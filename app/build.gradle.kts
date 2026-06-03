@@ -3,6 +3,7 @@ import mihon.gradle.getBuildTime
 import mihon.gradle.getLatestCommitCount
 import mihon.gradle.getLatestCommitSha
 import mihon.gradle.tasks.ReplaceShortcutsPlaceholderTask
+import java.util.Properties
 
 plugins {
     alias(mihonx.plugins.android.application)
@@ -20,6 +21,12 @@ if (Config.includeTelemetry) {
     }
 }
 
+// Yakuyomi M4（冒煙測試）：build 時從 api-keys.properties（gitignored）讀 DeepSeek key。正式版走設定頁 + Keystore。
+val yakuyomiApiKeys = Properties().apply {
+    val f = rootProject.file("api-keys.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+
 android {
     namespace = "eu.kanade.tachiyomi"
 
@@ -34,6 +41,7 @@ android {
         buildConfigField("String", "BUILD_TIME", "\"${getBuildTime(useLatestCommitTime = false)}\"")
         buildConfigField("boolean", "TELEMETRY_INCLUDED", "${Config.includeTelemetry}")
         buildConfigField("boolean", "UPDATER_ENABLED", "${Config.enableUpdater}")
+        buildConfigField("String", "DEEPSEEK_API_KEY", "\"${yakuyomiApiKeys.getProperty("DEEPSEEK_API_KEY", "")}\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

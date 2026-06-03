@@ -6,6 +6,7 @@ import eu.kanade.domain.chapter.model.toSChapter
 import eu.kanade.domain.manga.model.getComicInfo
 import eu.kanade.tachiyomi.data.cache.ChapterCache
 import eu.kanade.tachiyomi.data.download.model.Download
+import eu.kanade.tachiyomi.data.translation.PageTranslator
 import eu.kanade.tachiyomi.data.library.LibraryUpdateNotifier
 import eu.kanade.tachiyomi.data.notification.NotificationHandler
 import eu.kanade.tachiyomi.source.UnmeteredSource
@@ -94,6 +95,9 @@ class Downloader(
      * Notifier for the downloader state and progress.
      */
     private val notifier by lazy { DownloadNotifier(context) }
+
+    // Yakuyomi M4：翻譯引擎 glue（下載完成後就地翻譯頁圖）
+    private val pageTranslator by lazy { PageTranslator(context) }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var downloaderJob: Job? = null
@@ -396,6 +400,11 @@ class Downloader(
             if (!isDownloadSuccessful(download, tmpDir)) {
                 download.status = Download.State.ERROR
                 return
+            }
+
+            // Yakuyomi M4 3a：下載完成即翻譯 tmpDir 內頁圖（打包前、就地覆蓋、§11）。模型/key 未備齊則略過。
+            if (pageTranslator.isReady()) {
+                pageTranslator.translateChapter(tmpDir)
             }
 
             createComicInfoFile(
