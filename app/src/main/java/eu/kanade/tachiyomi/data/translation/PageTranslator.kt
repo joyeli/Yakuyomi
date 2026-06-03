@@ -6,13 +6,9 @@ import android.graphics.BitmapFactory
 import androidx.core.net.toUri
 import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.BuildConfig
-import li.joye.yakuyomi.engine.Detector
-import li.joye.yakuyomi.engine.EngineConfig
-import li.joye.yakuyomi.engine.Inpainter
-import li.joye.yakuyomi.engine.LlmTranslator
-import li.joye.yakuyomi.engine.Ocr
+import li.joye.yakuyomi.engine.ModelSet
 import li.joye.yakuyomi.engine.PageResult
-import li.joye.yakuyomi.engine.Pipeline
+import li.joye.yakuyomi.engine.Yakuyomi
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.storage.service.StoragePreferences
@@ -61,29 +57,25 @@ class PageTranslator(private val context: Context) {
             ?.takeIf { it.isNotEmpty() } ?: return 0
 
         val alphabet = context.assets.open(ALPHABET).bufferedReader().use { it.readLines() }
-        val cfg = EngineConfig()
-        val det = Detector(ensureLocal(detU), cfg.detector)
-        val ocr = Ocr(ensureLocal(ocrU), alphabet, cfg.ocr)
-        val inp = Inpainter(ensureLocal(lamaU), cfg.inpainter)
-        val translator = LlmTranslator(BuildConfig.DEEPSEEK_API_KEY, cfg.translator)
-        val pipeline = Pipeline(det, ocr, translator, inp, cfg, typeface = null)
+        val models = ModelSet(ensureLocal(detU), ensureLocal(ocrU), ensureLocal(lamaU))
 
         var translated = 0
         try {
-            for (img in images) {
-                val bmp = context.contentResolver.openInputStream(img.uri)
-                    ?.use { BitmapFactory.decodeStream(it) } ?: continue
-                when (val r = pipeline.translatePage(bmp)) {
-                    is PageResult.Translated -> { writeBack(img, r.page); translated++ }
-                    is PageResult.Skipped -> logcat { "翻譯略過 ${img.name}：${r.reason}" }
-                    is PageResult.Failed -> logcat(LogPriority.WARN) { "翻譯失敗 ${img.name}：${r.reason}" }
+            // 工廠取引擎、`use { }` 自動釋放三顆模型（取代手拼 Detector/Ocr/Inpainter/Pipeline + 逐一 close）
+            Yakuyomi.create(models, alphabet, BuildConfig.DEEPSEEK_API_KEY).use { engine ->
+                for (img in images) {
+                    val bmp = context.contentResolver.openInputStream(img.uri)
+                        ?.use { BitmapFactory.decodeStream(it) } ?: continue
+                    when (val r = engine.translatePage(bmp)) {
+                        is PageResult.Translated -> { writeBack(img, r.page); translated++ }
+                        is PageResult.Skipped -> logcat { "翻譯略過 ${img.name}：${r.reason}" }
+                        is PageResult.Failed -> logcat(LogPriority.WARN) { "翻譯失敗 ${img.name}：${r.reason}" }
+                    }
+                    bmp.recycle()
                 }
-                bmp.recycle()
             }
         } catch (e: Throwable) {
             logcat(LogPriority.ERROR, e) { "translateChapter 例外（保留原圖）" }
-        } finally {
-            det.close(); ocr.close(); inp.close()
         }
         return translated
     }
