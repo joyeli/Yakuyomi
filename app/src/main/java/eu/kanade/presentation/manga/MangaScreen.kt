@@ -446,6 +446,7 @@ private fun MangaScreenSmallImpl(
                         chapterSwipeEndAction = chapterSwipeEndAction,
                         onChapterClicked = onChapterClicked,
                         onDownloadChapter = onDownloadChapter,
+                        onTranslateChapterSingle = onTranslateChapter?.let { cb -> { item -> cb(listOf(item)) } },
                         onChapterSelected = onChapterSelected,
                         onChapterSwipe = onChapterSwipe,
                     )
@@ -685,6 +686,7 @@ fun MangaScreenLargeImpl(
                                 chapterSwipeEndAction = chapterSwipeEndAction,
                                 onChapterClicked = onChapterClicked,
                                 onDownloadChapter = onDownloadChapter,
+                                onTranslateChapterSingle = onTranslateChapter?.let { cb -> { item -> cb(listOf(item)) } },
                                 onChapterSelected = onChapterSelected,
                                 onChapterSwipe = onChapterSwipe,
                             )
@@ -750,6 +752,7 @@ private fun LazyListScope.sharedChapterItems(
     chapterSwipeEndAction: LibraryPreferences.ChapterSwipeAction,
     onChapterClicked: (Chapter) -> Unit,
     onDownloadChapter: ((List<ChapterList.Item>, ChapterDownloadAction) -> Unit)?,
+    onTranslateChapterSingle: ((ChapterList.Item) -> Unit)?,
     onChapterSelected: (ChapterList.Item, Boolean, Boolean) -> Unit,
     onChapterSwipe: (ChapterList.Item, LibraryPreferences.ChapterSwipeAction) -> Unit,
 ) {
@@ -814,6 +817,7 @@ private fun LazyListScope.sharedChapterItems(
                     } else {
                         null
                     },
+                    onTranslate = onTranslateChapterSingle?.let { cb -> { cb(item) } },
                     onChapterSwipe = {
                         onChapterSwipe(item, it)
                     },
