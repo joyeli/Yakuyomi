@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory
 import androidx.core.net.toUri
 import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.BuildConfig
+import li.joye.yakuyomi.engine.DetectorConfig
 import li.joye.yakuyomi.engine.EngineConfig
 import li.joye.yakuyomi.engine.InpainterConfig
 import li.joye.yakuyomi.engine.ModelSet
@@ -110,18 +111,54 @@ class PageTranslator(private val context: Context) {
             else -> "auto" to true // auto_whole（預設·平衡）；舊存的 lama_* 也落這、回退到平衡
         }
 
-        // OCR 逐行並發度：auto=硬體核數（市場手機幾乎都 8 核）/ 1=序列 / 2/4/6/8。真機 8.9s→4.8s（快 46%、零品質風險）。
-        val (ocrConcurrent, ocrConcurrency) = when (val v = translationPreferences.ocrConcurrency.get()) {
-            "1" -> false to 1 // 序列（單行 intra-op 4）
-            "auto" -> true to Runtime.getRuntime().availableProcessors().coerceIn(1, 16)
-            else -> true to (v.toIntOrNull() ?: 8)
+        // 緒數（裝置相依）
+        val cores = Runtime.getRuntime().availableProcessors()
+        // OCR 逐行並發度：auto=核數 / 2/4/6/8（concurrent 鎖 true）。真機 8.9s→4.8s。
+        val ocrConcurrency = when (val v = translationPreferences.ocrConcurrency.get()) {
+            "auto" -> cores
+            else -> (v.toIntOrNull() ?: cores).coerceIn(1, 32)
+        }
+        // 推論執行緒（偵測+去字 lama）：auto=大核數估算(cores-2，big.LITTLE 留 2 小核) / 2/4/6/8。真機 6 最快。
+        val intra = when (val v = translationPreferences.intraThreads.get()) {
+            "auto" -> (cores - 2).coerceAtLeast(2)
+            else -> (v.toIntOrNull() ?: 6).coerceIn(1, 32)
         }
 
+        // 進階數值：存字串、此處 parse + clamp 到值域（超界夾回，不擋存）。
+        fun pf(s: String, lo: Float, hi: Float, d: Float) = s.toFloatOrNull()?.coerceIn(lo, hi) ?: d
+        fun pi(s: String, lo: Int, hi: Int, d: Int) = s.toIntOrNull()?.coerceIn(lo, hi) ?: d
+        val p = translationPreferences
+
         val cfg = EngineConfig(
+            detector = DetectorConfig(
+                segThreshold = pf(p.segThreshold.get(), 0f, 1f, 0.12f),
+                intraThreads = intra,
+            ),
+            ocr = OcrConfig(
+                minProb = pf(p.minProb.get(), 0f, 1f, 0.5f),
+                concurrent = true,
+                concurrency = ocrConcurrency,
+            ),
             translator = translatorCfg,
-            ocr = OcrConfig(concurrent = ocrConcurrent, concurrency = ocrConcurrency),
-            inpainter = InpainterConfig(method = method, wholeImage = whole),
-            render = RenderConfig(orientation = orient),
+            inpainter = InpainterConfig(
+                method = method,
+                wholeImage = whole,
+                autoStdThreshold = pf(p.autoStdThreshold.get(), 0f, 30f, 6f),
+                autoWhiteThreshold = pf(p.autoWhiteThreshold.get(), 0f, 255f, 190f),
+                bboxPad = pi(p.bboxPad.get(), 0, 64, 16),
+                intraThreads = intra,
+            ),
+            render = RenderConfig(
+                orientation = orient,
+                fontBorder = p.fontBorder.get(),
+                colorMode = if (p.colorMode.get() == "mono") "mono" else "auto",
+                artStrokeRatio = pf(p.artStrokeRatio.get(), 0f, 0.5f, 0.16f),
+                fontSizeMax = pi(p.fontSizeMax.get(), 20, 120, 60),
+                fontSizeMin = pi(p.fontSizeMin.get(), 6, 40, 9),
+                colTrim = pi(p.colTrim.get(), 0, 10, 3),
+                rowTrim = pi(p.rowTrim.get(), 0, 10, 3),
+                fontScale = pf(p.fontScale.get(), 0.3f, 1.5f, 0.85f),
+            ),
         )
 
         var translated = 0

@@ -26,8 +26,33 @@ class TranslationPreferences(preferenceStore: PreferenceStore) {
     /** 去字方法（boxfill/auto_whole/lama_whole/auto_tile/lama_tile），對應引擎 InpainterConfig。 */
     val inpaintMethod = preferenceStore.getString("translation_inpaint_method", DEFAULT_INPAINT_METHOD)
 
-    /** OCR 逐行並發度（auto=硬體核數 / 1=序列 / 2/4/6/8），對應引擎 OcrConfig.concurrent+concurrency。 */
+    /** OCR 逐行並發度（auto=硬體核數 / 2/4/6/8），對應引擎 OcrConfig.concurrency（concurrent 鎖 true）。 */
     val ocrConcurrency = preferenceStore.getString("translation_ocr_concurrency", DEFAULT_OCR_CONCURRENCY)
+
+    /** 推論執行緒（偵測+去字 lama；auto=硬體大核數估算 / 2/4/6/8），對應 Detector/InpainterConfig.intraThreads。 */
+    val intraThreads = preferenceStore.getString("translation_intra_threads", DEFAULT_INTRA_THREADS)
+
+    /** 文字顏色（auto=依背景亮度黑/白字 / mono=一律黑字白邊），對應 RenderConfig.colorMode。 */
+    val colorMode = preferenceStore.getString("translation_color_mode", DEFAULT_COLOR_MODE)
+
+    /** 譯文字描邊，對應 RenderConfig.fontBorder。 */
+    val fontBorder = preferenceStore.getBoolean("translation_font_border", true)
+
+    /** 設定頁是否顯示進階選項（純 UI 開關，不進引擎）。 */
+    val showAdvanced = preferenceStore.getBoolean("translation_show_advanced", false)
+
+    // —— 進階數值（存字串、消費端 PageTranslator parse + clamp 到值域）——
+    val segThreshold = preferenceStore.getString("translation_seg_threshold", "0.12")       // 0.0–1.0
+    val minProb = preferenceStore.getString("translation_min_prob", "0.5")                  // 0.0–1.0
+    val autoStdThreshold = preferenceStore.getString("translation_auto_std", "6")           // 0–30
+    val autoWhiteThreshold = preferenceStore.getString("translation_auto_white", "190")     // 0–255
+    val bboxPad = preferenceStore.getString("translation_bbox_pad", "16")                   // 0–64
+    val artStrokeRatio = preferenceStore.getString("translation_art_stroke", "0.16")        // 0.0–0.5
+    val fontSizeMax = preferenceStore.getString("translation_font_size_max", "60")          // 20–120
+    val fontSizeMin = preferenceStore.getString("translation_font_size_min", "9")           // 6–40
+    val colTrim = preferenceStore.getString("translation_col_trim", "3")                    // 0–10
+    val rowTrim = preferenceStore.getString("translation_row_trim", "3")                    // 0–10
+    val fontScale = preferenceStore.getString("translation_font_scale", "0.85")             // 0.3–1.5
 
     companion object {
         /** 預設目標＝台灣繁中。非此值時 PageTranslator 不放引擎內建的日→繁中 few-shot（避免範例語言衝突）。 */
@@ -36,5 +61,7 @@ class TranslationPreferences(preferenceStore: PreferenceStore) {
         const val DEFAULT_ORIENTATION = "auto"
         const val DEFAULT_INPAINT_METHOD = "auto_whole" // 平衡：泡泡平塗(乾淨無黃暈)+整頁lama(~7s)；逐格(質佳但~64s)留選項
         const val DEFAULT_OCR_CONCURRENCY = "auto" // auto=硬體核數（多數手機8核）；真機 8.9s→4.8s 快46%
+        const val DEFAULT_INTRA_THREADS = "auto"   // auto=硬體大核數估算；真機 6 緒最快（big.LITTLE）
+        const val DEFAULT_COLOR_MODE = "auto"      // auto=依背景亮度判黑/白字
     }
 }
