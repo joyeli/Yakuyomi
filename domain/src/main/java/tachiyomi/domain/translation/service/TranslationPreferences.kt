@@ -31,6 +31,6 @@ class TranslationPreferences(preferenceStore: PreferenceStore) {
         const val DEFAULT_TARGET_LANG = "Traditional Chinese (Taiwan, 台灣慣用的繁體中文用語)"
         const val DEFAULT_SOURCE_LANG = "Japanese"
         const val DEFAULT_ORIENTATION = "auto"
-        const val DEFAULT_INPAINT_METHOD = "auto_tile"
+        const val DEFAULT_INPAINT_METHOD = "auto_whole" // 平衡：泡泡平塗(乾淨無黃暈)+整頁lama(~7s)；逐格(質佳但~64s)留選項
     }
 }

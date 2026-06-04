@@ -81,9 +81,7 @@ object SettingsTranslationScreen : SearchableSettings {
                 entries = persistentMapOf(
                     "boxfill" to stringResource(MR.strings.pref_translation_inpaint_boxfill),
                     "auto_whole" to stringResource(MR.strings.pref_translation_inpaint_auto_whole),
-                    "lama_whole" to stringResource(MR.strings.pref_translation_inpaint_lama_whole),
                     "auto_tile" to stringResource(MR.strings.pref_translation_inpaint_auto_tile),
-                    "lama_tile" to stringResource(MR.strings.pref_translation_inpaint_lama_tile),
                 ),
                 title = stringResource(MR.strings.pref_translation_inpaint_method),
             ),

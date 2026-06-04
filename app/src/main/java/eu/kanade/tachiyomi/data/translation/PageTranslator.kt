@@ -100,13 +100,13 @@ class PageTranslator(private val context: Context) {
             else -> TextOrientation.AUTO
         }
 
-        // 去字方法
+        // 去字方法（3 階梯，差別只在忙碌區怎麼處理；泡泡三者都平塗）：
+        //   boxfill＝全平塗(快·壓畫面塗色塊)／auto_whole＝泡泡平塗+整頁lama(平衡·預設)／auto_tile＝泡泡平塗+逐區lama(質佳·慢)
+        // 砍掉 lama_whole/lama_tile：那兩個會把乾淨白泡也送 lama→縮圖黃暈+變慢，純下風（auto 版對泡泡平塗永遠更乾淨）。
         val (method, whole) = when (translationPreferences.inpaintMethod.get()) {
             "boxfill" -> "boxfill" to true
-            "auto_whole" -> "auto" to true
-            "lama_whole" -> "lama" to true
-            "lama_tile" -> "lama" to false
-            else -> "auto" to false // auto_tile（預設）
+            "auto_tile" -> "auto" to false
+            else -> "auto" to true // auto_whole（預設·平衡）；舊存的 lama_* 也落這、回退到平衡
         }
 
         val cfg = EngineConfig(
