@@ -85,6 +85,18 @@ object SettingsTranslationScreen : SearchableSettings {
                 ),
                 title = stringResource(MR.strings.pref_translation_inpaint_method),
             ),
+            Preference.PreferenceItem.ListPreference(
+                preference = prefs.ocrConcurrency,
+                entries = persistentMapOf(
+                    "auto" to stringResource(MR.strings.pref_translation_ocr_concurrency_auto),
+                    "1" to stringResource(MR.strings.pref_translation_ocr_concurrency_serial),
+                    "2" to "2",
+                    "4" to "4",
+                    "6" to "6",
+                    "8" to stringResource(MR.strings.pref_translation_ocr_concurrency_max),
+                ),
+                title = stringResource(MR.strings.pref_translation_ocr_concurrency),
+            ),
         )
     }
 }

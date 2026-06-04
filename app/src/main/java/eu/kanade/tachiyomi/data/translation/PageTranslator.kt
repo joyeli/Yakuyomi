@@ -9,6 +9,7 @@ import eu.kanade.tachiyomi.BuildConfig
 import li.joye.yakuyomi.engine.EngineConfig
 import li.joye.yakuyomi.engine.InpainterConfig
 import li.joye.yakuyomi.engine.ModelSet
+import li.joye.yakuyomi.engine.OcrConfig
 import li.joye.yakuyomi.engine.PageResult
 import li.joye.yakuyomi.engine.RenderConfig
 import li.joye.yakuyomi.engine.TextOrientation
@@ -109,8 +110,16 @@ class PageTranslator(private val context: Context) {
             else -> "auto" to true // auto_whole（預設·平衡）；舊存的 lama_* 也落這、回退到平衡
         }
 
+        // OCR 逐行並發度：auto=硬體核數（市場手機幾乎都 8 核）/ 1=序列 / 2/4/6/8。真機 8.9s→4.8s（快 46%、零品質風險）。
+        val (ocrConcurrent, ocrConcurrency) = when (val v = translationPreferences.ocrConcurrency.get()) {
+            "1" -> false to 1 // 序列（單行 intra-op 4）
+            "auto" -> true to Runtime.getRuntime().availableProcessors().coerceIn(1, 16)
+            else -> true to (v.toIntOrNull() ?: 8)
+        }
+
         val cfg = EngineConfig(
             translator = translatorCfg,
+            ocr = OcrConfig(concurrent = ocrConcurrent, concurrency = ocrConcurrency),
             inpainter = InpainterConfig(method = method, wholeImage = whole),
             render = RenderConfig(orientation = orient),
         )

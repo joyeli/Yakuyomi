@@ -26,11 +26,15 @@ class TranslationPreferences(preferenceStore: PreferenceStore) {
     /** 去字方法（boxfill/auto_whole/lama_whole/auto_tile/lama_tile），對應引擎 InpainterConfig。 */
     val inpaintMethod = preferenceStore.getString("translation_inpaint_method", DEFAULT_INPAINT_METHOD)
 
+    /** OCR 逐行並發度（auto=硬體核數 / 1=序列 / 2/4/6/8），對應引擎 OcrConfig.concurrent+concurrency。 */
+    val ocrConcurrency = preferenceStore.getString("translation_ocr_concurrency", DEFAULT_OCR_CONCURRENCY)
+
     companion object {
         /** 預設目標＝台灣繁中。非此值時 PageTranslator 不放引擎內建的日→繁中 few-shot（避免範例語言衝突）。 */
         const val DEFAULT_TARGET_LANG = "Traditional Chinese (Taiwan, 台灣慣用的繁體中文用語)"
         const val DEFAULT_SOURCE_LANG = "Japanese"
         const val DEFAULT_ORIENTATION = "auto"
         const val DEFAULT_INPAINT_METHOD = "auto_whole" // 平衡：泡泡平塗(乾淨無黃暈)+整頁lama(~7s)；逐格(質佳但~64s)留選項
+        const val DEFAULT_OCR_CONCURRENCY = "auto" // auto=硬體核數（多數手機8核）；真機 8.9s→4.8s 快46%
     }
 }
