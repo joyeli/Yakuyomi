@@ -766,6 +766,14 @@ class MangaScreenModel(
         translationManager.translate(manga, downloaded)
     }
 
+    /** 重繪選取章（換 [method] 去字法重做去字+排版，復用素材、不重跑 OCR/翻譯）。對象＝已下載章（同翻譯）。 */
+    fun runChapterReRenderAction(items: List<ChapterList.Item>, method: String) {
+        val manga = successState?.manga ?: return
+        val downloaded = items.filter { it.isDownloaded }.map { it.chapter }
+        if (downloaded.isEmpty()) return
+        translationManager.reRender(manga, downloaded, method)
+    }
+
     fun runDownloadAction(action: DownloadAction) {
         val chaptersToDownload = when (action) {
             DownloadAction.NEXT_1_CHAPTER -> getUnreadChaptersSorted().take(1)

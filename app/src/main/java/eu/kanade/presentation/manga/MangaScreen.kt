@@ -2,6 +2,7 @@ package eu.kanade.presentation.manga
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -23,16 +24,20 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.SmallExtendedFloatingActionButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.animateFloatingActionButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -91,6 +96,7 @@ fun MangaScreen(
     onChapterClicked: (Chapter) -> Unit,
     onDownloadChapter: ((List<ChapterList.Item>, ChapterDownloadAction) -> Unit)?,
     onTranslateChapter: ((List<ChapterList.Item>) -> Unit)?,
+    onReRenderChapter: ((List<ChapterList.Item>, String) -> Unit)?,
     onAddToLibraryClicked: () -> Unit,
     onWebViewClicked: (() -> Unit)?,
     onWebViewLongClicked: (() -> Unit)?,
@@ -147,6 +153,7 @@ fun MangaScreen(
             onChapterClicked = onChapterClicked,
             onDownloadChapter = onDownloadChapter,
             onTranslateChapter = onTranslateChapter,
+            onReRenderChapter = onReRenderChapter,
             onAddToLibraryClicked = onAddToLibraryClicked,
             onWebViewClicked = onWebViewClicked,
             onWebViewLongClicked = onWebViewLongClicked,
@@ -184,6 +191,7 @@ fun MangaScreen(
             onChapterClicked = onChapterClicked,
             onDownloadChapter = onDownloadChapter,
             onTranslateChapter = onTranslateChapter,
+            onReRenderChapter = onReRenderChapter,
             onAddToLibraryClicked = onAddToLibraryClicked,
             onWebViewClicked = onWebViewClicked,
             onWebViewLongClicked = onWebViewLongClicked,
@@ -224,6 +232,7 @@ private fun MangaScreenSmallImpl(
     onChapterClicked: (Chapter) -> Unit,
     onDownloadChapter: ((List<ChapterList.Item>, ChapterDownloadAction) -> Unit)?,
     onTranslateChapter: ((List<ChapterList.Item>) -> Unit)?,
+    onReRenderChapter: ((List<ChapterList.Item>, String) -> Unit)?,
     onAddToLibraryClicked: () -> Unit,
     onWebViewClicked: (() -> Unit)?,
     onWebViewLongClicked: (() -> Unit)?,
@@ -326,6 +335,7 @@ private fun MangaScreenSmallImpl(
                 onMarkPreviousAsReadClicked = onMarkPreviousAsReadClicked,
                 onDownloadChapter = onDownloadChapter,
                 onTranslateChapter = onTranslateChapter,
+                onReRenderChapter = onReRenderChapter,
                 onMultiDeleteClicked = onMultiDeleteClicked,
                 fillFraction = 1f,
             )
@@ -469,6 +479,7 @@ fun MangaScreenLargeImpl(
     onChapterClicked: (Chapter) -> Unit,
     onDownloadChapter: ((List<ChapterList.Item>, ChapterDownloadAction) -> Unit)?,
     onTranslateChapter: ((List<ChapterList.Item>) -> Unit)?,
+    onReRenderChapter: ((List<ChapterList.Item>, String) -> Unit)?,
     onAddToLibraryClicked: () -> Unit,
     onWebViewClicked: (() -> Unit)?,
     onWebViewLongClicked: (() -> Unit)?,
@@ -568,6 +579,7 @@ fun MangaScreenLargeImpl(
                     onMarkPreviousAsReadClicked = onMarkPreviousAsReadClicked,
                     onDownloadChapter = onDownloadChapter,
                     onTranslateChapter = onTranslateChapter,
+                    onReRenderChapter = onReRenderChapter,
                     onMultiDeleteClicked = onMultiDeleteClicked,
                     fillFraction = 0.5f,
                 )
@@ -710,10 +722,14 @@ private fun SharedMangaBottomActionMenu(
     onMarkPreviousAsReadClicked: (Chapter) -> Unit,
     onDownloadChapter: ((List<ChapterList.Item>, ChapterDownloadAction) -> Unit)?,
     onTranslateChapter: ((List<ChapterList.Item>) -> Unit)?,
+    onReRenderChapter: ((List<ChapterList.Item>, String) -> Unit)?,
     onMultiDeleteClicked: (List<Chapter>) -> Unit,
     fillFraction: Float,
     modifier: Modifier = Modifier,
 ) {
+    // 重繪去字法選擇器：按下重繪鈕時存下當下選取章（快照）→ 非 null 時彈對話框；選法後回呼 + 清空。
+    var pendingReRender by remember { mutableStateOf<List<ChapterList.Item>?>(null) }
+
     MangaBottomActionMenu(
         visible = selected.isNotEmpty(),
         modifier = modifier.fillMaxWidth(fillFraction),
@@ -738,6 +754,12 @@ private fun SharedMangaBottomActionMenu(
             // 只在選取含已下載章時顯示翻譯鈕（翻譯對象＝下載頁圖；與單列指示器一致）
             onTranslateChapter != null && selected.fastAny { it.downloadState == Download.State.DOWNLOADED }
         },
+        onReRenderClicked = {
+            pendingReRender = selected.toList() // 先開選法對話框，選定去字法後才排重繪
+        }.takeIf {
+            // 重繪只對已下載(已翻)章有意義；門檻同翻譯/刪除＝選取含已下載章
+            onReRenderChapter != null && selected.fastAny { it.downloadState == Download.State.DOWNLOADED }
+        },
         onDownloadClicked = {
             onDownloadChapter!!(selected.toList(), ChapterDownloadAction.START)
         }.takeIf {
@@ -747,6 +769,53 @@ private fun SharedMangaBottomActionMenu(
             onMultiDeleteClicked(selected.fastMap { it.chapter })
         }.takeIf {
             selected.fastAny { it.downloadState == Download.State.DOWNLOADED }
+        },
+    )
+
+    pendingReRender?.let { items ->
+        ReRenderMethodDialog(
+            onDismissRequest = { pendingReRender = null },
+            onSelect = { method ->
+                onReRenderChapter?.invoke(items, method)
+                pendingReRender = null
+            },
+        )
+    }
+}
+
+/**
+ * 重繪去字法選擇對話框：3 階梯（BoxFill / Auto-整頁 / Auto-逐格）。
+ * 選項對映 [eu.kanade.tachiyomi.data.translation.PageTranslator.reRenderChapter] 吃的去字法原始字串。
+ */
+@Composable
+private fun ReRenderMethodDialog(
+    onDismissRequest: () -> Unit,
+    onSelect: (String) -> Unit,
+) {
+    // 顯示名 → 去字法字串（與設定頁/引擎 when 映射一致）
+    val options = listOf(
+        "BoxFill" to "boxfill",
+        "Auto-整頁" to "auto_whole",
+        "Auto-逐格" to "auto_tile",
+    )
+    AlertDialog(
+        onDismissRequest = onDismissRequest,
+        title = { Text(text = "重繪去字方法") },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                options.forEach { (label, method) ->
+                    ListItem(
+                        modifier = Modifier.clickable { onSelect(method) },
+                        headlineContent = { Text(text = label) },
+                    )
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismissRequest) {
+                Text(text = stringResource(MR.strings.action_cancel))
+            }
         },
     )
 }

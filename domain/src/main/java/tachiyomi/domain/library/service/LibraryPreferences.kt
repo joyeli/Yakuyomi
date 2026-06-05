@@ -106,6 +106,8 @@ class LibraryPreferences(
 
     val downloadBadge: Preference<Boolean> = preferenceStore.getBoolean("display_download_badge", false)
 
+    val translationBadge: Preference<Boolean> = preferenceStore.getBoolean("display_translation_badge", true)
+
     val unreadBadge: Preference<Boolean> = preferenceStore.getBoolean("display_unread_badge", true)
 
     val localBadge: Preference<Boolean> = preferenceStore.getBoolean("display_local_badge", true)

@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.ZeroCornerSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Label
+import androidx.compose.material.icons.outlined.AutoFixHigh
 import androidx.compose.material.icons.outlined.BookmarkAdd
 import androidx.compose.material.icons.outlined.BookmarkRemove
 import androidx.compose.material.icons.outlined.Delete
@@ -77,6 +78,7 @@ fun MangaBottomActionMenu(
     onMarkAsUnreadClicked: (() -> Unit)? = null,
     onMarkPreviousAsReadClicked: (() -> Unit)? = null,
     onTranslateClicked: (() -> Unit)? = null,
+    onReRenderClicked: (() -> Unit)? = null,
     onDownloadClicked: (() -> Unit)? = null,
     onDeleteClicked: (() -> Unit)? = null,
 ) {
@@ -92,7 +94,7 @@ fun MangaBottomActionMenu(
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
         ) {
             val haptic = LocalHapticFeedback.current
-            val confirm = remember { mutableStateListOf(false, false, false, false, false, false, false, false) }
+            val confirm = remember { mutableStateListOf(false, false, false, false, false, false, false, false, false) }
             var resetJob by remember { mutableStateOf<Job?>(null) }
             val onLongClickItem: (Int) -> Unit = { toConfirmIndex ->
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -164,6 +166,16 @@ fun MangaBottomActionMenu(
                         toConfirm = confirm[5],
                         onLongClick = { onLongClickItem(5) },
                         onClick = onTranslateClicked,
+                    )
+                }
+                if (onReRenderClicked != null) {
+                    // 重繪：換去字法重做去字+排版（復用素材、不重跑 OCR/翻譯）。內建 CHT 字串（同其餘翻譯功能不走 MR）
+                    Button(
+                        title = "重繪",
+                        icon = Icons.Outlined.AutoFixHigh,
+                        toConfirm = confirm[8],
+                        onLongClick = { onLongClickItem(8) },
+                        onClick = onReRenderClicked,
                     )
                 }
                 if (onDownloadClicked != null) {

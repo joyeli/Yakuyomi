@@ -54,13 +54,19 @@ class TranslationManager(private val context: Context) {
     @Volatile
     private var stopActive = false
 
-    /** 內部可變佇列項；對外只發 [TranslationItem] 不可變快照。所有欄位存取都在 [lock] 下。 */
+    /**
+     * 內部可變佇列項；對外只發 [TranslationItem] 不可變快照。所有欄位存取都在 [lock] 下。
+     *
+     * [reRenderMethod]：null＝一般翻譯（偵測/OCR/翻譯/去字全跑）；非 null＝重繪
+     * （復用素材、只換這個去字法字串重做去字+排版，不跑 OCR/翻譯，見 [PageTranslator.reRenderChapter]）。
+     */
     private class Entry(
         val manga: Manga,
         val chapter: Chapter,
         var status: TranslationItem.Status = TranslationItem.Status.QUEUE,
         var done: Int = 0,
         var total: Int = 0,
+        val reRenderMethod: String? = null,
     )
 
     private val lock = Any()
@@ -95,6 +101,26 @@ class TranslationManager(private val context: Context) {
         }
         publish()
         _isPaused.value = false // 明確要求翻譯 → 解除暫停、直接開跑（對照下載：排入即啟動）
+        ensureDrain()
+        TranslationJob.start(context)
+    }
+
+    /**
+     * 排入「重繪」（換去字法重做去字+排版，復用素材、不跑 OCR/翻譯）。[method]＝去字法原始字串
+     * （boxfill / auto_whole / auto_tile）。走同一條翻譯佇列（顯示「翻譯中」帶進度、可暫停/取消）。
+     *
+     * 與 [translate] 不同：重繪是使用者明確動作 → **即使該章已有翻譯項也允許再排**（換個方法重來）；
+     * 只擋「同章、同樣是重繪」的重複排隊（避免連點塞滿佇列）。
+     */
+    fun reRender(manga: Manga, chapters: List<Chapter>, method: String) {
+        if (chapters.isEmpty()) return
+        synchronized(lock) {
+            // 已排隊的重繪章 id（含進行中）；一般翻譯項不算，重繪可與其並存
+            val pending = entries.filter { it.reRenderMethod != null }.mapTo(HashSet()) { it.chapter.id }
+            chapters.forEach { if (it.id !in pending) entries.add(Entry(manga, it, reRenderMethod = method)) }
+        }
+        publish()
+        _isPaused.value = false // 明確要求重繪 → 解除暫停、直接開跑
         ensureDrain()
         TranslationJob.start(context)
     }
@@ -195,9 +221,16 @@ class TranslationManager(private val context: Context) {
         }
     }
 
-    /** 回傳「該章是否確實翻成」（manifest 覆蓋全頁）；沒下載/沒翻成→false，drain 據此標 ERROR、不誤標已翻。 */
+    /**
+     * 回傳「該章是否確實處理成」；沒下載/沒做成→false，drain 據此標 ERROR、不誤標已翻。
+     *
+     * 依 [Entry.reRenderMethod] 分兩條：
+     *  - null＝翻譯：跑 [PageTranslator.translateChapter]，成功判準＝manifest 覆蓋全頁。
+     *  - 非 null＝重繪：跑 [PageTranslator.reRenderChapter]（復用素材換去字法），成功判準＝有重繪到頁（count>0）。
+     * 兩條共用同一組 [onProgress]/[shouldStop]（佇列進度 + 合作式中止對重繪一樣生效）。
+     */
     private suspend fun translateOne(entry: Entry): Boolean {
-        val dir = chapterDir(entry.manga, entry.chapter) ?: return false // 沒下載 → 不算翻成
+        val dir = chapterDir(entry.manga, entry.chapter) ?: return false // 沒下載 → 不算做成
         val onProgress: (Int, Int) -> Unit = { done, total ->
             synchronized(lock) {
                 entry.done = done
@@ -205,13 +238,36 @@ class TranslationManager(private val context: Context) {
             }
             publish()
         }
-        return if (dir.isDirectory) {
-            pageTranslator.translateChapter(dir, onProgress) { stopActive } // 鬆散：原地翻（合作式中止）
+        val shouldStop: () -> Boolean = { stopActive }
+        val method = entry.reRenderMethod
+        return if (method != null) {
+            // 重繪：素材在 chapterDir/.yakuyomi/ 下，只換去字法重做去字+排版（不跑 OCR/翻譯）。
+            // 一次性（不像翻譯有「剩頁可續傳」概念）：重繪到任一頁(count>0)＝既值得換檔、也算成功。
+            if (dir.isDirectory) {
+                pageTranslator.reRenderChapter(dir, method, onProgress, shouldStop) > 0 // 鬆散：原地重繪
+            } else {
+                processArchiveInPlace(dir, onProgress, shouldStop) { tmpU ->
+                    val n = pageTranslator.reRenderChapter(tmpU, method, onProgress, shouldStop)
+                    ProcessResult(swap = n > 0, success = n > 0) // CBZ：有重繪到才換檔、才算成功
+                }
+            }
+        } else if (dir.isDirectory) {
+            pageTranslator.translateChapter(dir, onProgress, shouldStop) // 鬆散：原地翻（合作式中止）
             pageTranslator.isChapterTranslated(dir)
         } else {
-            translateArchiveInPlace(dir, onProgress) { stopActive } // CBZ：解壓→翻→安全重壓
+            // CBZ 翻譯：保留舊 translateArchiveInPlace 的雙條件——
+            //   換檔＝翻有進度 or manifest 已覆蓋（持久化部分成果、避免續傳重做）；
+            //   成功＝manifest 全覆蓋（部分成功仍回 false → drain 標 ERROR 留佇列、下次補剩頁）。
+            processArchiveInPlace(dir, onProgress, shouldStop) { tmpU ->
+                val n = pageTranslator.translateChapter(tmpU, onProgress, shouldStop)
+                val done = pageTranslator.isChapterTranslated(tmpU)
+                ProcessResult(swap = n > 0 || done, success = done)
+            }
         }
     }
+
+    /** [processArchiveInPlace] 的 callback 結果：[swap]＝是否值得重壓換檔（持久化成果）；[success]＝是否算「處理成功」（drain 據此標 ERROR/移除）。 */
+    private data class ProcessResult(val swap: Boolean, val success: Boolean)
 
     /** 已下載章是否已翻（鬆散＝manifest 覆蓋；CBZ＝archive 內有 marker entry）。 */
     fun isTranslated(manga: Manga, chapter: Chapter): Boolean {
@@ -224,11 +280,17 @@ class TranslationManager(private val context: Context) {
         return downloadProvider.findChapterDir(chapter.name, chapter.scanlator, chapter.url, manga.title, source)
     }
 
-    /** CBZ：解壓暫存→翻→重壓暫存 zip→驗證後才換掉原檔（§11：原檔到 rename 前都完好）。 */
-    private suspend fun translateArchiveInPlace(
+    /**
+     * CBZ：解壓暫存→[process]（翻譯或重繪）→重壓暫存 zip→驗證後才換掉原檔（§11：原檔到 rename 前都完好）。
+     *
+     * [process]＝對解壓後的暫存夾做實際處理、回傳 [ProcessResult]（swap＝是否重壓換檔、success＝是否算成功）。
+     * 翻譯與重繪共用同一套解壓/重壓/§11-安全換檔邏輯，差別只在這個 callback。回傳 [ProcessResult.success]。
+     */
+    private suspend fun processArchiveInPlace(
         cbz: UniFile,
         onProgress: (Int, Int) -> Unit,
         shouldStop: () -> Boolean,
+        process: suspend (UniFile) -> ProcessResult,
     ): Boolean {
         val parent = cbz.parentFile ?: return false
         val cbzName = cbz.name ?: return false
@@ -244,20 +306,19 @@ class TranslationManager(private val context: Context) {
                 }
             }
             val tmpU = UniFile.fromFile(tmp) ?: return false
-            // 2. 翻（就地覆蓋暫存頁 + 寫 manifest）
-            val n = pageTranslator.translateChapter(tmpU, onProgress, shouldStop)
-            val done = pageTranslator.isChapterTranslated(tmpU)
+            // 2. 處理（就地覆蓋暫存頁；翻譯另寫 manifest、重繪另更新素材 method）
+            val result = process(tmpU)
             if (shouldStop()) return false // 被暫停/取消中止 → 丟棄暫存、原檔不動（不壓回半成品）
-            if (n == 0 && !done) return false // 沒翻成、也沒新標記（全失敗）→ 不動原檔、可重試
+            if (!result.swap) return false // 全失敗（沒翻成/沒重繪到）→ 不動原檔、可重試
             // 3. 重壓到暫存 zip（原檔此時完好）
             val newZip = parent.createFile("$cbzName$TMP_SUFFIX") ?: return false
             ZipWriter(context, newZip).use { w -> tmpU.listFiles()?.forEach { w.write(it) } }
             // 4. 換檔
             cbz.delete()
             newZip.renameTo(cbzName)
-            return done
+            return result.success // 部分成功（swap 了但未全覆蓋）回 false → drain 標 ERROR 留佇列補剩頁
         } catch (e: Throwable) {
-            logcat(LogPriority.ERROR, e) { "translateArchiveInPlace 失敗（原檔保留）" }
+            logcat(LogPriority.ERROR, e) { "processArchiveInPlace 失敗（原檔保留）" }
             return false
         } finally {
             tmp.deleteRecursively()

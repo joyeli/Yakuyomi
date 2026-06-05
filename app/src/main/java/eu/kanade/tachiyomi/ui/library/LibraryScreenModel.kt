@@ -367,9 +367,11 @@ class LibraryScreenModel(
             libraryPreferences.filterBookmarked.changes(),
             libraryPreferences.filterCompleted.changes(),
             libraryPreferences.filterIntervalCustom.changes(),
+            libraryPreferences.translationBadge.changes(),
         ) {
             ItemPreferences(
                 downloadBadge = it[0] as Boolean,
+                translationBadge = it[12] as Boolean,
                 unreadBadge = it[1] as Boolean,
                 localBadge = it[2] as Boolean,
                 languageBadge = it[3] as Boolean,
@@ -400,7 +402,11 @@ class LibraryScreenModel(
                     } else {
                         0
                     },
-                    translatedCount = translationCache.getTranslatedCount(manga.manga).toLong(),
+                    translatedCount = if (preferences.translationBadge) {
+                        translationCache.getTranslatedCount(manga.manga).toLong()
+                    } else {
+                        0
+                    },
                     unreadCount = if (preferences.unreadBadge) {
                         manga.unreadCount
                     } else {
@@ -738,6 +744,7 @@ class LibraryScreenModel(
     @Immutable
     private data class ItemPreferences(
         val downloadBadge: Boolean,
+        val translationBadge: Boolean,
         val unreadBadge: Boolean,
         val localBadge: Boolean,
         val languageBadge: Boolean,

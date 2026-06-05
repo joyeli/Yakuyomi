@@ -26,6 +26,9 @@ class TranslationPreferences(preferenceStore: PreferenceStore) {
     /** 去字方法（boxfill/auto_whole/lama_whole/auto_tile/lama_tile），對應引擎 InpainterConfig。 */
     val inpaintMethod = preferenceStore.getString("translation_inpaint_method", DEFAULT_INPAINT_METHOD)
 
+    /** 保留重繪素材：翻完每頁另存遮罩 + 文字區 + 原圖，日後可換去字方法低成本重繪（免重跑 OCR/翻譯）；約多一倍儲存。 */
+    val keepMaterials = preferenceStore.getBoolean("pref_translation_keep_materials", false)
+
     /** OCR 逐行並發度（auto=硬體核數 / 2/4/6/8），對應引擎 OcrConfig.concurrency（concurrent 鎖 true）。 */
     val ocrConcurrency = preferenceStore.getString("translation_ocr_concurrency", DEFAULT_OCR_CONCURRENCY)
 

@@ -120,6 +120,11 @@ object SettingsTranslationScreen : SearchableSettings {
                         "背景亮度≥此值才算對話框；0–255，越低暗背景誤平塗、越高灰白泡也走 lama",
                     ),
                     advInt(showAdvanced, prefs.bboxPad, "去字外擴 (px)", "去字範圍外擴、涵蓋貼邊假名；0–64，太小漏邊假名、太大挖到鄰近畫面"),
+                    Preference.PreferenceItem.SwitchPreference(
+                        preference = prefs.keepMaterials,
+                        title = "保留重繪素材",
+                        subtitle = "翻完每頁另存原圖 + 遮罩 + 文字區，日後可換去字方法重繪（免重跑 OCR/翻譯）；約多一倍儲存",
+                    ),
                 ).toImmutableList(),
             ),
             Preference.PreferenceGroup(
