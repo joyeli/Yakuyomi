@@ -3,6 +3,8 @@ package eu.kanade.tachiyomi.data.translation
 import android.content.Context
 import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.data.download.DownloadProvider
+import eu.kanade.tachiyomi.data.translation.model.TranslationItem
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -24,44 +26,191 @@ import uy.kohesive.injekt.api.get
 import java.io.File
 
 /**
- * M4 3b：已下載章的翻譯 manager（case1）。背景一章一章翻、就地覆蓋（§11），UI 觀察 [queue]/[active]。
+ * 翻譯佇列（與下載 worker 解耦）。背景一章一章翻、就地覆蓋（§11），UI 觀察 [queueState]/[isPaused]。
  *
- * **跟隨磁碟實際格式**（不假設 CBZ；存 CBZ 還是鬆散資料夾由 mihon `saveChaptersAsCBZ` 決定）：
+ * 排入的兩條來源都走這裡：
+ *  - **自動**：章下載完、進 cache 後由 `Downloader` 呼叫 [translate]（gate＝[isReady]）。
+ *  - **手動**：漫畫頁的翻譯鈕（`MangaScreenModel`）。
+ *
+ * **跟隨磁碟實際格式**（CBZ 還是鬆散資料夾由 mihon `saveChaptersAsCBZ` 決定）：
  *  - 鬆散資料夾 → 原地翻（[PageTranslator.translateChapter]，無重壓、無掉檔風險）。
  *  - CBZ → 解壓→翻→重壓回 CBZ，**§11-安全順序**：新 zip 寫好前原檔完好，最後才 delete+rename。
- * 下載即翻（case2）走 Downloader 既有 hook，不在這裡。
+ *
+ * 失敗矩陣（§11）：單章失敗 → 標 ERROR 留佇列可重試、原檔不動；翻成功 → 離開佇列。
+ *
+ * ⚠️ 背景可靠性：目前跑在自有 in-process [scope]，app 被系統回收會中斷。
+ *    TODO：搬到 WorkManager 前景服務（對照 `DownloadJob`）才能在背景穩定跑完。
  */
 class TranslationManager(private val context: Context) {
 
     private val pageTranslator = PageTranslator(context)
     private val downloadProvider: DownloadProvider = Injekt.get()
     private val sourceManager: SourceManager = Injekt.get()
+    private val translationCache: TranslationCache = Injekt.get()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val drainMutex = Mutex()
 
-    private data class Job(val manga: Manga, val chapter: Chapter)
-    private val jobs = ArrayDeque<Job>()
+    /** 合作式中止旗標：true → 正在翻的章在下一頁邊界停下（暫停/取消/清空用）。在 [lock] 下寫、@Volatile 供逐頁迴圈無鎖讀。 */
+    @Volatile
+    private var stopActive = false
 
-    private val _queue = MutableStateFlow<Set<Long>>(emptySet())  // 排隊中/翻譯中的章 id
-    val queue: StateFlow<Set<Long>> = _queue.asStateFlow()
-    private val _active = MutableStateFlow<Long?>(null)           // 正在翻的章 id
-    val active: StateFlow<Long?> = _active.asStateFlow()
+    /** 內部可變佇列項；對外只發 [TranslationItem] 不可變快照。所有欄位存取都在 [lock] 下。 */
+    private class Entry(
+        val manga: Manga,
+        val chapter: Chapter,
+        var status: TranslationItem.Status = TranslationItem.Status.QUEUE,
+        var done: Int = 0,
+        var total: Int = 0,
+    )
 
+    private val lock = Any()
+    private val entries = mutableListOf<Entry>()
+
+    private val _queueState = MutableStateFlow<List<TranslationItem>>(emptyList())
+    val queueState: StateFlow<List<TranslationItem>> = _queueState.asStateFlow()
+
+    private val _isPaused = MutableStateFlow(false)
+    val isPaused: StateFlow<Boolean> = _isPaused.asStateFlow()
+
+    private val _translatedIds = MutableStateFlow<Set<Long>>(emptySet())
+
+    /** 本 session 翻成功的章 id（給 UI 標「已翻」；跨重啟的持久標記另由 manifest 補）。 */
+    val translatedIds: StateFlow<Set<Long>> = _translatedIds.asStateFlow()
+
+    /** 翻譯開關開 + key 有設 + 模型 3 顆齊，才排得了（給下載 hook 判斷）。 */
     fun isReady(): Boolean = pageTranslator.isReady()
 
-    /** 排入翻譯（已下載章）。 */
-    fun translate(manga: Manga, chapters: List<Chapter>) {
-        if (chapters.isEmpty()) return
-        synchronized(jobs) { chapters.forEach { jobs.addLast(Job(manga, it)) } }
-        _queue.value = _queue.value + chapters.map { it.id }
-        scope.launch { drain() }
+    private fun publish() {
+        _queueState.value = synchronized(lock) {
+            entries.map { TranslationItem(it.manga, it.chapter, it.status, it.done, it.total) }
+        }
     }
 
-    /** 取消排隊中的章（翻譯中的那章不中斷）。 */
+    /** 排入翻譯（已下載章）。已在佇列裡的章 id 不重排。 */
+    fun translate(manga: Manga, chapters: List<Chapter>) {
+        if (chapters.isEmpty()) return
+        synchronized(lock) {
+            val present = entries.mapTo(HashSet()) { it.chapter.id }
+            chapters.forEach { if (it.id !in present) entries.add(Entry(manga, it)) }
+        }
+        publish()
+        _isPaused.value = false // 明確要求翻譯 → 解除暫停、直接開跑（對照下載：排入即啟動）
+        ensureDrain()
+        TranslationJob.start(context)
+    }
+
+    /** 取消指定章（含正在翻的那章：中止後移除）。 */
     fun cancel(chapterIds: List<Long>) {
-        val ids = chapterIds.toSet()
-        synchronized(jobs) { jobs.removeAll { it.chapter.id in ids } }
-        _queue.value = _queue.value - ids
+        val ids = chapterIds.toHashSet()
+        synchronized(lock) {
+            if (entries.any { it.status == TranslationItem.Status.TRANSLATING && it.chapter.id in ids }) {
+                stopActive = true // 正在翻的章被取消 → 逐頁迴圈下一頁停下、移除
+            }
+            entries.removeAll { it.chapter.id in ids }
+        }
+        publish()
+        ensureDrain()
+    }
+
+    /** 重試失敗的章（重新排隊）。 */
+    fun retry(chapterIds: List<Long>) {
+        val ids = chapterIds.toHashSet()
+        synchronized(lock) {
+            entries.forEach {
+                if (it.chapter.id in ids && it.status == TranslationItem.Status.ERROR) {
+                    it.status = TranslationItem.Status.QUEUE
+                }
+            }
+        }
+        publish()
+        _isPaused.value = false // 重試 → 解除暫停、直接開跑
+        ensureDrain()
+        TranslationJob.start(context)
+    }
+
+    /** 清空佇列（含正在翻的那章：中止後移除）。 */
+    fun clearQueue() {
+        synchronized(lock) {
+            if (entries.any { it.status == TranslationItem.Status.TRANSLATING }) stopActive = true
+            entries.clear()
+        }
+        publish()
+    }
+
+    fun pause() {
+        _isPaused.value = true
+        synchronized(lock) { stopActive = true } // 中止正在翻的章（逐頁迴圈下一頁停），暫停才即時生效
+    }
+
+    fun resume() {
+        _isPaused.value = false
+        ensureDrain()
+        TranslationJob.start(context)
+    }
+
+    /** 確保有一條 drain 在跑（drainMutex 保證單一消費者；重複呼叫會排隊後再掃一遍）。 */
+    private fun ensureDrain() {
+        scope.launch { drainLoop() }
+    }
+
+    private suspend fun drainLoop() = drainMutex.withLock {
+        while (!_isPaused.value) {
+            val entry = synchronized(lock) {
+                entries.firstOrNull { it.status == TranslationItem.Status.QUEUE }
+            } ?: break
+            synchronized(lock) {
+                entry.status = TranslationItem.Status.TRANSLATING
+                entry.done = 0
+                entry.total = 0
+                stopActive = false // 開始新章前清旗標
+            }
+            publish()
+            val translated = try {
+                translateOne(entry)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                logcat(LogPriority.ERROR, e) { "翻譯章失敗 ${entry.chapter.name}（原檔保留）" }
+                synchronized(lock) { entry.status = TranslationItem.Status.ERROR } // 失敗 → 留佇列可重試
+                publish()
+                continue
+            }
+            if (stopActive) {
+                // 被暫停/取消/清空打斷：還在佇列(暫停)→回 QUEUE 等續傳；已被移除(取消/清空)→不動
+                synchronized(lock) {
+                    if (entries.contains(entry)) entry.status = TranslationItem.Status.QUEUE
+                }
+                publish()
+                if (_isPaused.value) break else continue
+            }
+            if (translated) {
+                synchronized(lock) { entries.remove(entry) } // 真的翻成 → 離開佇列
+                _translatedIds.value = _translatedIds.value + entry.chapter.id
+                translationCache.invalidate(entry.manga.id) // 已翻章數變 → 失效該本、刷新書庫徽章
+            } else {
+                // 沒下載 / 沒翻成（部分失敗）→ 標 ERROR 留佇列可重試，不誤標「已翻」
+                synchronized(lock) { entry.status = TranslationItem.Status.ERROR }
+            }
+            publish()
+        }
+    }
+
+    /** 回傳「該章是否確實翻成」（manifest 覆蓋全頁）；沒下載/沒翻成→false，drain 據此標 ERROR、不誤標已翻。 */
+    private suspend fun translateOne(entry: Entry): Boolean {
+        val dir = chapterDir(entry.manga, entry.chapter) ?: return false // 沒下載 → 不算翻成
+        val onProgress: (Int, Int) -> Unit = { done, total ->
+            synchronized(lock) {
+                entry.done = done
+                entry.total = total
+            }
+            publish()
+        }
+        return if (dir.isDirectory) {
+            pageTranslator.translateChapter(dir, onProgress) { stopActive } // 鬆散：原地翻（合作式中止）
+            pageTranslator.isChapterTranslated(dir)
+        } else {
+            translateArchiveInPlace(dir, onProgress) { stopActive } // CBZ：解壓→翻→安全重壓
+        }
     }
 
     /** 已下載章是否已翻（鬆散＝manifest 覆蓋；CBZ＝archive 內有 marker entry）。 */
@@ -70,39 +219,19 @@ class TranslationManager(private val context: Context) {
         return if (dir.isDirectory) pageTranslator.isChapterTranslated(dir) else archiveHasMarker(dir)
     }
 
-    private suspend fun drain() = drainMutex.withLock {
-        while (true) {
-            val job = synchronized(jobs) { jobs.removeFirstOrNull() } ?: break
-            _active.value = job.chapter.id
-            try {
-                translateOne(job.manga, job.chapter)
-            } catch (e: Throwable) {
-                logcat(LogPriority.ERROR, e) { "翻譯章失敗 ${job.chapter.name}（原檔保留）" }
-            } finally {
-                _active.value = null
-                _queue.value = _queue.value - job.chapter.id
-            }
-        }
-    }
-
-    private suspend fun translateOne(manga: Manga, chapter: Chapter) {
-        val dir = chapterDir(manga, chapter) ?: return // 沒下載 → 不做（case2 走下載 hook）
-        if (dir.isDirectory) {
-            pageTranslator.translateChapter(dir) // 鬆散：原地翻
-        } else {
-            translateArchiveInPlace(dir) // CBZ：解壓→翻→安全重壓
-        }
-    }
-
     private fun chapterDir(manga: Manga, chapter: Chapter): UniFile? {
         val source = sourceManager.getOrStub(manga.source)
         return downloadProvider.findChapterDir(chapter.name, chapter.scanlator, chapter.url, manga.title, source)
     }
 
     /** CBZ：解壓暫存→翻→重壓暫存 zip→驗證後才換掉原檔（§11：原檔到 rename 前都完好）。 */
-    private suspend fun translateArchiveInPlace(cbz: UniFile) {
-        val parent = cbz.parentFile ?: return
-        val cbzName = cbz.name ?: return
+    private suspend fun translateArchiveInPlace(
+        cbz: UniFile,
+        onProgress: (Int, Int) -> Unit,
+        shouldStop: () -> Boolean,
+    ): Boolean {
+        val parent = cbz.parentFile ?: return false
+        val cbzName = cbz.name ?: return false
         val tmp = File(context.cacheDir, "yakutr_${System.nanoTime()}").apply { mkdirs() }
         try {
             // 1. 解壓檔案 entry 到暫存夾
@@ -114,19 +243,22 @@ class TranslationManager(private val context: Context) {
                     }
                 }
             }
-            val tmpU = UniFile.fromFile(tmp) ?: return
+            val tmpU = UniFile.fromFile(tmp) ?: return false
             // 2. 翻（就地覆蓋暫存頁 + 寫 manifest）
-            val n = pageTranslator.translateChapter(tmpU)
+            val n = pageTranslator.translateChapter(tmpU, onProgress, shouldStop)
             val done = pageTranslator.isChapterTranslated(tmpU)
-            if (n == 0 && !done) return // 沒翻成、也沒新標記（全失敗）→ 不動原檔、可重試
+            if (shouldStop()) return false // 被暫停/取消中止 → 丟棄暫存、原檔不動（不壓回半成品）
+            if (n == 0 && !done) return false // 沒翻成、也沒新標記（全失敗）→ 不動原檔、可重試
             // 3. 重壓到暫存 zip（原檔此時完好）
-            val newZip = parent.createFile("$cbzName$TMP_SUFFIX") ?: return
+            val newZip = parent.createFile("$cbzName$TMP_SUFFIX") ?: return false
             ZipWriter(context, newZip).use { w -> tmpU.listFiles()?.forEach { w.write(it) } }
             // 4. 換檔
             cbz.delete()
             newZip.renameTo(cbzName)
+            return done
         } catch (e: Throwable) {
             logcat(LogPriority.ERROR, e) { "translateArchiveInPlace 失敗（原檔保留）" }
+            return false
         } finally {
             tmp.deleteRecursively()
         }

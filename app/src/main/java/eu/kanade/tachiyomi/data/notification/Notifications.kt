@@ -39,6 +39,8 @@ object Notifications {
     const val ID_DOWNLOAD_CHAPTER_PROGRESS = -201
     const val CHANNEL_DOWNLOADER_ERROR = "downloader_error_channel"
     const val ID_DOWNLOAD_CHAPTER_ERROR = -202
+    const val CHANNEL_TRANSLATOR_PROGRESS = "translator_progress_channel"
+    const val ID_TRANSLATION_PROGRESS = -210
 
     /**
      * Notification channel and ids used by the library updater.
@@ -136,6 +138,11 @@ object Notifications {
                     setName(context.stringResource(MR.strings.channel_new_chapters))
                 },
                 buildNotificationChannel(CHANNEL_DOWNLOADER_PROGRESS, IMPORTANCE_LOW) {
+                    setName(context.stringResource(MR.strings.channel_progress))
+                    setGroup(GROUP_DOWNLOADER)
+                    setShowBadge(false)
+                },
+                buildNotificationChannel(CHANNEL_TRANSLATOR_PROGRESS, IMPORTANCE_LOW) {
                     setName(context.stringResource(MR.strings.channel_progress))
                     setGroup(GROUP_DOWNLOADER)
                     setShowBadge(false)

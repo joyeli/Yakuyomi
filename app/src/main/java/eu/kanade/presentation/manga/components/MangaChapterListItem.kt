@@ -67,6 +67,8 @@ fun MangaChapterListItem(
     onClick: () -> Unit,
     onDownloadClick: ((ChapterDownloadAction) -> Unit)?,
     onTranslate: (() -> Unit)?,
+    translationStateProvider: () -> ChapterTranslationState,
+    translationProgressProvider: () -> Int,
     onChapterSwipe: (LibraryPreferences.ChapterSwipeAction) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -177,17 +179,12 @@ fun MangaChapterListItem(
             }
 
             if (onTranslate != null) {
-                IconButton(
+                ChapterTranslationIndicator(
+                    enabled = !selected,
+                    stateProvider = translationStateProvider,
+                    progressProvider = translationProgressProvider,
                     onClick = onTranslate,
-                    modifier = Modifier.size(IconButtonTokens.StateLayerSize),
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Translate,
-                        contentDescription = stringResource(MR.strings.action_translate),
-                        modifier = Modifier.size(26.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                )
             }
             ChapterDownloadIndicator(
                 enabled = downloadIndicatorEnabled,

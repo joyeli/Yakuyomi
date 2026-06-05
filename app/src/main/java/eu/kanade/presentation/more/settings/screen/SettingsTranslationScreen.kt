@@ -107,8 +107,18 @@ object SettingsTranslationScreen : SearchableSettings {
                         ),
                         title = stringResource(MR.strings.pref_translation_inpaint_method),
                     ),
-                    advFloat(showAdvanced, prefs.autoStdThreshold, "auto 泡泡判定門檻 std", "背景 std<此值=平塗、否則 lama；0–30，越低越多走 lama(精/慢)、越高壓畫面字塗成色塊"),
-                    advFloat(showAdvanced, prefs.autoWhiteThreshold, "auto 白底門檻", "背景亮度≥此值才算對話框；0–255，越低暗背景誤平塗、越高灰白泡也走 lama"),
+                    advFloat(
+                        showAdvanced,
+                        prefs.autoStdThreshold,
+                        "auto 泡泡判定門檻 std",
+                        "背景 std<此值=平塗、否則 lama；0–30，越低越多走 lama(精/慢)、越高壓畫面字塗成色塊",
+                    ),
+                    advFloat(
+                        showAdvanced,
+                        prefs.autoWhiteThreshold,
+                        "auto 白底門檻",
+                        "背景亮度≥此值才算對話框；0–255，越低暗背景誤平塗、越高灰白泡也走 lama",
+                    ),
                     advInt(showAdvanced, prefs.bboxPad, "去字外擴 (px)", "去字範圍外擴、涵蓋貼邊假名；0–64，太小漏邊假名、太大挖到鄰近畫面"),
                 ).toImmutableList(),
             ),
@@ -174,10 +184,36 @@ object SettingsTranslationScreen : SearchableSettings {
     }
 
     /** 進階浮點輸入：showAdvanced 關時回 null（不顯示）。subtitle 帶說明 + 現值(%s)。 */
-    private fun advFloat(show: Boolean, pref: tachiyomi.core.common.preference.Preference<String>, title: String, desc: String): Item? =
-        if (!show) null else Preference.PreferenceItem.EditTextPreference(preference = pref, title = title, subtitle = "$desc。現值：%s")
+    private fun advFloat(
+        show: Boolean,
+        pref: tachiyomi.core.common.preference.Preference<String>,
+        title: String,
+        desc: String,
+    ): Item? =
+        if (!show) {
+            null
+        } else {
+            Preference.PreferenceItem.EditTextPreference(
+                preference = pref,
+                title = title,
+                subtitle = "$desc。現值：%s",
+            )
+        }
 
     /** 進階整數輸入：同 [advFloat]。 */
-    private fun advInt(show: Boolean, pref: tachiyomi.core.common.preference.Preference<String>, title: String, desc: String): Item? =
-        if (!show) null else Preference.PreferenceItem.EditTextPreference(preference = pref, title = title, subtitle = "$desc。現值：%s")
+    private fun advInt(
+        show: Boolean,
+        pref: tachiyomi.core.common.preference.Preference<String>,
+        title: String,
+        desc: String,
+    ): Item? =
+        if (!show) {
+            null
+        } else {
+            Preference.PreferenceItem.EditTextPreference(
+                preference = pref,
+                title = title,
+                subtitle = "$desc。現值：%s",
+            )
+        }
 }

@@ -21,10 +21,12 @@ import eu.kanade.presentation.more.MoreScreen
 import eu.kanade.presentation.util.Tab
 import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.data.download.DownloadManager
+import eu.kanade.tachiyomi.data.translation.TranslationManager
 import eu.kanade.tachiyomi.ui.category.CategoryScreen
 import eu.kanade.tachiyomi.ui.download.DownloadQueueScreen
 import eu.kanade.tachiyomi.ui.setting.SettingsScreen
 import eu.kanade.tachiyomi.ui.stats.StatsScreen
+import eu.kanade.tachiyomi.ui.translation.TranslationQueueScreen
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -60,13 +62,16 @@ data object MoreTab : Tab {
         val navigator = LocalNavigator.currentOrThrow
         val screenModel = rememberScreenModel { MoreScreenModel() }
         val downloadQueueState by screenModel.downloadQueueState.collectAsState()
+        val translationQueueState by screenModel.translationQueueState.collectAsState()
         MoreScreen(
             downloadQueueStateProvider = { downloadQueueState },
+            translationQueueStateProvider = { translationQueueState },
             downloadedOnly = screenModel.downloadedOnly,
             onDownloadedOnlyChange = { screenModel.downloadedOnly = it },
             incognitoMode = screenModel.incognitoMode,
             onIncognitoModeChange = { screenModel.incognitoMode = it },
             onClickDownloadQueue = { navigator.push(DownloadQueueScreen) },
+            onClickTranslationQueue = { navigator.push(TranslationQueueScreen) },
             onClickCategories = { navigator.push(CategoryScreen()) },
             onClickStats = { navigator.push(StatsScreen()) },
             onClickDataAndStorage = { navigator.push(SettingsScreen(SettingsScreen.Destination.DataAndStorage)) },
@@ -79,6 +84,7 @@ data object MoreTab : Tab {
 
 private class MoreScreenModel(
     private val downloadManager: DownloadManager = Injekt.get(),
+    private val translationManager: TranslationManager = Injekt.get(),
     preferences: BasePreferences = Injekt.get(),
 ) : ScreenModel {
 
@@ -87,6 +93,10 @@ private class MoreScreenModel(
 
     private var _downloadQueueState: MutableStateFlow<DownloadQueueState> = MutableStateFlow(DownloadQueueState.Stopped)
     val downloadQueueState: StateFlow<DownloadQueueState> = _downloadQueueState.asStateFlow()
+
+    private var _translationQueueState: MutableStateFlow<TranslationQueueState> =
+        MutableStateFlow(TranslationQueueState.Stopped)
+    val translationQueueState: StateFlow<TranslationQueueState> = _translationQueueState.asStateFlow()
 
     init {
         // Handle running/paused status change and queue progress updating
@@ -104,6 +114,20 @@ private class MoreScreenModel(
                     }
                 }
         }
+        // 翻譯佇列狀態（與下載各自獨立）
+        screenModelScope.launchIO {
+            combine(
+                translationManager.queueState,
+                translationManager.isPaused,
+            ) { queue, paused -> Pair(queue.size, paused) }
+                .collectLatest { (size, paused) ->
+                    _translationQueueState.value = when {
+                        size == 0 -> TranslationQueueState.Stopped
+                        paused -> TranslationQueueState.Paused(size)
+                        else -> TranslationQueueState.Translating(size)
+                    }
+                }
+        }
     }
 }
 
@@ -111,4 +135,10 @@ sealed interface DownloadQueueState {
     data object Stopped : DownloadQueueState
     data class Paused(val pending: Int) : DownloadQueueState
     data class Downloading(val pending: Int) : DownloadQueueState
+}
+
+sealed interface TranslationQueueState {
+    data object Stopped : TranslationQueueState
+    data class Paused(val pending: Int) : TranslationQueueState
+    data class Translating(val pending: Int) : TranslationQueueState
 }

@@ -34,9 +34,10 @@ import eu.kanade.presentation.util.formattedMessage
 import eu.kanade.tachiyomi.data.download.DownloadCache
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.download.model.Download
-import eu.kanade.tachiyomi.data.translation.TranslationManager
 import eu.kanade.tachiyomi.data.track.EnhancedTracker
 import eu.kanade.tachiyomi.data.track.TrackerManager
+import eu.kanade.tachiyomi.data.translation.TranslationManager
+import eu.kanade.tachiyomi.data.translation.model.TranslationItem
 import eu.kanade.tachiyomi.network.HttpException
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
@@ -208,6 +209,7 @@ class MangaScreenModel(
         }
 
         observeDownloads()
+        observeTranslations()
 
         screenModelScope.launchIO {
             val manga = getMangaAndChapters.awaitManga(mangaId)
@@ -518,8 +520,39 @@ class MangaScreenModel(
         }
     }
 
+    private fun observeTranslations() {
+        screenModelScope.launchIO {
+            combine(
+                translationManager.queueState,
+                translationManager.translatedIds,
+            ) { queue, translated -> queue to translated }
+                .flowWithLifecycle(lifecycle)
+                .collect { (queue, translated) ->
+                    withUIContext { updateTranslationState(queue, translated) }
+                }
+        }
+    }
+
+    private fun updateTranslationState(queue: List<TranslationItem>, translatedIds: Set<Long>) {
+        updateSuccessState { successState ->
+            val byId = queue.associateBy { it.chapter.id }
+            val newChapters = successState.chapters.map { item ->
+                val t = byId[item.id]
+                item.copy(
+                    translationStatus = t?.status,
+                    translationProgress = if (t != null && t.total > 0) t.done * 100 / t.total else 0,
+                    // 只增不覆蓋：保留 toChapterListItems 掃出的持久「已翻」，再加上本 session 翻成的
+                    isTranslated = item.isTranslated || item.id in translatedIds,
+                )
+            }
+            successState.copy(chapters = newChapters)
+        }
+    }
+
     private fun List<Chapter>.toChapterListItems(manga: Manga): List<ChapterList.Item> {
         val isLocal = manga.isLocal()
+        val translations = translationManager.queueState.value.associateBy { it.chapter.id }
+        val translatedIds = translationManager.translatedIds.value
         return map { chapter ->
             val activeDownload = if (isLocal) {
                 null
@@ -543,10 +576,21 @@ class MangaScreenModel(
                 else -> Download.State.NOT_DOWNLOADED
             }
 
+            val translation = translations[chapter.id]
             ChapterList.Item(
                 chapter = chapter,
                 downloadState = downloadState,
                 downloadProgress = activeDownload?.progress ?: 0,
+                translationStatus = translation?.status,
+                translationProgress = if (translation != null && translation.total > 0) {
+                    translation.done * 100 / translation.total
+                } else {
+                    0
+                },
+                // 持久「已翻」：session 翻成的 OR 已下載且 manifest 有標記（跨重啟；observer combine 了
+                // downloadCache.changes，下載增刪會重跑這裡刷新）。只對已下載章掃 manifest（在 launchIO）。
+                isTranslated = chapter.id in translatedIds ||
+                    (downloaded && translationManager.isTranslated(manga, chapter)),
                 selected = chapter.id in selectedChapterIds,
             )
         }
@@ -716,7 +760,10 @@ class MangaScreenModel(
 
     fun runChapterTranslateAction(items: List<ChapterList.Item>) {
         val manga = successState?.manga ?: return
-        translationManager.translate(manga, items.map { it.chapter })
+        // 只翻已下載的章（翻譯對象是下載好的頁圖；未下載的略過，與單列指示器一致）
+        val downloaded = items.filter { it.isDownloaded }.map { it.chapter }
+        if (downloaded.isEmpty()) return
+        translationManager.translate(manga, downloaded)
     }
 
     fun runDownloadAction(action: DownloadAction) {
@@ -1226,6 +1273,9 @@ sealed class ChapterList {
         val chapter: Chapter,
         val downloadState: Download.State,
         val downloadProgress: Int,
+        val translationStatus: TranslationItem.Status? = null,
+        val translationProgress: Int = 0,
+        val isTranslated: Boolean = false,
         val selected: Boolean = false,
     ) : ChapterList() {
         val id = chapter.id

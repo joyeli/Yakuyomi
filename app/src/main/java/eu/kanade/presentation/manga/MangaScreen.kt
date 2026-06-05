@@ -49,6 +49,7 @@ import androidx.compose.ui.util.fastMap
 import eu.kanade.presentation.components.relativeDateText
 import eu.kanade.presentation.manga.components.ChapterDownloadAction
 import eu.kanade.presentation.manga.components.ChapterHeader
+import eu.kanade.presentation.manga.components.ChapterTranslationState
 import eu.kanade.presentation.manga.components.ExpandableMangaDescription
 import eu.kanade.presentation.manga.components.MangaActionRow
 import eu.kanade.presentation.manga.components.MangaBottomActionMenu
@@ -58,6 +59,7 @@ import eu.kanade.presentation.manga.components.MangaToolbar
 import eu.kanade.presentation.manga.components.MissingChapterCountListItem
 import eu.kanade.presentation.util.formatChapterNumber
 import eu.kanade.tachiyomi.data.download.model.Download
+import eu.kanade.tachiyomi.data.translation.model.TranslationItem
 import eu.kanade.tachiyomi.source.getNameForMangaInfo
 import eu.kanade.tachiyomi.ui.manga.ChapterList
 import eu.kanade.tachiyomi.ui.manga.MangaScreenModel
@@ -686,7 +688,9 @@ fun MangaScreenLargeImpl(
                                 chapterSwipeEndAction = chapterSwipeEndAction,
                                 onChapterClicked = onChapterClicked,
                                 onDownloadChapter = onDownloadChapter,
-                                onTranslateChapterSingle = onTranslateChapter?.let { cb -> { item -> cb(listOf(item)) } },
+                                onTranslateChapterSingle = onTranslateChapter?.let { cb ->
+                                    { item -> cb(listOf(item)) }
+                                },
                                 onChapterSelected = onChapterSelected,
                                 onChapterSwipe = onChapterSwipe,
                             )
@@ -730,7 +734,10 @@ private fun SharedMangaBottomActionMenu(
         }.takeIf { selected.size == 1 },
         onTranslateClicked = {
             onTranslateChapter!!(selected.toList())
-        }.takeIf { onTranslateChapter != null },
+        }.takeIf {
+            // 只在選取含已下載章時顯示翻譯鈕（翻譯對象＝下載頁圖；與單列指示器一致）
+            onTranslateChapter != null && selected.fastAny { it.downloadState == Download.State.DOWNLOADED }
+        },
         onDownloadClicked = {
             onDownloadChapter!!(selected.toList(), ChapterDownloadAction.START)
         }.takeIf {
@@ -818,6 +825,22 @@ private fun LazyListScope.sharedChapterItems(
                         null
                     },
                     onTranslate = onTranslateChapterSingle?.let { cb -> { cb(item) } },
+                    translationStateProvider = {
+                        when {
+                            // 未下載 → 不顯示翻譯指示器（翻譯以下載頁為對象；同時修：刪下載後不再殘留已翻、
+                            // 未下載章不再被誤點翻譯而瞬間變藍）
+                            !item.isDownloaded -> ChapterTranslationState.HIDDEN
+                            item.translationStatus == TranslationItem.Status.TRANSLATING ->
+                                ChapterTranslationState.TRANSLATING
+                            item.translationStatus == TranslationItem.Status.QUEUE ->
+                                ChapterTranslationState.QUEUED
+                            item.translationStatus == TranslationItem.Status.ERROR ->
+                                ChapterTranslationState.ERROR
+                            item.isTranslated -> ChapterTranslationState.TRANSLATED
+                            else -> ChapterTranslationState.NONE
+                        }
+                    },
+                    translationProgressProvider = { item.translationProgress },
                     onChapterSwipe = {
                         onChapterSwipe(item, it)
                     },

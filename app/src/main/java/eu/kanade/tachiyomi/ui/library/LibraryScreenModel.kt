@@ -19,6 +19,7 @@ import eu.kanade.tachiyomi.data.cache.CoverCache
 import eu.kanade.tachiyomi.data.download.DownloadCache
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.track.TrackerManager
+import eu.kanade.tachiyomi.data.translation.TranslationCache
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.util.chapter.getNextUnread
@@ -84,6 +85,7 @@ class LibraryScreenModel(
     private val sourceManager: SourceManager = Injekt.get(),
     private val downloadManager: DownloadManager = Injekt.get(),
     private val downloadCache: DownloadCache = Injekt.get(),
+    private val translationCache: TranslationCache = Injekt.get(),
     private val trackerManager: TrackerManager = Injekt.get(),
 ) : StateScreenModel<LibraryScreenModel.State>(State()) {
 
@@ -388,7 +390,8 @@ class LibraryScreenModel(
             getLibraryManga.subscribe(),
             getLibraryItemPreferencesFlow(),
             downloadCache.changes,
-        ) { libraryManga, preferences, _ ->
+            translationCache.changes,
+        ) { libraryManga, preferences, _, _ ->
             libraryManga.map { manga ->
                 LibraryItem(
                     libraryManga = manga,
@@ -397,6 +400,7 @@ class LibraryScreenModel(
                     } else {
                         0
                     },
+                    translatedCount = translationCache.getTranslatedCount(manga.manga).toLong(),
                     unreadCount = if (preferences.unreadBadge) {
                         manga.unreadCount
                     } else {

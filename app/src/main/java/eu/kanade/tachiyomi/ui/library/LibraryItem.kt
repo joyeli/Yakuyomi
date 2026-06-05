@@ -12,6 +12,7 @@ private const val LOCAL_SOURCE_ID_ALIAS = "local"
 data class LibraryItem(
     val libraryManga: LibraryManga,
     val downloadCount: Long = -1,
+    val translatedCount: Long = -1,
     val unreadCount: Long = -1,
     val isLocal: Boolean = false,
     val sourceLanguage: String = "",

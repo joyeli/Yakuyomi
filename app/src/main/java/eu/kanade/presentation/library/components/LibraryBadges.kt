@@ -21,6 +21,17 @@ internal fun DownloadsBadge(count: Long) {
 }
 
 @Composable
+internal fun TranslatedBadge(count: Long) {
+    if (count > 0) {
+        Badge(
+            text = "$count",
+            color = MaterialTheme.colorScheme.primary,
+            textColor = MaterialTheme.colorScheme.onPrimary,
+        )
+    }
+}
+
+@Composable
 internal fun UnreadBadge(count: Long) {
     if (count > 0) {
         Badge(text = "$count")

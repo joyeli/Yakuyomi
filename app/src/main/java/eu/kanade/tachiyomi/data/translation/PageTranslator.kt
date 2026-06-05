@@ -64,7 +64,11 @@ class PageTranslator(private val context: Context) {
      * page-level resume（§11）：跳過 manifest 已記的頁、只補沒翻的；每頁成功就更新 manifest，
      * 中斷後重跑只補剩下的。回傳這次新翻成功的頁數。
      */
-    suspend fun translateChapter(chapterDir: UniFile): Int {
+    suspend fun translateChapter(
+        chapterDir: UniFile,
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+        shouldStop: () -> Boolean = { false },
+    ): Int {
         val m = modelsDir() ?: return 0
         val detU = findOnnx(m, "detect", "comictext") ?: return 0
         val ocrU = findOnnx(m, "ocr") ?: return 0
@@ -79,6 +83,7 @@ class PageTranslator(private val context: Context) {
         val pending = images.filter { (it.name ?: "") !in done }
         if (pending.isEmpty()) {
             logcat { "已翻過、跳過 ${chapterDir.name}" }
+            onProgress(images.size, images.size)
             return 0
         }
 
@@ -161,27 +166,36 @@ class PageTranslator(private val context: Context) {
             ),
         )
 
+        val total = images.size
+        var processed = total - pending.size // resume：已完成頁先計入進度
+        onProgress(processed, total)
         var translated = 0
         try {
             // 工廠取引擎、`use { }` 自動釋放三顆模型
             Yakuyomi.create(models, alphabet, apiKey(), cfg).use { engine ->
                 for (img in pending) {
+                    if (shouldStop()) break // 合作式中止：暫停/取消 → 停在頁邊界
                     val name = img.name ?: continue
                     val bmp = context.contentResolver.openInputStream(img.uri)
                         ?.use { BitmapFactory.decodeStream(it) } ?: continue
                     when (val r = engine.translatePage(bmp)) {
                         is PageResult.Translated -> {
-                            writeBack(img, r.page); translated++
-                            done.add(name); writeManifest(chapterDir, done)
+                            writeBack(img, r.page)
+                            translated++
+                            done.add(name)
+                            writeManifest(chapterDir, done)
                         }
                         is PageResult.Skipped -> {
                             logcat { "翻譯略過 $name：${r.reason}" }
-                            done.add(name); writeManifest(chapterDir, done) // 略過＝沒字可翻、算處理過、不重試
+                            done.add(name)
+                            writeManifest(chapterDir, done) // 略過＝沒字可翻、算處理過、不重試
                         }
                         is PageResult.Failed ->
                             logcat(LogPriority.WARN) { "翻譯失敗 $name：${r.reason}" } // 不標記、下次重試
                     }
                     bmp.recycle()
+                    processed++
+                    onProgress(processed, total)
                 }
             }
         } catch (e: Throwable) {
@@ -247,6 +261,7 @@ class PageTranslator(private val context: Context) {
     companion object {
         private const val MODELS_DIR = "models"
         private const val ALPHABET = "models/alphabet-all-v5.txt"
+
         // 章內 manifest：已處理頁名（每行一個）＝page-level resume + 「已翻」標記。
         // 放章節內（隨 CBZ/資料夾走）：reader 依副檔名濾掉、也不會灌爆 mihon 的下載計數。
         private const val MARKER = ".yakuyomi_translated"

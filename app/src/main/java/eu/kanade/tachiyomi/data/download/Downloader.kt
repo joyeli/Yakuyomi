@@ -6,9 +6,9 @@ import eu.kanade.domain.chapter.model.toSChapter
 import eu.kanade.domain.manga.model.getComicInfo
 import eu.kanade.tachiyomi.data.cache.ChapterCache
 import eu.kanade.tachiyomi.data.download.model.Download
-import eu.kanade.tachiyomi.data.translation.PageTranslator
 import eu.kanade.tachiyomi.data.library.LibraryUpdateNotifier
 import eu.kanade.tachiyomi.data.notification.NotificationHandler
+import eu.kanade.tachiyomi.data.translation.TranslationManager
 import eu.kanade.tachiyomi.source.UnmeteredSource
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.online.HttpSource
@@ -97,7 +97,7 @@ class Downloader(
     private val notifier by lazy { DownloadNotifier(context) }
 
     // Yakuyomi M4：翻譯引擎 glue（下載完成後就地翻譯頁圖）
-    private val pageTranslator by lazy { PageTranslator(context) }
+    private val translationManager: TranslationManager by lazy { Injekt.get() }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var downloaderJob: Job? = null
@@ -402,11 +402,6 @@ class Downloader(
                 return
             }
 
-            // Yakuyomi M4 3a：下載完成即翻譯 tmpDir 內頁圖（打包前、就地覆蓋、§11）。模型/key 未備齊則略過。
-            if (pageTranslator.isReady()) {
-                pageTranslator.translateChapter(tmpDir)
-            }
-
             createComicInfoFile(
                 tmpDir,
                 download.manga,
@@ -425,6 +420,12 @@ class Downloader(
             DiskUtil.createNoMediaFile(tmpDir, context)
 
             download.status = Download.State.DOWNLOADED
+
+            // Yakuyomi M4：章已下載並進 cache → 排入翻譯佇列（與下載 worker 解耦、非阻塞）。
+            // isReady() 已含啟用開關 + key + 模型；TranslationManager 走獨立 scope 逐章翻、就地覆蓋（§11）。
+            if (translationManager.isReady()) {
+                translationManager.translate(download.manga, listOf(download.chapter))
+            }
         } catch (error: Throwable) {
             if (error is CancellationException) throw error
             // If the page list threw, it will resume here

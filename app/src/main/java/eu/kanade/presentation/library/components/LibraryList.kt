@@ -55,6 +55,7 @@ internal fun LibraryList(
                 ),
                 badge = {
                     DownloadsBadge(count = libraryItem.downloadCount)
+                    TranslatedBadge(count = libraryItem.translatedCount)
                     UnreadBadge(count = libraryItem.unreadCount)
                     LanguageBadge(
                         isLocal = libraryItem.isLocal,

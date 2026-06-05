@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.data.download
 
 import android.content.Context
 import eu.kanade.tachiyomi.data.download.model.Download
+import eu.kanade.tachiyomi.data.translation.TranslationCache
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.model.Page
 import kotlinx.coroutines.flow.Flow
@@ -232,6 +233,7 @@ class DownloadManager(
             val (mangaDir, chapterDirs) = provider.findChapterDirs(filteredChapters, manga, source)
             chapterDirs.forEach { it.delete() }
             cache.removeChapters(filteredChapters, manga)
+            Injekt.get<TranslationCache>().invalidate(manga.id) // 已翻章可能被刪 → 失效該本書庫徽章
 
             // Delete manga directory if empty
             if (mangaDir?.listFiles()?.isEmpty() == true) {
@@ -254,6 +256,7 @@ class DownloadManager(
             }
             provider.findMangaDir(manga.title, source)?.delete()
             cache.removeManga(manga)
+            Injekt.get<TranslationCache>().invalidate(manga.id) // 整本刪 → 失效該本書庫徽章
 
             // Delete source directory if empty
             val sourceDir = provider.findSourceDir(source)
