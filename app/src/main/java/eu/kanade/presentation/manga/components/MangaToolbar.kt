@@ -37,6 +37,7 @@ fun MangaToolbar(
     onClickEditCategory: (() -> Unit)?,
     onClickRefresh: () -> Unit,
     onClickMigrate: (() -> Unit)?,
+    onClickReRenderAll: (() -> Unit)?,
     onClickEditNotes: () -> Unit,
 
     // For action mode
@@ -130,6 +131,15 @@ fun MangaToolbar(
                             AppBar.OverflowAction(
                                 title = stringResource(MR.strings.action_migrate),
                                 onClick = onClickMigrate,
+                            ),
+                        )
+                    }
+                    // 重繪全本：用目前去字設定，把已下載且已翻的章全部重做去字+排版（不重跑 OCR/翻譯）
+                    if (onClickReRenderAll != null) {
+                        add(
+                            AppBar.OverflowAction(
+                                title = "重繪全本（目前去字設定）",
+                                onClick = onClickReRenderAll,
                             ),
                         )
                     }

@@ -87,6 +87,7 @@ import tachiyomi.domain.manga.model.applyFilter
 import tachiyomi.domain.manga.repository.MangaRepository
 import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.domain.track.interactor.GetTracks
+import tachiyomi.domain.translation.service.TranslationPreferences
 import tachiyomi.i18n.MR
 import tachiyomi.source.local.isLocal
 import uy.kohesive.injekt.Injekt
@@ -106,6 +107,7 @@ class MangaScreenModel(
     private val downloadManager: DownloadManager = Injekt.get(),
     private val downloadCache: DownloadCache = Injekt.get(),
     private val translationManager: TranslationManager = Injekt.get(),
+    private val translationPreferences: TranslationPreferences = Injekt.get(),
     private val getMangaAndChapters: GetMangaWithChapters = Injekt.get(),
     private val getDuplicateLibraryManga: GetDuplicateLibraryManga = Injekt.get(),
     private val getAvailableScanlators: GetAvailableScanlators = Injekt.get(),
@@ -772,6 +774,33 @@ class MangaScreenModel(
         val downloaded = items.filter { it.isDownloaded }.map { it.chapter }
         if (downloaded.isEmpty()) return
         translationManager.reRender(manga, downloaded, method)
+    }
+
+    /**
+     * 重繪「整本」：用**目前的去字設定**（不彈方法選擇器）把本作**已下載且已翻**的章全部重做去字+排版，
+     * 復用素材、不重跑 OCR/翻譯/網路（見 [TranslationManager.reRender]）。從漫畫頁的溢位選單(⋮)觸發。
+     *
+     * 對象限定＝既下載又已翻的章（[ChapterList.Item.isDownloaded] && [ChapterList.Item.isTranslated]）：
+     * 沒下載＝沒素材可重繪、沒翻過＝重繪無意義，皆排除（與單列指示器/底部選單一致）。
+     * 沒有可重繪的章 → 提示後返回；否則讀目前去字法字串排入佇列、回報排入幾章。
+     */
+    fun runMangaReRenderAction() {
+        val state = successState ?: return
+        val chapters = state.chapters
+            .filter { it.isDownloaded && it.isTranslated }
+            .map { it.chapter }
+        if (chapters.isEmpty()) {
+            screenModelScope.launch {
+                snackbarHostState.showSnackbar(message = "沒有可重繪的已翻章節")
+            }
+            return
+        }
+        // 目前的去字法原始字串（boxfill / auto_whole / auto_tile），與設定頁選擇器寫入的同一格
+        val method = translationPreferences.inpaintMethod.get()
+        translationManager.reRender(state.manga, chapters, method)
+        screenModelScope.launch {
+            snackbarHostState.showSnackbar(message = "已排入重繪：${chapters.size} 章")
+        }
     }
 
     fun runDownloadAction(action: DownloadAction) {

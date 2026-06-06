@@ -51,6 +51,7 @@ import eu.kanade.core.util.ifSourcesLoaded
 import eu.kanade.domain.base.BasePreferences
 import eu.kanade.presentation.reader.DisplayRefreshHost
 import eu.kanade.presentation.reader.OrientationSelectDialog
+import eu.kanade.presentation.reader.ReRenderMethodDialog
 import eu.kanade.presentation.reader.ReaderContentOverlay
 import eu.kanade.presentation.reader.ReaderPageActionsDialog
 import eu.kanade.presentation.reader.ReaderPageIndicator
@@ -68,6 +69,7 @@ import eu.kanade.tachiyomi.ui.main.MainActivity
 import eu.kanade.tachiyomi.ui.reader.ReaderViewModel.SetAsCoverResult.AddToLibraryFirst
 import eu.kanade.tachiyomi.ui.reader.ReaderViewModel.SetAsCoverResult.Error
 import eu.kanade.tachiyomi.ui.reader.ReaderViewModel.SetAsCoverResult.Success
+import eu.kanade.tachiyomi.ui.reader.loader.DownloadPageLoader
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.model.ViewerChapters
@@ -241,6 +243,14 @@ class ReaderActivity : BaseActivity() {
                     is ReaderViewModel.Event.SetCoverResult -> {
                         onSetAsCoverResult(event.result)
                     }
+                    ReaderViewModel.Event.ReRenderStarted -> {
+                        // 開始重繪提示：頁面同時顯示 per-page 轉圈圈（「重繪中」指示）；IO 約 2–8s。
+                        toast("重繪中…")
+                    }
+                    is ReaderViewModel.Event.ReRenderResult -> {
+                        // 重繪結果提示：成功＝頁已重繪（holder 已自動刷新）；失敗＝無素材或出錯（原圖保留不動）。
+                        toast(if (event.success) "已重繪此頁" else "重繪失敗（無素材或出錯）")
+                    }
                 }
             }
             .launchIn(lifecycleScope)
@@ -274,7 +284,7 @@ class ReaderActivity : BaseActivity() {
         }
 
         val onDismissRequest = viewModel::closeDialog
-        when (state.dialog) {
+        when (val dialog = state.dialog) {
             is ReaderViewModel.Dialog.Loading -> {
                 AlertDialog(
                     onDismissRequest = {},
@@ -321,11 +331,22 @@ class ReaderActivity : BaseActivity() {
                 )
             }
             is ReaderViewModel.Dialog.PageActions -> {
+                val page = dialog.page
                 ReaderPageActionsDialog(
                     onDismissRequest = onDismissRequest,
                     onSetAsCover = viewModel::setAsCover,
                     onShare = viewModel::shareImage,
                     onSave = viewModel::saveImage,
+                    // 只有已下載章（DownloadPageLoader、頁圖在磁碟、可能留有重繪素材）才顯示「重繪」鈕；
+                    // 線上/封存頁無素材，不給此選項。按下→VM 彈去字法選擇對話框、帶著這頁。
+                    onReRender = { viewModel.openReRenderDialog(page) }
+                        .takeIf { page.chapter.pageLoader is DownloadPageLoader },
+                )
+            }
+            is ReaderViewModel.Dialog.ReRenderMethod -> {
+                ReRenderMethodDialog(
+                    onDismissRequest = onDismissRequest,
+                    onSelect = { method -> viewModel.reRenderPage(method) },
                 )
             }
             null -> {}

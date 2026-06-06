@@ -163,6 +163,8 @@ class MangaScreen(
             onMigrateClicked = {
                 navigator.push(MigrationConfigScreen(successState.manga.id))
             }.takeIf { successState.manga.favorite },
+            // 重繪全本：用目前去字設定重做本作已下載且已翻的章（空集合由 screenModel 提示）
+            onReRenderAllClicked = screenModel::runMangaReRenderAction,
             onEditNotesClicked = { navigator.push(MangaNotesScreen(manga = successState.manga)) },
             onMultiBookmarkClicked = screenModel::bookmarkChapters,
             onMultiMarkAsReadClicked = screenModel::markChaptersRead,

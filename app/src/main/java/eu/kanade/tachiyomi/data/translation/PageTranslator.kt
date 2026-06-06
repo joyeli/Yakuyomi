@@ -35,7 +35,6 @@ import tachiyomi.domain.storage.service.StoragePreferences
 import tachiyomi.domain.translation.service.TranslationPreferences
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
-import java.io.ByteArrayOutputStream
 import java.io.File
 
 /**
@@ -319,43 +318,142 @@ class PageTranslator(private val context: Context) {
         Inpainter(lamaPath, inpainterCfg).use { inpainter ->
             for (img in workList) {
                 if (shouldStop()) break // 合作式中止：停在頁邊界
-                val name = img.name ?: continue
-                val base = name.substringBeforeLast('.')
-                // 單頁包 try/catch：某頁素材壞（json 損毀/原圖缺）不該中斷整章，只記 log 跳過。
-                try {
-                    val materials = decodeMaterials(matDir!!, base) ?: continue
-                    val original = matDir.findFile("$base.orig.webp")
-                        ?.let { f ->
-                            context.contentResolver.openInputStream(f.uri)?.use { BitmapFactory.decodeStream(it) }
-                        }
-                        ?: continue
-                    val maskBytes = Base64.decode(materials.mask, Base64.NO_WRAP)
-                    val mask = BitmapFactory.decodeByteArray(maskBytes, 0, maskBytes.size)
-                    if (mask == null) {
-                        original.recycle()
-                        continue
-                    }
-
-                    val regions = regionsFromMaterials(materials)
-                    val cleaned = inpainter.inpaint(original, regions, mask) // 引擎內部 copy 輸入，不會 mutate original/mask
-                    val finalPage = Renderer.render(cleaned, regions, renderCfg, null) // 引擎內部 copy cleaned
-
-                    writeBack(img, finalPage)
-                    // 更新 json 的 method（其餘素材不變），保持記錄與檔案一致。
-                    saveMaterialsMethod(matDir, base, materials, newMethod)
-
-                    original.recycle()
-                    mask.recycle()
-                    cleaned.recycle()
-                    finalPage.recycle()
+                // 單頁失敗（素材壞/原圖缺）不該中斷整章：reRenderOnePage 內已包 try/catch、回 false 略過。
+                if (reRenderOnePage(matDir!!, img, newMethod, inpainter, renderCfg)) {
                     processed++
                     onProgress(processed, workList.size)
-                } catch (e: Throwable) {
-                    logcat(LogPriority.WARN, e) { "重繪頁失敗 $name（跳過、保留原圖）" }
                 }
             }
         }
         return processed
+    }
+
+    /**
+     * 換去字法重繪「單頁」（§ 不重跑偵測/OCR/翻譯）：對 [chapterDir] 內檔名 == [pageFileName] 的頁，
+     * 用 [newMethod]（[TranslationPreferences.inpaintMethod] 原始字串）重做**去字 + 排版**、就地覆蓋頁圖。
+     *
+     * 與 [reRenderChapter] 共用核心 [reRenderOnePage]，差別只在這裡只開一顆 lama session、只跑一頁
+     * （reader 內長按某頁→選去字法→重繪當頁用）。素材缺/模型缺 → 回 false（不毀原圖）。
+     */
+    suspend fun reRenderPage(
+        chapterDir: UniFile,
+        pageFileName: String,
+        newMethod: String,
+    ): Boolean {
+        // 只需 lama（去字）；偵測/OCR/翻譯都不跑（同 reRenderChapter）。
+        val m = modelsDir() ?: return false
+        val lamaU = findOnnx(m, "lama") ?: return false
+        val lamaPath = ensureLocal(lamaU)
+
+        // 去字方法映射（與 reRenderChapter/translateChapter 同一 when）。
+        val (method, whole) = when (newMethod) {
+            "boxfill" -> "boxfill" to true
+            "auto_tile" -> "auto" to false
+            else -> "auto" to true // auto_whole（預設·平衡）；舊存的 lama_* 也落這
+        }
+
+        // 緒數 + 進階數值（與 reRenderChapter 完全相同的讀法/clamp）。
+        val cores = Runtime.getRuntime().availableProcessors()
+        val intra = when (val v = translationPreferences.intraThreads.get()) {
+            "auto" -> (cores - 2).coerceAtLeast(2)
+            else -> (v.toIntOrNull() ?: 6).coerceIn(1, 32)
+        }
+        fun pf(s: String, lo: Float, hi: Float, d: Float) = s.toFloatOrNull()?.coerceIn(lo, hi) ?: d
+        fun pi(s: String, lo: Int, hi: Int, d: Int) = s.toIntOrNull()?.coerceIn(lo, hi) ?: d
+        val p = translationPreferences
+
+        val orient = when (p.orientation.get()) {
+            "vertical" -> TextOrientation.VERTICAL
+            "horizontal" -> TextOrientation.HORIZONTAL
+            else -> TextOrientation.AUTO
+        }
+        val inpainterCfg = InpainterConfig(
+            method = method,
+            wholeImage = whole,
+            autoStdThreshold = pf(p.autoStdThreshold.get(), 0f, 30f, 6f),
+            autoWhiteThreshold = pf(p.autoWhiteThreshold.get(), 0f, 255f, 190f),
+            bboxPad = pi(p.bboxPad.get(), 0, 64, 16),
+            intraThreads = intra,
+        )
+        val renderCfg = RenderConfig(
+            orientation = orient,
+            fontBorder = p.fontBorder.get(),
+            colorMode = if (p.colorMode.get() == "mono") "mono" else "auto",
+            artStrokeRatio = pf(p.artStrokeRatio.get(), 0f, 0.5f, 0.16f),
+            fontSizeMax = pi(p.fontSizeMax.get(), 20, 120, 60),
+            fontSizeMin = pi(p.fontSizeMin.get(), 6, 40, 9),
+            colTrim = pi(p.colTrim.get(), 0, 10, 3),
+            rowTrim = pi(p.rowTrim.get(), 0, 10, 3),
+            fontScale = pf(p.fontScale.get(), 0.3f, 1.5f, 0.85f),
+        )
+
+        // 解析目標頁圖檔（頂層、副檔名為圖、檔名 == pageFileName）；不存在 → 回 false。
+        val img = chapterDir.listFiles()
+            ?.firstOrNull { f ->
+                f.isFile &&
+                    (f.name?.substringAfterLast('.', "")?.lowercase() ?: "") in IMAGE_EXT &&
+                    f.name == pageFileName
+            }
+            ?: return false
+        // 素材子夾不在 → 沒東西可重繪（回 false，保留原圖）。
+        val matDir = chapterDir.findFile(MATERIALS_DIR) ?: return false
+
+        // 只開一顆 lama session（單頁重繪、跑完即釋放）。
+        return Inpainter(lamaPath, inpainterCfg).use { inpainter ->
+            reRenderOnePage(matDir, img, newMethod, inpainter, renderCfg)
+        }
+    }
+
+    /**
+     * 重繪單頁的核心（[reRenderChapter] 逐頁迴圈 / [reRenderPage] 共用）：
+     * 讀 [img] 對應的素材（json + `.orig.webp` 原圖 + 遮罩）→ lama 去字 → Renderer 排版 → 覆蓋 [img]，
+     * 再把 json 的 `method` 更新為 [newMethod]。
+     *
+     * 單頁包 try/catch：某頁素材壞（json 損毀/原圖缺/遮罩解不開）不該中斷整章，只記 log、回 false 略過、保留原圖。
+     * 成功覆蓋回 true。
+     *
+     * @param matDir 章內 `.yakuyomi/` 素材子夾（呼叫端確保非 null）。
+     * @param inpainter 已建好的 lama session（跨頁復用，避免逐頁重載 ~450MB）。
+     */
+    private suspend fun reRenderOnePage(
+        matDir: UniFile,
+        img: UniFile,
+        newMethod: String,
+        inpainter: Inpainter,
+        renderCfg: RenderConfig,
+    ): Boolean {
+        val name = img.name ?: return false
+        val base = name.substringBeforeLast('.')
+        return try {
+            val materials = decodeMaterials(matDir, base) ?: return false
+            val original = matDir.findFile("$base.orig.webp")
+                ?.let { f ->
+                    context.contentResolver.openInputStream(f.uri)?.use { BitmapFactory.decodeStream(it) }
+                }
+                ?: return false
+            val mask = loadMask(matDir, base, materials)
+            if (mask == null) {
+                original.recycle()
+                return false
+            }
+
+            val regions = regionsFromMaterials(materials)
+            val cleaned = inpainter.inpaint(original, regions, mask) // 引擎內部 copy 輸入，不會 mutate original/mask
+            val finalPage = Renderer.render(cleaned, regions, renderCfg, null) // 引擎內部 copy cleaned
+
+            writeBack(img, finalPage)
+            // 更新 json 的 method（其餘素材不變），保持記錄與檔案一致。
+            saveMaterialsMethod(matDir, base, materials, newMethod)
+
+            original.recycle()
+            mask.recycle()
+            cleaned.recycle()
+            finalPage.recycle()
+            true
+        } catch (e: Throwable) {
+            logcat(LogPriority.WARN, e) { "重繪頁失敗 $name（跳過、保留原圖）" }
+            false
+        }
     }
 
     /** 讀 `.yakuyomi/<base>.json` → [PageMaterials]；缺檔/解析失敗回 null。 */
@@ -363,9 +461,54 @@ class PageTranslator(private val context: Context) {
         val f = matDir.findFile("$base.json") ?: return null
         return runCatching {
             context.contentResolver.openInputStream(f.uri)?.use { input ->
-                MATERIALS_JSON.decodeFromString<PageMaterials>(input.bufferedReader().readText())
+                val text = input.bufferedReader().readText()
+                // 容錯：舊版截斷 bug 可能留下「合法 json + 殘尾」→ 嚴格解析失敗時，截到根物件平衡結束再解一次（救回舊素材、免重翻）。
+                runCatching { MATERIALS_JSON.decodeFromString<PageMaterials>(text) }
+                    .getOrElse { MATERIALS_JSON.decodeFromString<PageMaterials>(trimToRootObject(text)) }
             }
         }.getOrNull()
+    }
+
+    /** 從字串頭掃出根 json 物件的平衡結束位置（避開字串內的括號），截掉之後殘尾。找不到平衡點則原樣回傳（交給上層判失敗）。 */
+    private fun trimToRootObject(s: String): String {
+        var depth = 0
+        var inStr = false
+        var esc = false
+        for (i in s.indices) {
+            val c = s[i]
+            if (inStr) {
+                when {
+                    esc -> esc = false
+                    c == '\\' -> esc = true
+                    c == '"' -> inStr = false
+                }
+            } else {
+                when (c) {
+                    '"' -> inStr = true
+                    '{', '[' -> depth++
+                    '}', ']' -> {
+                        depth--
+                        if (depth == 0) return s.substring(0, i + 1)
+                    }
+                }
+            }
+        }
+        return s
+    }
+
+    /**
+     * 載入這頁的去字遮罩：優先讀獨立檔 `<base>.mask.png`（新格式）；找不到才退回 json 內嵌 base64（舊素材相容）。
+     * 走 native stream 解碼、不把整串 base64 灌進 JVM heap。
+     */
+    private fun loadMask(matDir: UniFile, base: String, materials: PageMaterials): Bitmap? {
+        matDir.findFile("$base.mask.png")?.let { f ->
+            context.contentResolver.openInputStream(f.uri)?.use { BitmapFactory.decodeStream(it) }?.let { return it }
+        }
+        if (materials.mask.isNotEmpty()) {
+            val bytes = Base64.decode(materials.mask, Base64.NO_WRAP)
+            return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        }
+        return null
     }
 
     /**
@@ -395,8 +538,7 @@ class PageTranslator(private val context: Context) {
     private fun saveMaterialsMethod(matDir: UniFile, base: String, materials: PageMaterials, newMethod: String) {
         runCatching {
             val updated = materials.copy(method = newMethod)
-            (matDir.findFile("$base.json") ?: matDir.createFile("$base.json"))
-                ?.openOutputStream()?.use { it.write(MATERIALS_JSON.encodeToString(updated).toByteArray()) }
+            overwriteBytes(matDir, "$base.json", MATERIALS_JSON.encodeToString(updated).toByteArray())
         }.onFailure { logcat(LogPriority.WARN, it) { "重繪後更新 method 失敗 $base（不影響已覆蓋的頁圖）" } }
     }
 
@@ -422,10 +564,7 @@ class PageTranslator(private val context: Context) {
 
     /** 覆寫 manifest（每頁成功後叫一次；小檔、相對翻譯耗時可忽略，給中斷後 resume）。 */
     private fun writeManifest(chapterDir: UniFile, done: Set<String>) {
-        val f = chapterDir.findFile(MARKER) ?: chapterDir.createFile(MARKER) ?: return
-        runCatching {
-            f.openOutputStream().use { it.write(done.joinToString("\n").toByteArray()) }
-        }
+        overwriteBytes(chapterDir, MARKER, done.joinToString("\n").toByteArray())
     }
 
     private fun writeBack(file: UniFile, bmp: Bitmap) {
@@ -436,6 +575,34 @@ class PageTranslator(private val context: Context) {
         }
         file.openOutputStream().use { bmp.compress(fmt, 92, it) }
     }
+
+    /**
+     * 覆寫 [dir]/[name]：用 ContentResolver 的 "wt"（write + truncate）模式開流。
+     * 繞過 SAF DocumentFile「w」模式不截斷的老問題——否則寫入比舊檔短的內容會留下舊尾，
+     * 對 json 尤其致命：去字法字串 boxfill(7) / auto_whole(10) 長度不同，
+     * 由 auto_whole 改回 boxfill 時 json 變短、舊尾 3 byte 殘留 → 下次 decodeMaterials 整個解析失敗（顯示「無素材」）。
+     * File-backed UniFile 也吃 "wt"（FileOutputStream 本就截斷）。best-effort：回傳是否成功。
+     */
+    private fun overwriteBytes(dir: UniFile, name: String, bytes: ByteArray): Boolean = runCatching {
+        val f = dir.findFile(name) ?: dir.createFile(name) ?: return@runCatching false
+        val os = context.contentResolver.openOutputStream(f.uri, "wt") ?: return@runCatching false
+        os.use { it.write(bytes) }
+        true
+    }.getOrDefault(false)
+
+    /** 把 [bmp] 以 [format]/[quality] 壓進 [dir]/[name]，同樣走 "wt" 截斷（避免短輸出留舊尾）。best-effort：回傳是否成功。 */
+    private fun compressToFile(
+        dir: UniFile,
+        name: String,
+        bmp: Bitmap,
+        format: Bitmap.CompressFormat,
+        quality: Int,
+    ): Boolean = runCatching {
+        val f = dir.findFile(name) ?: dir.createFile(name) ?: return@runCatching false
+        val os = context.contentResolver.openOutputStream(f.uri, "wt") ?: return@runCatching false
+        os.use { bmp.compress(format, quality, it) }
+        true
+    }.getOrDefault(false)
 
     /**
      * 保留重繪素材（§ 換去字法重繪用）：把這頁的原圖 + seg 遮罩 + 文字區存進章內 `.yakuyomi/` 子夾，
@@ -463,8 +630,11 @@ class PageTranslator(private val context: Context) {
                 @Suppress("DEPRECATION")
                 Bitmap.CompressFormat.WEBP
             }
-            (dir.findFile("$base.orig.webp") ?: dir.createFile("$base.orig.webp"))
-                ?.openOutputStream()?.use { original.compress(webpFmt, 90, it) }
+            compressToFile(dir, "$base.orig.webp", original, webpFmt, 90)
+            // 遮罩 → 獨立無損 PNG 檔（不再 base64 內嵌 json）：換去字法重繪只重寫小 json、遮罩檔不動；省 ~33% 膨脹、讀取走 native stream 不灌 heap。
+            val bin = binarizeMask(analysis.mask)
+            compressToFile(dir, "$base.mask.png", bin, Bitmap.CompressFormat.PNG, 100)
+            bin.recycle()
             // 文字區 → RegionMaterial（四邊形逐行、角度、onArt、原文、譯文、bbox）。
             val regions = analysis.regions.map { region ->
                 RegionMaterial(
@@ -481,18 +651,14 @@ class PageTranslator(private val context: Context) {
                     boxH = region.boxH,
                 )
             }
-            val materials = PageMaterials(
-                method = method,
-                mask = encodeMaskBase64(analysis.mask),
-                regions = regions,
-            )
-            (dir.findFile("$base.json") ?: dir.createFile("$base.json"))
-                ?.openOutputStream()?.use { it.write(MATERIALS_JSON.encodeToString(materials).toByteArray()) }
+            // mask 改存獨立檔 → materials 不帶 mask（預設空字串、不序列化進 json）。
+            val materials = PageMaterials(method = method, regions = regions)
+            overwriteBytes(dir, "$base.json", MATERIALS_JSON.encodeToString(materials).toByteArray())
         }.onFailure { logcat(LogPriority.WARN, it) { "保留重繪素材失敗 $pageName（不影響翻譯）" } }
     }
 
-    /** 二值化 seg 遮罩（>127 白 / 否則黑）→ PNG → base64(NO_WRAP)。用 getPixels/setPixels 批次，不逐像素。 */
-    private fun encodeMaskBase64(mask: Bitmap): String {
+    /** 二值化 seg 遮罩（>127 白 / 否則黑）→ 新 ARGB Bitmap（呼叫端負責 recycle）。getPixels/setPixels 批次，不逐像素。 */
+    private fun binarizeMask(mask: Bitmap): Bitmap {
         val w = mask.width
         val h = mask.height
         val px = IntArray(w * h)
@@ -500,14 +666,7 @@ class PageTranslator(private val context: Context) {
         for (i in px.indices) {
             px[i] = if ((px[i] and 0xFF) > 127) Color.WHITE else Color.BLACK
         }
-        val bin = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        bin.setPixels(px, 0, w, 0, 0, w, h)
-        val bytes = ByteArrayOutputStream().use { out ->
-            bin.compress(Bitmap.CompressFormat.PNG, 100, out)
-            out.toByteArray()
-        }
-        bin.recycle()
-        return Base64.encodeToString(bytes, Base64.NO_WRAP)
+        return Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).apply { setPixels(px, 0, w, 0, 0, w, h) }
     }
 
     /** SAF 模型串流複製到 filesDir（64KB、不佔 JVM heap），回傳路徑；已存在且同大小則跳過。 */
@@ -550,9 +709,9 @@ class PageTranslator(private val context: Context) {
 data class PageMaterials(
     /** 當初 reader 用的去字方法字串（[TranslationPreferences.inpaintMethod] 原始值），重繪比對用。 */
     val method: String,
-    /** 二值化 seg 遮罩的 base64(NO_WRAP) PNG。 */
-    val mask: String,
     val regions: List<RegionMaterial>,
+    /** 舊格式：二值化 seg 遮罩內嵌 base64(NO_WRAP) PNG。新格式遮罩改存獨立檔 `<base>.mask.png`、此欄留空（相容讀舊素材）。 */
+    val mask: String = "",
 )
 
 /** 一個文字區的重繪素材。 */

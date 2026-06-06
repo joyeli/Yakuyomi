@@ -44,10 +44,7 @@ object SettingsDownloadScreen : SearchableSettings {
                 preference = downloadPreferences.downloadOnlyOverWifi,
                 title = stringResource(MR.strings.connected_to_wifi),
             ),
-            Preference.PreferenceItem.SwitchPreference(
-                preference = downloadPreferences.saveChaptersAsCBZ,
-                title = stringResource(MR.strings.save_chapter_as_cbz),
-            ),
+            // Yakuyomi：移除「存成 CBZ」開關——永遠用鬆散資料夾（重繪素材 .yakuyomi/ 要直接落地）。
             Preference.PreferenceItem.SwitchPreference(
                 preference = downloadPreferences.splitTallImages,
                 title = stringResource(MR.strings.split_tall_images),

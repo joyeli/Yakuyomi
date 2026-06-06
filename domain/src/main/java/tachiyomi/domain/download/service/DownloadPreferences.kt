@@ -12,7 +12,8 @@ class DownloadPreferences(
         true,
     )
 
-    val saveChaptersAsCBZ: Preference<Boolean> = preferenceStore.getBoolean("save_chapter_as_cbz", true)
+    // Yakuyomi：永遠用鬆散資料夾（翻譯重繪素材 .yakuyomi/ 要直接落地、CBZ 取不到）→ 預設關、設定頁開關已移除。
+    val saveChaptersAsCBZ: Preference<Boolean> = preferenceStore.getBoolean("save_chapter_as_cbz", false)
 
     val splitTallImages: Preference<Boolean> = preferenceStore.getBoolean("split_tall_images", true)
 

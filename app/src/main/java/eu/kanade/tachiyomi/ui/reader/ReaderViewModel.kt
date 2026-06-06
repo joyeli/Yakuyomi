@@ -22,6 +22,7 @@ import eu.kanade.tachiyomi.data.download.model.Download
 import eu.kanade.tachiyomi.data.saver.Image
 import eu.kanade.tachiyomi.data.saver.ImageSaver
 import eu.kanade.tachiyomi.data.saver.Location
+import eu.kanade.tachiyomi.data.translation.PageTranslator
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.ui.reader.loader.ChapterLoader
@@ -108,6 +109,12 @@ class ReaderViewModel @JvmOverloads constructor(
 
     private val eventChannel = Channel<Event>()
     val eventFlow = eventChannel.receiveAsFlow()
+
+    /**
+     * 重繪用的翻譯引擎入口（換去字法重繪當頁）。lazy：只有 reader 內按重繪才會建、不拖開啟 reader 的速度。
+     * 取 app context（同本檔其他 Injekt.get<Application>() 用法）。sourceManager/downloadProvider 已建構子注入。
+     */
+    private val pageTranslator by lazy { PageTranslator(Injekt.get<Application>()) }
 
     /**
      * The manga loaded in the reader. It can be null when instantiated for a short time.
@@ -779,6 +786,11 @@ class ReaderViewModel @JvmOverloads constructor(
         mutableState.update { it.copy(dialog = Dialog.PageActions(page)) }
     }
 
+    /** 開「重繪當頁」去字法選擇對話框（由頁動作對話框的「重繪」鈕觸發、帶著該頁）。 */
+    fun openReRenderDialog(page: ReaderPage) {
+        mutableState.update { it.copy(dialog = Dialog.ReRenderMethod(page)) }
+    }
+
     fun openSettingsDialog() {
         mutableState.update { it.copy(dialog = Dialog.Settings) }
     }
@@ -894,6 +906,78 @@ class ReaderViewModel @JvmOverloads constructor(
         }
     }
 
+    /**
+     * 換 [method] 去字法重繪「當頁」（待重繪頁取自 [Dialog.ReRenderMethod]）：復用該章 `.yakuyomi/` 素材
+     * （原圖 + 遮罩 + 文字區），不重跑偵測/OCR/翻譯、無網路、只載 lama 一顆。重繪會就地覆蓋頁圖。
+     *
+     * 流程：
+     * 1. 先關對話框 → 立刻把該頁狀態設成 [Page.State.Queue]（holder 顯示 per-page 轉圈圈當「重繪中」指示）
+     *    + 送 [Event.ReRenderStarted]（toast「重繪中…」）。
+     * 2. [launchIO] 背景重繪（reader 保持可動；IO 約 2–8s，期間 Queue 必被 collect 到）。
+     * 3. **不論成功或失敗都** 回 UI thread 呼叫 [PageLoader.retryPage]（[DownloadPageLoader] 會驅動 `→ Ready`）
+     *    → holder `collectLatest { Ready -> setImage() }` 重 decode：成功＝讀到覆蓋後新圖、失敗＝讀回原圖
+     *    （未被改動），兩者都會把轉圈圈換回可看的圖、不會卡在 spinner（§11 不變式：絕不留比原圖更糟的狀態）。
+     * 4. 送 [Event.ReRenderResult] 給 UI 提示成敗。
+     *
+     * 全程 try/catch、絕不讓 reader crash。只對已下載章（[DownloadPageLoader]、頁圖在磁碟）有意義；
+     * 線上/封存頁無素材 → reRenderPage 回 false → 走「重新顯示原圖 + 提示失敗」路徑。
+     */
+    fun reRenderPage(method: String) {
+        val page = (state.value.dialog as? Dialog.ReRenderMethod)?.page ?: return
+        closeDialog()
+        val manga = manga ?: return
+        val chapter = page.chapter
+
+        viewModelScope.launchIO {
+            // 收尾：回 UI thread 刷新該頁（retryPage → Ready → holder 重 decode，把 spinner 換回圖）並回報成敗。
+            // 成功＝顯示新圖；失敗/無素材＝重新 decode 原圖（未動），避免頁面卡在「重繪中」轉圈圈。
+            suspend fun finish(ok: Boolean) {
+                withUIContext { page.chapter.pageLoader?.retryPage(page) }
+                eventChannel.send(Event.ReRenderResult(ok))
+            }
+
+            // 先讓頁面進入載入態（顯示轉圈圈），並提示「重繪中…」。
+            withUIContext { page.status = Page.State.Queue }
+            eventChannel.send(Event.ReRenderStarted)
+
+            try {
+                val source = sourceManager.getOrStub(manga.source)
+                val chapterDir = downloadProvider.findChapterDir(
+                    chapter.chapter.name,
+                    chapter.chapter.scanlator,
+                    chapter.chapter.url,
+                    manga.title,
+                    source,
+                )
+                if (chapterDir == null) {
+                    finish(false)
+                    return@launchIO
+                }
+                // page.index → 檔名：以與下載頁列表相同的排序（DownloadManager.buildPageList 的 sortedBy{name}）
+                // 取第 index 個圖檔；對不上（資料夾被外部改動）→ 放棄、重新顯示原圖。
+                val imageExt = setOf("jpg", "jpeg", "png", "webp")
+                val sortedImages = chapterDir.listFiles()
+                    ?.filter { f ->
+                        f.isFile && (f.name?.substringAfterLast('.', "")?.lowercase() ?: "") in imageExt
+                    }
+                    ?.sortedBy { it.name.orEmpty() }
+                    .orEmpty()
+                val pageFileName = sortedImages.getOrNull(page.index)?.name
+                if (pageFileName == null) {
+                    finish(false)
+                    return@launchIO
+                }
+
+                val ok = pageTranslator.reRenderPage(chapterDir, pageFileName, method)
+                finish(ok)
+            } catch (e: Throwable) {
+                if (e is CancellationException) throw e
+                logcat(LogPriority.ERROR, e) { "重繪當頁失敗" }
+                finish(false)
+            }
+        }
+    }
+
     enum class SetAsCoverResult {
         Success,
         AddToLibraryFirst,
@@ -973,6 +1057,9 @@ class ReaderViewModel @JvmOverloads constructor(
         data object ReadingModeSelect : Dialog
         data object OrientationModeSelect : Dialog
         data class PageActions(val page: ReaderPage) : Dialog
+
+        /** 重繪當頁去字法選擇對話框（帶著要重繪的頁）。 */
+        data class ReRenderMethod(val page: ReaderPage) : Dialog
     }
 
     sealed interface Event {
@@ -984,5 +1071,11 @@ class ReaderViewModel @JvmOverloads constructor(
         data class SavedImage(val result: SaveImageResult) : Event
         data class ShareImage(val uri: Uri, val page: ReaderPage) : Event
         data class CopyImage(val uri: Uri) : Event
+
+        /** 開始重繪當頁（IO 約需數秒）：給 UI 提示「重繪中…」；頁面同時會顯示 per-page 轉圈圈。 */
+        data object ReRenderStarted : Event
+
+        /** 重繪當頁結果（true＝成功覆蓋並刷新／false＝無素材或失敗），給 UI 提示。 */
+        data class ReRenderResult(val success: Boolean) : Event
     }
 }
