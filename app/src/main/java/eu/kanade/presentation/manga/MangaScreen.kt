@@ -791,7 +791,7 @@ private fun SharedMangaBottomActionMenu(
 }
 
 /**
- * 重繪去字法選擇對話框：3 階梯（BoxFill / Auto-整頁 / Auto-逐格）。
+ * 重繪去字法選擇對話框：3 階梯（BoxFill / Auto-整頁 / Auto-逐格）＋「原圖」（還原未翻）。
  * 選項對映 [eu.kanade.tachiyomi.data.translation.PageTranslator.reRenderChapter] 吃的去字法原始字串。
  */
 @Composable
@@ -799,11 +799,12 @@ private fun ReRenderMethodDialog(
     onDismissRequest: () -> Unit,
     onSelect: (String) -> Unit,
 ) {
-    // 顯示名 → 去字法字串（與設定頁/引擎 when 映射一致）
+    // 顯示名 → 去字法字串（與設定頁/引擎 when 映射一致）；「原圖」＝用素材還原未翻原圖（不去字、不載 lama）。
     val options = listOf(
         "BoxFill" to "boxfill",
         "Auto-整頁" to "auto_whole",
         "Auto-逐格" to "auto_tile",
+        "原圖（還原未翻）" to "original",
     )
     AlertDialog(
         onDismissRequest = onDismissRequest,

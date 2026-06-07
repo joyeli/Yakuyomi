@@ -11,6 +11,22 @@ class TranslationPreferences(preferenceStore: PreferenceStore) {
     /** 下載完成後自動翻譯該章（連同 isReady 的模型/key 檢查）。 */
     val translationEnabled = preferenceStore.getBoolean("translation_enabled", false)
 
+    /**
+     * 即時翻譯（reader 邊讀邊翻）：開啟後，開「已下載但未翻」的章時，逐頁用快速 boxfill 去字即時翻（預設關）。
+     * 與 [translationEnabled]（下載後整章離線翻）獨立：即時翻是讀到才翻、不落地（本里程碑），整章翻是預先翻好覆蓋原檔。
+     * reader 設定面板可切；切換後現有章會重新透過 ChapterLoader 套用/取消這層包裝。
+     */
+    val liveTranslate = preferenceStore.getBoolean("translation_live", false)
+
+    /**
+     * 即時翻譯的「包含」分類（書庫分類 id 字串集合）：非空＝只對屬於這些分類的書即時翻；空＝不限包含。
+     * 與 [liveTranslateCategoriesExclude] 一起構成 tri-state 過濾（鏡射 DownloadPreferences.downloadNewChapterCategories）。
+     */
+    val liveTranslateCategories = preferenceStore.getStringSet("translation_live_categories", emptySet())
+
+    /** 即時翻譯的「排除」分類：屬於這些分類的書一律不即時翻（優先於包含）。 */
+    val liveTranslateCategoriesExclude = preferenceStore.getStringSet("translation_live_categories_exclude", emptySet())
+
     /** 翻譯 LLM 的 API key（BYOK，OpenAI 相容，預設 DeepSeek）。 */
     val apiKey = preferenceStore.getString("translation_api_key", "")
 

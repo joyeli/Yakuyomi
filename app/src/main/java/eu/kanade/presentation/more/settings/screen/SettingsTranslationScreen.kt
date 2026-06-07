@@ -2,12 +2,21 @@ package eu.kanade.presentation.more.settings.screen
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.util.fastMap
+import eu.kanade.presentation.category.visualName
 import eu.kanade.presentation.more.settings.Preference
+import eu.kanade.presentation.more.settings.widget.TriStateListDialog
 import kotlinx.collections.immutable.persistentMapOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.collections.immutable.toImmutableMap
+import tachiyomi.domain.category.interactor.GetCategories
+import tachiyomi.domain.download.service.DownloadPreferences
 import tachiyomi.domain.translation.service.TranslationPreferences
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
@@ -27,8 +36,33 @@ object SettingsTranslationScreen : SearchableSettings {
     @Composable
     override fun getPreferences(): List<Preference> {
         val prefs = remember { Injekt.get<TranslationPreferences>() }
+        // 「閱讀後刪除」綁下載偏好同一個 pref → 與下載設定頁連動（任一邊改都同步）。
+        val downloadPrefs = remember { Injekt.get<DownloadPreferences>() }
         val showAdvanced by prefs.showAdvanced.collectAsState()
         val cores = remember { Runtime.getRuntime().availableProcessors() }
+
+        // 即時翻譯分類過濾（包含/排除，鏡射下載「新章分類」）：取所有書庫分類 + tri-state 對話框狀態。
+        val getCategories = remember { Injekt.get<GetCategories>() }
+        val allCategories by getCategories.subscribe().collectAsState(initial = emptyList())
+        val liveIncluded by prefs.liveTranslateCategories.collectAsState()
+        val liveExcluded by prefs.liveTranslateCategoriesExclude.collectAsState()
+        var showLiveCategoryDialog by rememberSaveable { mutableStateOf(false) }
+        if (showLiveCategoryDialog) {
+            TriStateListDialog(
+                title = "即時翻譯分類",
+                message = "選了「包含」分類＝只翻這些分類的書；選「排除」＝這些分類的書不翻；都不選＝全部",
+                items = allCategories,
+                initialChecked = liveIncluded.mapNotNull { id -> allCategories.find { it.id.toString() == id } },
+                initialInversed = liveExcluded.mapNotNull { id -> allCategories.find { it.id.toString() == id } },
+                itemLabel = { it.visualName },
+                onDismissRequest = { showLiveCategoryDialog = false },
+                onValueChanged = { newIncluded, newExcluded ->
+                    prefs.liveTranslateCategories.set(newIncluded.fastMap { it.id.toString() }.toSet())
+                    prefs.liveTranslateCategoriesExclude.set(newExcluded.fastMap { it.id.toString() }.toSet())
+                    showLiveCategoryDialog = false
+                },
+            )
+        }
         // 裝置感知緒數選項：自動 + {2,4,6,8 ≤ 核數}（超過核數的隱藏）
         val threadEntries = remember(cores) {
             buildMap {
@@ -75,6 +109,35 @@ object SettingsTranslationScreen : SearchableSettings {
                         preference = prefs.translationEnabled,
                         title = "下載時翻譯章節",
                         subtitle = "偵測 / OCR / 去字在裝置上跑；翻譯走雲端 LLM",
+                    ),
+                    Preference.PreferenceItem.SwitchPreference(
+                        preference = prefs.liveTranslate,
+                        title = "即時翻譯（邊讀邊翻）",
+                        subtitle = "開啟後，讀未翻章節時逐頁用快速 boxfill 即時翻並置換頁面；需 API key + 模型，與「下載時翻譯章節」獨立",
+                    ),
+                    Preference.PreferenceItem.TextPreference(
+                        title = "即時翻譯分類",
+                        subtitle = getCategoriesLabel(
+                            allCategories = allCategories,
+                            included = liveIncluded,
+                            excluded = liveExcluded,
+                        ),
+                        onClick = { showLiveCategoryDialog = true },
+                    ),
+                    // 閱讀後刪除：綁下載偏好同一 pref（removeAfterReadSlots）→ 與下載設定頁完全連動。
+                    // 即時翻譯讓「讀＝下載＋翻」會累積章節，這裡可就地設定讀完自動清。
+                    Preference.PreferenceItem.ListPreference(
+                        preference = downloadPrefs.removeAfterReadSlots,
+                        entries = persistentMapOf(
+                            -1 to stringResource(MR.strings.disabled),
+                            0 to stringResource(MR.strings.last_read_chapter),
+                            1 to stringResource(MR.strings.second_to_last),
+                            2 to stringResource(MR.strings.third_to_last),
+                            3 to stringResource(MR.strings.fourth_to_last),
+                            4 to stringResource(MR.strings.fifth_to_last),
+                        ),
+                        title = stringResource(MR.strings.pref_remove_after_read),
+                        subtitle = "%s（與下載設定連動）",
                     ),
                     Preference.PreferenceItem.EditTextPreference(
                         preference = prefs.apiKey,

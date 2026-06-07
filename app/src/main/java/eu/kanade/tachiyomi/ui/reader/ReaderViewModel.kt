@@ -27,6 +27,7 @@ import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.ui.reader.loader.ChapterLoader
 import eu.kanade.tachiyomi.ui.reader.loader.DownloadPageLoader
+import eu.kanade.tachiyomi.ui.reader.loader.TranslatingPageLoader
 import eu.kanade.tachiyomi.ui.reader.model.InsertPage
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
@@ -74,6 +75,7 @@ import tachiyomi.domain.library.service.LibraryPreferences
 import tachiyomi.domain.manga.interactor.GetManga
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.source.service.SourceManager
+import tachiyomi.domain.translation.service.TranslationPreferences
 import tachiyomi.source.local.isLocal
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -115,6 +117,9 @@ class ReaderViewModel @JvmOverloads constructor(
      * 取 app context（同本檔其他 Injekt.get<Application>() 用法）。sourceManager/downloadProvider 已建構子注入。
      */
     private val pageTranslator by lazy { PageTranslator(Injekt.get<Application>()) }
+
+    /** 翻譯偏好（即時翻譯開關 [TranslationPreferences.liveTranslate] 由設定面板切，切換後重載章節套用包裝）。 */
+    private val translationPreferences: TranslationPreferences = Injekt.get()
 
     /**
      * The manga loaded in the reader. It can be null when instantiated for a short time.
@@ -339,6 +344,21 @@ class ReaderViewModel @JvmOverloads constructor(
                     bookmarked = newChapters.currChapter.chapter.bookmark,
                 )
             }
+        }
+
+        // TODO(live): 暫時診斷，確認穩定後移除。即時翻譯開著卻沒生效時，使用者看不出原因（key/模型/分類/已翻/未下載都可能）。
+        // 章載完當下回報：currChapter 的 pageLoader 是不是 TranslatingPageLoader（＝即時翻真的套上了）。
+        if (translationPreferences.liveTranslate.get()) {
+            val active = chapter.pageLoader is TranslatingPageLoader
+            eventChannel.trySend(
+                Event.LiveTranslateStatus(
+                    if (active) {
+                        "即時翻譯：已啟動"
+                    } else {
+                        "即時翻譯：未啟動（確認 API key／模型／分類，或此章已翻／未下載）"
+                    },
+                ),
+            )
         }
         return newChapters
     }
@@ -1077,5 +1097,8 @@ class ReaderViewModel @JvmOverloads constructor(
 
         /** 重繪當頁結果（true＝成功覆蓋並刷新／false＝無素材或失敗），給 UI 提示。 */
         data class ReRenderResult(val success: Boolean) : Event
+
+        /** TODO(live): 暫時診斷，確認穩定後移除。即時翻譯開著時、章載完回報是否真的套上 TranslatingPageLoader（給 UI toast）。 */
+        data class LiveTranslateStatus(val message: String) : Event
     }
 }

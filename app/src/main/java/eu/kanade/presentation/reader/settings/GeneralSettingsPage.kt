@@ -46,6 +46,7 @@ internal fun ColumnScope.GeneralPage(screenModel: ReaderSettingsScreenModel) {
     val flashColorPref = screenModel.preferences.flashColor
     val flashColor by flashColorPref.collectAsState()
 
+    // 即時翻譯開關已移到 App 設定 →「翻譯」（與「下載時翻譯章節」放一起、加分類過濾）；reader 面板不再放。
     SettingsChipRow(MR.strings.pref_reader_theme) {
         themes.map { (labelRes, value) ->
             FilterChip(

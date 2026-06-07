@@ -70,6 +70,7 @@ import eu.kanade.tachiyomi.ui.reader.ReaderViewModel.SetAsCoverResult.AddToLibra
 import eu.kanade.tachiyomi.ui.reader.ReaderViewModel.SetAsCoverResult.Error
 import eu.kanade.tachiyomi.ui.reader.ReaderViewModel.SetAsCoverResult.Success
 import eu.kanade.tachiyomi.ui.reader.loader.DownloadPageLoader
+import eu.kanade.tachiyomi.ui.reader.loader.TranslatingPageLoader
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.model.ViewerChapters
@@ -251,6 +252,10 @@ class ReaderActivity : BaseActivity() {
                         // 重繪結果提示：成功＝頁已重繪（holder 已自動刷新）；失敗＝無素材或出錯（原圖保留不動）。
                         toast(if (event.success) "已重繪此頁" else "重繪失敗（無素材或出錯）")
                     }
+                    is ReaderViewModel.Event.LiveTranslateStatus -> {
+                        // TODO(live): 暫時診斷，確認穩定後移除。即時翻譯開著時、章載完 toast 是否真的套上 TranslatingPageLoader。
+                        toast(event.message)
+                    }
                 }
             }
             .launchIn(lifecycleScope)
@@ -337,10 +342,13 @@ class ReaderActivity : BaseActivity() {
                     onSetAsCover = viewModel::setAsCover,
                     onShare = viewModel::shareImage,
                     onSave = viewModel::saveImage,
-                    // 只有已下載章（DownloadPageLoader、頁圖在磁碟、可能留有重繪素材）才顯示「重繪」鈕；
-                    // 線上/封存頁無素材，不給此選項。按下→VM 彈去字法選擇對話框、帶著這頁。
+                    // 只有已下載章（頁圖在磁碟、可能留有重繪素材）才顯示「重繪」鈕；線上/封存頁無素材，不給此選項。
+                    // DownloadPageLoader＝已整章翻好直接服務譯圖；TranslatingPageLoader＝即時翻（同樣落盤、逐頁存素材）→ 兩者都允許重繪。
                     onReRender = { viewModel.openReRenderDialog(page) }
-                        .takeIf { page.chapter.pageLoader is DownloadPageLoader },
+                        .takeIf {
+                            page.chapter.pageLoader is DownloadPageLoader ||
+                                page.chapter.pageLoader is TranslatingPageLoader
+                        },
                 )
             }
             is ReaderViewModel.Dialog.ReRenderMethod -> {

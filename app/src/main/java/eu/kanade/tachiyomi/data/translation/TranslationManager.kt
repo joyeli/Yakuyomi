@@ -21,6 +21,7 @@ import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.source.service.SourceManager
+import tachiyomi.domain.translation.service.TranslationPreferences
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.io.File
@@ -47,6 +48,7 @@ class TranslationManager(private val context: Context) {
     private val downloadProvider: DownloadProvider = Injekt.get()
     private val sourceManager: SourceManager = Injekt.get()
     private val translationCache: TranslationCache = Injekt.get()
+    private val translationPreferences: TranslationPreferences = Injekt.get()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val drainMutex = Mutex()
 
@@ -59,6 +61,11 @@ class TranslationManager(private val context: Context) {
      *
      * [reRenderMethod]：null＝一般翻譯（偵測/OCR/翻譯/去字全跑）；非 null＝重繪
      * （復用素材、只換這個去字法字串重做去字+排版，不跑 OCR/翻譯，見 [PageTranslator.reRenderChapter]）。
+     *
+     * [method]：一般翻譯項的去字方法原始字串（boxfill / auto_whole / auto_tile），於 [translate] 排入當下
+     * 從 [TranslationPreferences.inpaintMethod] 擷取（讓佇列裡每章各帶當下偏好、之後改全域偏好不影響已排隊的章）。
+     * QUEUE 狀態可由 [setItemMethod] 改、傳給 [PageTranslator.translateChapter]。重繪項用 [reRenderMethod]、此欄不用。
+     * 「生效去字法」＝`reRenderMethod ?: method`。
      */
     private class Entry(
         val manga: Manga,
@@ -67,7 +74,11 @@ class TranslationManager(private val context: Context) {
         var done: Int = 0,
         var total: Int = 0,
         val reRenderMethod: String? = null,
-    )
+        var method: String = "",
+    ) {
+        /** 生效去字法：重繪項＝[reRenderMethod]，翻譯項＝[method]。 */
+        val effectiveMethod: String get() = reRenderMethod ?: method
+    }
 
     private val lock = Any()
     private val entries = mutableListOf<Entry>()
@@ -88,16 +99,51 @@ class TranslationManager(private val context: Context) {
 
     private fun publish() {
         _queueState.value = synchronized(lock) {
-            entries.map { TranslationItem(it.manga, it.chapter, it.status, it.done, it.total) }
+            entries.map {
+                TranslationItem(it.manga, it.chapter, it.status, it.done, it.total, it.effectiveMethod)
+            }
         }
     }
 
-    /** 排入翻譯（已下載章）。已在佇列裡的章 id 不重排。 */
-    fun translate(manga: Manga, chapters: List<Chapter>) {
+    /**
+     * 排入翻譯（已下載章）。已在佇列裡的章 id 不重排。
+     *
+     * 每個新項擷取**當下**的去字方法（[TranslationPreferences.inpaintMethod]）存進 [Entry.method]——
+     * 之後改全域偏好不影響已排隊的章；QUEUE 項可再經 [setItemMethod] 改。
+     *
+     * @param atFront true＝插隊到佇列最前（正在讀的章即時翻時用，見 [eu.kanade.tachiyomi.ui.reader.loader.TranslatingPageLoader]）：
+     *   新章排到既有排隊項之前；若該章已在佇列（且尚未開始翻）則**移到最前**而非加重複項。
+     *   **注意**：只重排 QUEUE 項——正在翻（TRANSLATING）的那章不會被中途搶占（會翻完當前章才換下一章），此為已知限制。
+     */
+    fun translate(manga: Manga, chapters: List<Chapter>, atFront: Boolean = false) {
         if (chapters.isEmpty()) return
+        val m = translationPreferences.inpaintMethod.get() // 排入當下擷取一次去字法，逐章帶走
         synchronized(lock) {
-            val present = entries.mapTo(HashSet()) { it.chapter.id }
-            chapters.forEach { if (it.id !in present) entries.add(Entry(manga, it)) }
+            if (atFront) {
+                // 插隊：依輸入順序，把每章放到佇列最前（已排隊則搬到最前、不加重複）。
+                // 逐章插到 index 0 會使整批反序，故先收集成 batch（保持輸入順序）再一次性插到最前。
+                val batch = mutableListOf<Entry>()
+                chapters.forEach { chapter ->
+                    val existing = entries.firstOrNull { it.chapter.id == chapter.id }
+                    when {
+                        // 已在翻的章不動（不中途搶占）；它的 method 已鎖、留原處翻完。
+                        existing?.status == TranslationItem.Status.TRANSLATING -> Unit
+                        // 已排隊（QUEUE/ERROR）→ 從原位移除、改放到 batch 最前（搬到佇列前段）。
+                        existing != null -> {
+                            entries.remove(existing)
+                            existing.method = m // 插隊＝使用者剛要讀，刷新成當下去字法
+                            existing.status = TranslationItem.Status.QUEUE // ERROR 重排也算重試
+                            batch.add(existing)
+                        }
+                        // 全新章 → 建項加進 batch。
+                        else -> batch.add(Entry(manga, chapter, method = m))
+                    }
+                }
+                entries.addAll(0, batch)
+            } else {
+                val present = entries.mapTo(HashSet()) { it.chapter.id }
+                chapters.forEach { if (it.id !in present) entries.add(Entry(manga, it, method = m)) }
+            }
         }
         publish()
         _isPaused.value = false // 明確要求翻譯 → 解除暫停、直接開跑（對照下載：排入即啟動）
@@ -123,6 +169,31 @@ class TranslationManager(private val context: Context) {
         _isPaused.value = false // 明確要求重繪 → 解除暫停、直接開跑
         ensureDrain()
         TranslationJob.start(context)
+    }
+
+    /**
+     * 改某章在佇列裡的去字方法（[method]＝boxfill / auto_whole / auto_tile）。
+     * **QUEUE 或 TRANSLATING 皆可改**（ERROR / 已離開佇列的不可改）。翻譯項改 [Entry.method]；
+     * 重繪項的方法在 [Entry.reRenderMethod]（val、不可改）→ 直接略過。
+     *
+     * 正在翻（TRANSLATING）改方法 → 設 [stopActive]（**不**設 _isPaused）：當前章停在下一頁邊界、回 QUEUE，
+     * drain 立刻重挑、`translateChapter` 以新 [Entry.method] 從 manifest **續傳**——已翻頁（manifest 已記）跳過、
+     * 保留舊去字結果；**剩餘頁用新去字**。例：4/14 改 → 1-4 維持舊法、5-14 用新法。（代價：續傳會重載引擎 ~450MB。）
+     */
+    fun setItemMethod(chapterId: Long, method: String) {
+        synchronized(lock) {
+            val entry = entries.firstOrNull {
+                it.chapter.id == chapterId &&
+                    (it.status == TranslationItem.Status.QUEUE || it.status == TranslationItem.Status.TRANSLATING)
+            } ?: return
+            if (entry.reRenderMethod != null) return // 重繪項方法不可改（reRenderMethod 為 val）
+            entry.method = method
+            // 正在翻 → 停在頁邊界回 QUEUE、立刻被重挑，以新方法續傳剩餘頁（見上）。
+            if (entry.status == TranslationItem.Status.TRANSLATING) {
+                stopActive = true
+            }
+        }
+        publish()
     }
 
     /** 取消指定章（含正在翻的那章：中止後移除）。 */
@@ -252,14 +323,15 @@ class TranslationManager(private val context: Context) {
                 }
             }
         } else if (dir.isDirectory) {
-            pageTranslator.translateChapter(dir, onProgress, shouldStop) // 鬆散：原地翻（合作式中止）
+            // entry.method＝排入當下擷取（可在排隊時經 setItemMethod 改）；傳給引擎用、不再讀全域 pref。
+            pageTranslator.translateChapter(dir, entry.method, onProgress, shouldStop) // 鬆散：原地翻（合作式中止）
             pageTranslator.isChapterTranslated(dir)
         } else {
             // CBZ 翻譯：保留舊 translateArchiveInPlace 的雙條件——
             //   換檔＝翻有進度 or manifest 已覆蓋（持久化部分成果、避免續傳重做）；
             //   成功＝manifest 全覆蓋（部分成功仍回 false → drain 標 ERROR 留佇列、下次補剩頁）。
             processArchiveInPlace(dir, onProgress, shouldStop) { tmpU ->
-                val n = pageTranslator.translateChapter(tmpU, onProgress, shouldStop)
+                val n = pageTranslator.translateChapter(tmpU, entry.method, onProgress, shouldStop)
                 val done = pageTranslator.isChapterTranslated(tmpU)
                 ProcessResult(swap = n > 0 || done, success = done)
             }

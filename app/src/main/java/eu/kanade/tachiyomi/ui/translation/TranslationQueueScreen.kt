@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.ui.translation
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -12,6 +13,9 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -23,6 +27,9 @@ import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -136,6 +143,7 @@ object TranslationQueueScreen : Screen() {
                         item = item,
                         onCancel = { screenModel.cancel(item.chapter.id) },
                         onRetry = { screenModel.retry(item.chapter.id) },
+                        onSetMethod = { method -> screenModel.setItemMethod(item.chapter.id, method) },
                     )
                 }
             }
@@ -148,6 +156,7 @@ private fun TranslationQueueRow(
     item: TranslationItem,
     onCancel: () -> Unit,
     onRetry: () -> Unit,
+    onSetMethod: (String) -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -170,6 +179,13 @@ private fun TranslationQueueRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
+        // 去字方法：QUEUE 或 TRANSLATING 皆可改（點 chip 開選單）；翻譯中改＝停在頁邊界、以新法續傳剩餘頁。ERROR 鎖定、顯示靜態標籤。
+        MethodChip(
+            method = item.method,
+            editable = item.status == TranslationItem.Status.QUEUE ||
+                item.status == TranslationItem.Status.TRANSLATING,
+            onSetMethod = onSetMethod,
+        )
         if (item.status == TranslationItem.Status.ERROR) {
             IconButton(onClick = onRetry) {
                 Icon(Icons.Outlined.Refresh, contentDescription = stringResource(MR.strings.action_retry))
@@ -182,6 +198,66 @@ private fun TranslationQueueRow(
         }
     }
 }
+
+/**
+ * 去字方法小標籤：
+ *  - [editable]（QUEUE 項）＝可點的 [AssistChip]，點開 [DropdownMenu] 列 3 選項（BoxFill / Auto-整頁 / Auto-逐格），
+ *    選後呼叫 [onSetMethod]（傳原始字串 boxfill / auto_whole / auto_tile）。
+ *  - 否則（TRANSLATING/ERROR）＝靜態文字（方法已鎖、不可改）。
+ *
+ * [method] 空字串（理論上不會發生：翻譯項都帶 method、重繪項帶 reRenderMethod）→ 不畫任何東西。
+ */
+@Composable
+private fun MethodChip(
+    method: String,
+    editable: Boolean,
+    onSetMethod: (String) -> Unit,
+) {
+    if (method.isBlank()) return
+    val label = methodLabel(method)
+    if (!editable) {
+        // 鎖定：純標籤（淡色），不可互動。
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(end = 4.dp),
+        )
+        return
+    }
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        AssistChip(
+            onClick = { expanded = true },
+            label = { Text(text = label, style = MaterialTheme.typography.labelSmall) },
+        )
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            METHOD_OPTIONS.forEach { (raw, friendly) ->
+                DropdownMenuItem(
+                    text = { Text(friendly) },
+                    onClick = {
+                        expanded = false
+                        if (raw != method) onSetMethod(raw)
+                    },
+                )
+            }
+        }
+    }
+}
+
+/** 去字方法原始字串 → 友善標籤（對齊 MangaScreen/ReaderPageActionsDialog 的 3 階梯命名）。 */
+private fun methodLabel(raw: String): String = when (raw) {
+    "boxfill" -> "BoxFill"
+    "auto_tile" -> "Auto-逐格"
+    else -> "Auto-整頁" // auto_whole（預設）；舊存的 lama_* 等也落這
+}
+
+/** 可選的去字方法（原始字串 to 友善標籤），順序＝3 階梯 BoxFill / Auto-整頁 / Auto-逐格。 */
+private val METHOD_OPTIONS = listOf(
+    "boxfill" to "BoxFill",
+    "auto_whole" to "Auto-整頁",
+    "auto_tile" to "Auto-逐格",
+)
 
 @Composable
 private fun statusLine(item: TranslationItem): String {
@@ -210,4 +286,7 @@ private class TranslationQueueScreenModel(
     fun clearQueue() = translationManager.clearQueue()
     fun pause() = translationManager.pause()
     fun resume() = translationManager.resume()
+
+    /** 改某章去字方法（QUEUE 或 TRANSLATING；委派 [TranslationManager.setItemMethod]，翻譯中改＝以新法續傳剩餘頁）。 */
+    fun setItemMethod(chapterId: Long, method: String) = translationManager.setItemMethod(chapterId, method)
 }

@@ -14,6 +14,12 @@ data class TranslationItem(
     val status: Status,
     val done: Int = 0,
     val total: Int = 0,
+    /**
+     * 此項生效的去字方法原始字串（boxfill / auto_whole / auto_tile）。
+     * 翻譯項＝排入當下擷取的全域偏好（可在排隊時被改）；重繪項＝重繪所選方法。
+     * UI 用來顯示每章去字法、QUEUE 項另可改（見 [eu.kanade.tachiyomi.data.translation.TranslationManager.setItemMethod]）。
+     */
+    val method: String = "",
 ) {
     enum class Status {
         QUEUE, // 排隊中

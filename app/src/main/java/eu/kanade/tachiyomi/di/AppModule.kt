@@ -17,6 +17,7 @@ import eu.kanade.tachiyomi.data.download.DownloadProvider
 import eu.kanade.tachiyomi.data.saver.ImageSaver
 import eu.kanade.tachiyomi.data.track.TrackerManager
 import eu.kanade.tachiyomi.data.translation.TranslationCache
+import eu.kanade.tachiyomi.data.translation.TranslationEngineService
 import eu.kanade.tachiyomi.data.translation.TranslationManager
 import eu.kanade.tachiyomi.extension.ExtensionManager
 import eu.kanade.tachiyomi.network.JavaScriptEngine
@@ -117,6 +118,8 @@ class AppModule(val app: Application) : InjektModule {
         addSingletonFactory { DownloadCache(app) }
         addSingletonFactory { TranslationManager(app) }
         addSingletonFactory { TranslationCache(app) }
+        // 即時翻譯常駐引擎（reader 邊讀邊翻；process singleton，跨頁/章復用 ~450MB 引擎）。
+        addSingletonFactory { TranslationEngineService(app) }
 
         addSingletonFactory { TrackerManager() }
         addSingletonFactory { DelayedTrackingStore(app) }

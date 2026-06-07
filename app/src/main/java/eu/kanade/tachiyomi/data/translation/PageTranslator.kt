@@ -6,19 +6,16 @@ import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.os.Build
 import android.util.Base64
-import androidx.core.net.toUri
 import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.BuildConfig
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import li.joye.yakuyomi.engine.DetectorConfig
-import li.joye.yakuyomi.engine.EngineConfig
 import li.joye.yakuyomi.engine.Inpainter
 import li.joye.yakuyomi.engine.InpainterConfig
-import li.joye.yakuyomi.engine.ModelSet
-import li.joye.yakuyomi.engine.OcrConfig
 import li.joye.yakuyomi.engine.PageAnalysis
 import li.joye.yakuyomi.engine.PageResult
 import li.joye.yakuyomi.engine.Pt
@@ -27,15 +24,12 @@ import li.joye.yakuyomi.engine.Renderer
 import li.joye.yakuyomi.engine.TextLine
 import li.joye.yakuyomi.engine.TextOrientation
 import li.joye.yakuyomi.engine.TextRegion
-import li.joye.yakuyomi.engine.TranslatorConfig
 import li.joye.yakuyomi.engine.Yakuyomi
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
-import tachiyomi.domain.storage.service.StoragePreferences
 import tachiyomi.domain.translation.service.TranslationPreferences
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
-import java.io.File
 
 /**
  * M4 步驟 3a/3b：在 mihon 內翻譯一個章節的頁圖（就地覆蓋）。
@@ -49,43 +43,45 @@ import java.io.File
  */
 class PageTranslator(private val context: Context) {
 
-    private val storagePreferences: StoragePreferences = Injekt.get()
     private val translationPreferences: TranslationPreferences = Injekt.get()
+
+    /**
+     * 保護 manifest 的「讀-改-寫」（[persistLivePage] 可能多頁併發落地）。
+     * [translateChapter] 是單消費者（drainMutex 序列化）故不經此鎖；即時逐頁翻才需要它（多個 loadPage 併發持久化同章）。
+     */
+    private val manifestMutex = Mutex()
 
     /** key：優先設定頁（BYOK）；空白時 fallback build-time key（冒煙測試）。 */
     private fun apiKey(): String =
         translationPreferences.apiKey.get().ifBlank { BuildConfig.DEEPSEEK_API_KEY }
 
-    /** mihon 儲存位置（base）底下的 `models/` 子資料夾，使用者把 3 顆 onnx 放這。 */
-    private fun modelsDir(): UniFile? {
-        val base = storagePreferences.baseStorageDirectory.get().takeIf { it.isNotBlank() } ?: return null
-        return UniFile.fromUri(context, base.toUri())?.findFile(MODELS_DIR)
-    }
+    /** mihon 儲存位置（base）底下的 `models/` 子資料夾，使用者把 3 顆 onnx 放這。委派共用 [TranslationEngineConfig]。 */
+    private fun modelsDir(): UniFile? = TranslationEngineConfig.modelsDir(context)
 
-    /** 翻譯開關開 + key 有設 + 模型 3 顆齊，才翻得了（給下載 hook 判斷）。 */
+    /** 翻譯開關開 + key 有設 + 模型 3 顆齊，才翻得了（給下載 hook 判斷）。模型檢查委派 [TranslationEngineConfig]。 */
     fun isReady(): Boolean {
         if (!translationPreferences.translationEnabled.get()) return false
         if (apiKey().isBlank()) return false
-        val m = modelsDir() ?: return false
-        return findOnnx(m, "detect", "comictext") != null &&
-            findOnnx(m, "ocr") != null &&
-            findOnnx(m, "lama") != null
+        return TranslationEngineConfig.hasAllModels(context)
     }
 
     /**
      * 翻譯 [chapterDir]（UniFile，相容本機/SAF）內所有頁圖、就地覆蓋成功的頁。
      * page-level resume（§11）：跳過 manifest 已記的頁、只補沒翻的；每頁成功就更新 manifest，
      * 中斷後重跑只補剩下的。回傳這次新翻成功的頁數。
+     *
+     * @param method 去字方法原始字串（boxfill / auto_whole / auto_tile）。由呼叫端（佇列 [TranslationManager]）
+     *   於排入當下從 [TranslationPreferences.inpaintMethod] 擷取後逐章傳入——讓佇列裡每章可各自帶不同去字法、
+     *   可在排隊時被改（見 [TranslationManager.setItemMethod]）。預設＝目前全域偏好，行為與舊版「讀全域 pref」一致。
      */
     suspend fun translateChapter(
         chapterDir: UniFile,
+        method: String = translationPreferences.inpaintMethod.get(),
         onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
         shouldStop: () -> Boolean = { false },
     ): Int {
-        val m = modelsDir() ?: return 0
-        val detU = findOnnx(m, "detect", "comictext") ?: return 0
-        val ocrU = findOnnx(m, "ocr") ?: return 0
-        val lamaU = findOnnx(m, "lama") ?: return 0
+        // 模型解析 + 字元表（缺任一顆模型回 null → 不翻）：委派共用 [TranslationEngineConfig]（與即時翻譯同一份）。
+        val bundle = TranslationEngineConfig.resolveModelSet(context) ?: return 0
         val images = chapterDir.listFiles()
             ?.filter { f -> f.isFile && (f.name?.substringAfterLast('.', "")?.lowercase() ?: "") in IMAGE_EXT }
             ?.sortedBy { it.name.orEmpty() }
@@ -101,88 +97,16 @@ class PageTranslator(private val context: Context) {
         }
 
         // 保留重繪素材開關（讀一次）：開時翻完每頁另存遮罩/文字區/原圖到 .yakuyomi/ 子夾，日後換去字法重繪。
-        val keepMaterials = translationPreferences.keepMaterials.get()
+        // 即時翻譯（liveTranslate）一律強制存素材——reader 端要靠 .yakuyomi/ 素材換去字法重繪（reRenderPage），
+        // 故即使使用者沒開 keepMaterials，只要即時翻開著就存（與舊 persistLivePage 的「強制存素材」語義一致）。
+        val keepMaterials = translationPreferences.keepMaterials.get() || translationPreferences.liveTranslate.get()
         // 去字方法原始字串（round-trip 用）：素材記成它，重繪時照 method 還原（不存 boxfill/auto 那層映射後值）。
-        val inpaintMethodRaw = translationPreferences.inpaintMethod.get()
+        // 由參數帶入（佇列逐章擷取的去字法、可在排隊時被改）——預設＝全域偏好，與舊版讀 pref 行為一致。
+        val inpaintMethodRaw = method
 
-        val alphabet = context.assets.open(ALPHABET).bufferedReader().use { it.readLines() }
-        val models = ModelSet(ensureLocal(detU), ensureLocal(ocrU), ensureLocal(lamaU))
-        // 語言對從設定頁讀（預設日→繁中）。改了目標語言就清掉引擎內建的日→繁中 few-shot，
-        // 免得範例語言（繁中）跟新目標衝突、把輸出帶偏。
-        val target = translationPreferences.targetLangName.get()
-        var translatorCfg = TranslatorConfig(
-            toLangName = target,
-            fromLangName = translationPreferences.sourceLangName.get(),
-        )
-        if (target != TranslationPreferences.DEFAULT_TARGET_LANG) {
-            translatorCfg = translatorCfg.copy(sampleSource = "", sampleTarget = "")
-        }
-
-        // 排版方向
-        val orient = when (translationPreferences.orientation.get()) {
-            "vertical" -> TextOrientation.VERTICAL
-            "horizontal" -> TextOrientation.HORIZONTAL
-            else -> TextOrientation.AUTO
-        }
-
-        // 去字方法（3 階梯，差別只在忙碌區怎麼處理；泡泡三者都平塗）：
-        //   boxfill＝全平塗(快·壓畫面塗色塊)／auto_whole＝泡泡平塗+整頁lama(平衡·預設)／auto_tile＝泡泡平塗+逐區lama(質佳·慢)
-        // 砍掉 lama_whole/lama_tile：那兩個會把乾淨白泡也送 lama→縮圖黃暈+變慢，純下風（auto 版對泡泡平塗永遠更乾淨）。
-        val (method, whole) = when (inpaintMethodRaw) {
-            "boxfill" -> "boxfill" to true
-            "auto_tile" -> "auto" to false
-            else -> "auto" to true // auto_whole（預設·平衡）；舊存的 lama_* 也落這、回退到平衡
-        }
-
-        // 緒數（裝置相依）
-        val cores = Runtime.getRuntime().availableProcessors()
-        // OCR 逐行並發度：auto=核數 / 2/4/6/8（concurrent 鎖 true）。真機 8.9s→4.8s。
-        val ocrConcurrency = when (val v = translationPreferences.ocrConcurrency.get()) {
-            "auto" -> cores
-            else -> (v.toIntOrNull() ?: cores).coerceIn(1, 32)
-        }
-        // 推論執行緒（偵測+去字 lama）：auto=大核數估算(cores-2，big.LITTLE 留 2 小核) / 2/4/6/8。真機 6 最快。
-        val intra = when (val v = translationPreferences.intraThreads.get()) {
-            "auto" -> (cores - 2).coerceAtLeast(2)
-            else -> (v.toIntOrNull() ?: 6).coerceIn(1, 32)
-        }
-
-        // 進階數值：存字串、此處 parse + clamp 到值域（超界夾回，不擋存）。
-        fun pf(s: String, lo: Float, hi: Float, d: Float) = s.toFloatOrNull()?.coerceIn(lo, hi) ?: d
-        fun pi(s: String, lo: Int, hi: Int, d: Int) = s.toIntOrNull()?.coerceIn(lo, hi) ?: d
-        val p = translationPreferences
-
-        val cfg = EngineConfig(
-            detector = DetectorConfig(
-                segThreshold = pf(p.segThreshold.get(), 0f, 1f, 0.12f),
-                intraThreads = intra,
-            ),
-            ocr = OcrConfig(
-                minProb = pf(p.minProb.get(), 0f, 1f, 0.5f),
-                concurrent = true,
-                concurrency = ocrConcurrency,
-            ),
-            translator = translatorCfg,
-            inpainter = InpainterConfig(
-                method = method,
-                wholeImage = whole,
-                autoStdThreshold = pf(p.autoStdThreshold.get(), 0f, 30f, 6f),
-                autoWhiteThreshold = pf(p.autoWhiteThreshold.get(), 0f, 255f, 190f),
-                bboxPad = pi(p.bboxPad.get(), 0, 64, 16),
-                intraThreads = intra,
-            ),
-            render = RenderConfig(
-                orientation = orient,
-                fontBorder = p.fontBorder.get(),
-                colorMode = if (p.colorMode.get() == "mono") "mono" else "auto",
-                artStrokeRatio = pf(p.artStrokeRatio.get(), 0f, 0.5f, 0.16f),
-                fontSizeMax = pi(p.fontSizeMax.get(), 20, 120, 60),
-                fontSizeMin = pi(p.fontSizeMin.get(), 6, 40, 9),
-                colTrim = pi(p.colTrim.get(), 0, 10, 3),
-                rowTrim = pi(p.rowTrim.get(), 0, 10, 3),
-                fontScale = pf(p.fontScale.get(), 0.3f, 1.5f, 0.85f),
-            ),
-        )
+        // 引擎設定（偵測/OCR/翻譯/去字/排版）：委派共用 [TranslationEngineConfig]（與即時翻譯同一份、避免飄移）。
+        // 離線整章翻＝照使用者選的去字方法（inpaintMethodRaw）；即時逐頁翻才固定 boxfill。
+        val cfg = TranslationEngineConfig.buildEngineConfig(translationPreferences, inpaintMethodRaw)
 
         val total = images.size
         var processed = total - pending.size // resume：已完成頁先計入進度
@@ -190,7 +114,7 @@ class PageTranslator(private val context: Context) {
         var translated = 0
         try {
             // 工廠取引擎、`use { }` 自動釋放三顆模型
-            Yakuyomi.create(models, alphabet, apiKey(), cfg).use { engine ->
+            Yakuyomi.create(bundle.models, bundle.alphabet, apiKey(), cfg).use { engine ->
                 for (img in pending) {
                     if (shouldStop()) break // 合作式中止：暫停/取消 → 停在頁邊界
                     val name = img.name ?: continue
@@ -227,6 +151,67 @@ class PageTranslator(private val context: Context) {
     }
 
     /**
+     * （目前未使用）即時翻譯舊路徑：loader 逐頁進引擎翻、靠本法逐頁落地。即時翻已改為「整章排入翻譯佇列、
+     * loader 只當顯示層」（[translateChapter] 已強制存素材），故 reader 不再呼叫本法。保留：無害、可供日後線上
+     * （未下載）即時翻或單頁路徑復用。
+     *
+     * 即時翻譯（reader 邊讀邊翻）逐頁落地：把單頁的譯圖**就地覆蓋**下載檔、並寫素材 + 記 manifest，
+     * 形狀與 [translateChapter] 逐頁所做的完全一致 → 重開章節走 page-level resume（manifest 命中跳過、不重翻）、
+     * 且素材齊備可不重跑 OCR/翻譯直接換去字法重繪（[reRenderPage]/[reRenderChapter]）。
+     *
+     * 與 [translateChapter] 的差異：
+     *  - **強制存素材**：即時翻不看 [TranslationPreferences.keepMaterials] 開關——重繪一定要素材，故 [analysis] 非 null 就存。
+     *  - **manifest 上鎖**：多個 [TranslatingPageLoader.loadPage] 可併發落地同章不同頁 → 讀-改-寫經 [manifestMutex] 序列化，避免互蓋掉彼此剛加的頁名。
+     *
+     * §11：呼叫端只在**翻譯成功**（[output] 來自 [PageResult.Translated]）時才呼叫本法 → [writeBack] 只覆蓋成功頁；
+     * 失敗/略過頁不進來、下載檔維持原圖。[saveMaterials] 另把原圖存成 `orig.webp`（重繪源），不動下載檔。
+     *
+     * @param chapterDir 章目錄（鬆散下載夾；即時翻本里程碑只走已下載章）。
+     * @param pageFile   這一頁的下載檔（會被 [translated] 覆蓋）。
+     * @param original   這頁的原圖（引擎輸入；引擎回的是新 bitmap、不會動到它）——存成重繪源。
+     * @param translated 譯後圖（覆蓋 [pageFile]）。
+     * @param analysis   重繪素材（遮罩 + 文字區）；非 null 才存素材（即時翻一律帶素材，見上）。
+     * @param methodRaw  去字法原始字串（即時翻＝boxfill），存進素材 json 供重繪 round-trip。
+     * @return 是否落地成功（覆蓋 + 記 manifest 成功）。best-effort：包 runCatching，失敗回 false（下載檔可能已被覆蓋，但這只代表「已翻」，不毀畫）。
+     */
+    suspend fun persistLivePage(
+        chapterDir: UniFile,
+        pageFile: UniFile,
+        original: Bitmap,
+        translated: Bitmap,
+        analysis: PageAnalysis?,
+        methodRaw: String,
+    ): Boolean {
+        val name = pageFile.name ?: return false
+        return runCatching {
+            // 1. 譯圖覆蓋下載檔（§11：呼叫端保證只有成功頁才進來）。
+            writeBack(pageFile, translated)
+            // 2. 強制存重繪素材（即時翻不看 keepMaterials 開關；重繪需要它）。saveMaterials 本身 best-effort + "wt" 截斷安全。
+            if (analysis != null) {
+                saveMaterials(chapterDir, name, original, analysis, methodRaw)
+            }
+            // 3. 加進 manifest（page-level resume 標記）。多頁併發 → manifestMutex 序列化讀-改-寫。
+            manifestMutex.withLock {
+                writeManifest(chapterDir, readDonePages(chapterDir) + name)
+            }
+            true
+        }.getOrElse { e ->
+            logcat(LogPriority.WARN, e) { "即時翻譯落地頁失敗 $name" }
+            false
+        }
+    }
+
+    /** 該頁是否已翻（manifest 命中）：即時翻 loader 用來判斷「直接服務已覆蓋的譯圖」還是「進引擎翻」。 */
+    fun isPageTranslated(chapterDir: UniFile, pageName: String): Boolean =
+        pageName in readDonePages(chapterDir)
+
+    /**
+     * 整章已翻頁名集合（manifest 快照）。即時翻 [eu.kanade.tachiyomi.ui.reader.loader.TranslatingPageLoader]
+     * 的佇列觀察者用：每次佇列變動讀一次，把「已落盤」的頁批次換上譯圖（一次讀檔、避免逐頁各讀一次 manifest）。
+     */
+    fun donePages(chapterDir: UniFile): Set<String> = readDonePages(chapterDir)
+
+    /**
      * 換去字法重繪整章（§ 不重跑偵測/OCR/翻譯）：對 [chapterDir] 內每頁「有保留素材」的頁，
      * 用 [newMethod]（[TranslationPreferences.inpaintMethod] 原始字串）重做**去字 + 排版**、就地覆蓋頁圖。
      *
@@ -243,10 +228,35 @@ class PageTranslator(private val context: Context) {
         onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
         shouldStop: () -> Boolean = { false },
     ): Int {
-        // 只需 lama（去字）；偵測/OCR/翻譯都不跑 → 不取那兩顆模型、不讀 alphabet/key。
+        // 原圖：還原整章 orig.webp，不需 lama → 早於 lama 載入處理。工作清單同去字路徑（有素材 json 的頁）。
+        if (newMethod == ORIGINAL_METHOD) {
+            val matDir = chapterDir.findFile(MATERIALS_DIR) ?: run {
+                onProgress(0, 0)
+                return 0
+            }
+            val workList = chapterDir.listFiles()
+                ?.filter { f -> f.isFile && (f.name?.substringAfterLast('.', "")?.lowercase() ?: "") in IMAGE_EXT }
+                ?.sortedBy { it.name.orEmpty() }
+                ?.filter { img ->
+                    val base = (img.name ?: return@filter false).substringBeforeLast('.')
+                    matDir.findFile("$base.json")?.isFile == true
+                }
+                ?: return 0
+            onProgress(0, workList.size)
+            var processed = 0
+            for (img in workList) {
+                if (shouldStop()) break
+                if (reRenderOnePage(matDir, img, newMethod, null, null)) {
+                    processed++
+                    onProgress(processed, workList.size)
+                }
+            }
+            return processed
+        }
+        // 只需 lama（去字）；偵測/OCR/翻譯都不跑 → 不取那兩顆模型、不讀 alphabet/key。模型解析委派共用 [TranslationEngineConfig]。
         val m = modelsDir() ?: return 0
-        val lamaU = findOnnx(m, "lama") ?: return 0
-        val lamaPath = ensureLocal(lamaU)
+        val lamaU = TranslationEngineConfig.findOnnx(m, "lama") ?: return 0
+        val lamaPath = TranslationEngineConfig.ensureLocal(context, lamaU)
 
         // 去字方法（與 translateChapter 同一 when 映射）：boxfill＝全平塗／auto_tile＝逐區 lama／其餘＝整頁 lama。
         val (method, whole) = when (newMethod) {
@@ -340,10 +350,22 @@ class PageTranslator(private val context: Context) {
         pageFileName: String,
         newMethod: String,
     ): Boolean {
-        // 只需 lama（去字）；偵測/OCR/翻譯都不跑（同 reRenderChapter）。
+        // 原圖：用素材的 orig.webp 還原該頁，不需 lama / 排版 → 早於 lama 載入處理（避免為還原白載 ~450MB）。
+        if (newMethod == ORIGINAL_METHOD) {
+            val img = chapterDir.listFiles()
+                ?.firstOrNull { f ->
+                    f.isFile &&
+                        (f.name?.substringAfterLast('.', "")?.lowercase() ?: "") in IMAGE_EXT &&
+                        f.name == pageFileName
+                }
+                ?: return false
+            val matDir = chapterDir.findFile(MATERIALS_DIR) ?: return false
+            return reRenderOnePage(matDir, img, newMethod, null, null)
+        }
+        // 只需 lama（去字）；偵測/OCR/翻譯都不跑（同 reRenderChapter）。模型解析委派共用 [TranslationEngineConfig]。
         val m = modelsDir() ?: return false
-        val lamaU = findOnnx(m, "lama") ?: return false
-        val lamaPath = ensureLocal(lamaU)
+        val lamaU = TranslationEngineConfig.findOnnx(m, "lama") ?: return false
+        val lamaPath = TranslationEngineConfig.ensureLocal(context, lamaU)
 
         // 去字方法映射（與 reRenderChapter/translateChapter 同一 when）。
         val (method, whole) = when (newMethod) {
@@ -419,8 +441,8 @@ class PageTranslator(private val context: Context) {
         matDir: UniFile,
         img: UniFile,
         newMethod: String,
-        inpainter: Inpainter,
-        renderCfg: RenderConfig,
+        inpainter: Inpainter?,
+        renderCfg: RenderConfig?,
     ): Boolean {
         val name = img.name ?: return false
         val base = name.substringBeforeLast('.')
@@ -431,6 +453,16 @@ class PageTranslator(private val context: Context) {
                     context.contentResolver.openInputStream(f.uri)?.use { BitmapFactory.decodeStream(it) }
                 }
                 ?: return false
+
+            // 原圖：用素材的 orig.webp 還原該頁（不去字/不排版）。記 method=original、保留 manifest（即時翻譯視為已處理、
+            // 不會又翻回去）；檔案＝原圖。inpainter/renderCfg 此路徑用不到（呼叫端對原圖傳 null、不載 lama）。
+            if (newMethod == ORIGINAL_METHOD) {
+                writeBack(img, original)
+                saveMaterialsMethod(matDir, base, materials, newMethod)
+                original.recycle()
+                return true
+            }
+
             val mask = loadMask(matDir, base, materials)
             if (mask == null) {
                 original.recycle()
@@ -438,8 +470,8 @@ class PageTranslator(private val context: Context) {
             }
 
             val regions = regionsFromMaterials(materials)
-            val cleaned = inpainter.inpaint(original, regions, mask) // 引擎內部 copy 輸入，不會 mutate original/mask
-            val finalPage = Renderer.render(cleaned, regions, renderCfg, null) // 引擎內部 copy cleaned
+            val cleaned = inpainter!!.inpaint(original, regions, mask) // 引擎內部 copy 輸入，不會 mutate original/mask
+            val finalPage = Renderer.render(cleaned, regions, renderCfg!!, null) // 引擎內部 copy cleaned
 
             writeBack(img, finalPage)
             // 更新 json 的 method（其餘素材不變），保持記錄與檔案一致。
@@ -669,27 +701,7 @@ class PageTranslator(private val context: Context) {
         return Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).apply { setPixels(px, 0, w, 0, 0, w, h) }
     }
 
-    /** SAF 模型串流複製到 filesDir（64KB、不佔 JVM heap），回傳路徑；已存在且同大小則跳過。 */
-    private fun ensureLocal(doc: UniFile): String {
-        val name = doc.name ?: "model.onnx"
-        val out = File(context.filesDir, name)
-        if (out.exists() && out.length() == doc.length()) return out.absolutePath
-        context.contentResolver.openInputStream(doc.uri)!!.use { input ->
-            out.outputStream().use { input.copyTo(it, 1 shl 16) }
-        }
-        return out.absolutePath
-    }
-
-    private fun findOnnx(dir: UniFile, vararg keywords: String): UniFile? =
-        dir.listFiles()?.firstOrNull { f ->
-            val n = f.name?.lowercase() ?: return@firstOrNull false
-            n.endsWith(".onnx") && keywords.any { n.contains(it) }
-        }
-
     companion object {
-        private const val MODELS_DIR = "models"
-        private const val ALPHABET = "models/alphabet-all-v5.txt"
-
         // 章內 manifest：已處理頁名（每行一個）＝page-level resume + 「已翻」標記。
         // 放章節內（隨 CBZ/資料夾走）：reader 依副檔名濾掉、也不會灌爆 mihon 的下載計數。
         private const val MARKER = ".yakuyomi_translated"
@@ -698,6 +710,9 @@ class PageTranslator(private val context: Context) {
         // 重繪素材子夾（章內）：放原圖 + 遮罩/文字區 json。reader 列頁只看頂層圖檔 → 忽略此子夾。
         private const val MATERIALS_DIR = ".yakuyomi"
         private val MATERIALS_JSON = Json { prettyPrint = false }
+
+        /** 重繪的「原圖」方法：用素材 orig.webp 還原該頁（不去字/不排版、不載 lama）。重繪對話框「原圖」選項對應此值。 */
+        const val ORIGINAL_METHOD = "original"
     }
 }
 

@@ -135,11 +135,12 @@ fun ReRenderMethodDialog(
     onDismissRequest: () -> Unit,
     onSelect: (String) -> Unit,
 ) {
-    // 顯示名 → 去字法字串（與設定頁/引擎 when 映射一致）
+    // 顯示名 → 去字法字串（與設定頁/引擎 when 映射一致）；「原圖」＝用素材還原未翻原圖（不去字、不載 lama）。
     val options = listOf(
         "BoxFill" to "boxfill",
         "Auto-整頁" to "auto_whole",
         "Auto-逐格" to "auto_tile",
+        "原圖（還原未翻）" to "original",
     )
     AlertDialog(
         onDismissRequest = onDismissRequest,
