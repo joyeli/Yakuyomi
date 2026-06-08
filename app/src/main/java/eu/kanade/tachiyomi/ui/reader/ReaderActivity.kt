@@ -308,6 +308,7 @@ class ReaderActivity : BaseActivity() {
                         translating = !progress.queued,
                         done = progress.done,
                         total = progress.total,
+                        loading = state.engineLoading,
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .statusBarsPadding()

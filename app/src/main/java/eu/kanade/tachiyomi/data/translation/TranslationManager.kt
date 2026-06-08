@@ -8,8 +8,11 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -126,6 +129,14 @@ class TranslationManager(private val context: Context) {
 
     /** 本 session 翻成功的章 id（給 UI 標「已翻」；跨重啟的持久標記另由 manifest 補）。 */
     val translatedIds: StateFlow<Set<Long>> = _translatedIds.asStateFlow()
+
+    /**
+     * 每翻好一頁就推一次（chapterId, pageName）。給即時翻 [eu.kanade.tachiyomi.ui.reader.loader.TranslatingPageLoader]
+     * **直接重畫該頁**，取代「觀察 conflated 的 [queueState] + 每次讀 manifest 檔」那條——後者會 conflate 丟中間值 +
+     * 檔案讀慢，導致某頁翻完當下沒被即時比中、要等之後某頁 emit 才順便補上（更新延遲）。SharedFlow 有緩衝、不丟事件。
+     */
+    private val _donePageEvents = MutableSharedFlow<Pair<Long, String>>(extraBufferCapacity = 128)
+    val donePageEvents: SharedFlow<Pair<Long, String>> = _donePageEvents.asSharedFlow()
 
     /** 翻譯開關開 + key 有設 + 模型 3 顆齊，才排得了（給下載 hook 判斷）。 */
     fun isReady(): Boolean = pageTranslator.isReady()
@@ -401,7 +412,9 @@ class TranslationManager(private val context: Context) {
             }
         } else if (dir.isDirectory) {
             // entry.method＝排入當下擷取（可在排隊時經 setItemMethod 改）；傳給引擎用、不再讀全域 pref。
-            pageTranslator.translateChapter(dir, entry.method, onProgress, shouldStop) // 鬆散：原地翻（合作式中止）
+            pageTranslator.translateChapter(dir, entry.method, onProgress, shouldStop) { name ->
+                _donePageEvents.tryEmit(entry.chapter.id to name) // 每翻好一頁就推給即時翻 loader 即時重畫該頁
+            }
             pageTranslator.isChapterTranslated(dir)
         } else {
             // CBZ 翻譯：保留舊 translateArchiveInPlace 的雙條件——

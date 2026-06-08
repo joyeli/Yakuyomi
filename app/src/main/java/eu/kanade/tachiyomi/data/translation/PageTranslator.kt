@@ -85,6 +85,7 @@ class PageTranslator(private val context: Context) {
         method: String = translationPreferences.inpaintMethod.get(),
         onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
         shouldStop: () -> Boolean = { false },
+        onPageDone: (pageName: String) -> Unit = {},
     ): Int {
         // 模型齊備才翻（缺任一顆 → 不翻）。引擎本身由 [engineService] 持有/建構（warm、跨章復用），這裡不再自建。
         if (!TranslationEngineConfig.hasAllModels(context)) return 0
@@ -115,6 +116,10 @@ class PageTranslator(private val context: Context) {
         var processed = total - pending.size // resume：已完成頁先計入進度
         onProgress(processed, total)
         var translated = 0
+        // 連續失敗計數（快速失敗用）：連續 [FAIL_FAST_FAILURES] 頁 Failed（疑似斷網）→ 提早中止整章，
+        // 不白跑剩餘頁的偵測/OCR/去字；未標記的頁留待重試（整章 isChapterTranslated=false → drain 標 ERROR 變紅）。
+        // 成功/略過會歸零，故偶發單頁失敗不會誤觸。
+        var consecutiveFailures = 0
         try {
             // 逐頁透過 warm [engineService] 翻（引擎跨章常駐、不每章重載 ~450MB）。
             // 服務內部以 Mutex 序列化引擎存取；drain 是單一消費者故呼叫天然序列。§11 三態處理與舊版完全一致。
@@ -133,18 +138,32 @@ class PageTranslator(private val context: Context) {
                         translated++
                         done.add(name)
                         writeManifest(chapterDir, done)
+                        // 推「這頁翻好了」事件 → 即時翻 loader 直接重畫該頁（不靠輪詢 manifest／queueState，
+                        // 後者是 conflated StateFlow + 慢的檔案讀 → 某頁常要等後面頁的 emit 才被順便比中、更新延遲）。
+                        onPageDone(name)
+                        consecutiveFailures = 0
                     }
                     is PageResult.Skipped -> {
                         logcat { "翻譯略過 $name：${r.reason}" }
                         done.add(name)
                         writeManifest(chapterDir, done) // 略過＝沒字可翻、算處理過、不重試
+                        consecutiveFailures = 0
                     }
-                    is PageResult.Failed ->
+                    is PageResult.Failed -> {
                         logcat(LogPriority.WARN) { "翻譯失敗 $name：${r.reason}" } // 不標記、下次重試（含引擎不可用）
+                        consecutiveFailures++
+                    }
                 }
                 bmp.recycle()
                 processed++
                 onProgress(processed, total)
+                // 快速失敗：連續多頁失敗（疑似網路中斷）→ 提早中止整章，盡快讓整章標 ERROR 可重試、不白跑剩餘頁。
+                if (consecutiveFailures >= FAIL_FAST_FAILURES) {
+                    logcat(LogPriority.WARN) {
+                        "連續 $consecutiveFailures 頁翻譯失敗（疑似網路中斷）→ 提早中止整章（未完成、可重試）"
+                    }
+                    break
+                }
             }
         } catch (e: Throwable) {
             logcat(LogPriority.ERROR, e) { "translateChapter 例外（保留原圖）" }
@@ -260,12 +279,6 @@ class PageTranslator(private val context: Context) {
     /** 該頁是否已翻（manifest 命中）：即時翻 loader 用來判斷「直接服務已覆蓋的譯圖」還是「進引擎翻」。 */
     fun isPageTranslated(chapterDir: UniFile, pageName: String): Boolean =
         pageName in readDonePages(chapterDir)
-
-    /**
-     * 整章已翻頁名集合（manifest 快照）。即時翻 [eu.kanade.tachiyomi.ui.reader.loader.TranslatingPageLoader]
-     * 的佇列觀察者用：每次佇列變動讀一次，把「已落盤」的頁批次換上譯圖（一次讀檔、避免逐頁各讀一次 manifest）。
-     */
-    fun donePages(chapterDir: UniFile): Set<String> = readDonePages(chapterDir)
 
     /**
      * 讀某章已存的去字法（任一頁素材 json 的 method）；無素材＝null（不可便宜重繪）。
@@ -783,6 +796,9 @@ class PageTranslator(private val context: Context) {
 
         /** 重繪的「原圖」方法：用素材 orig.webp 還原該頁（不去字/不排版、不載 lama）。重繪對話框「原圖」選項對應此值。 */
         const val ORIGINAL_METHOD = "original"
+
+        /** 快速失敗門檻：連續這麼多頁 Failed（疑似網路中斷）→ 提早中止整章翻譯，不白跑剩餘頁的偵測/OCR/去字。 */
+        private const val FAIL_FAST_FAILURES = 2
     }
 }
 

@@ -35,7 +35,7 @@ import uy.kohesive.injekt.api.get
  * 在背景用 [PageTranslator.translateChapter] 整章翻、就地覆蓋頁圖 + 存重繪素材 + 記 manifest。本 loader **不進引擎翻**
  * 任何頁，只負責：
  *  - 顯示下載原檔，直到某頁被佇列翻好（manifest 命中）才**換上**譯圖。
- *  - 觀察佇列狀態（[TranslationManager.queueState]），每次變動掃一次 manifest，把新翻好的頁批次換頁。
+ *  - 觀察每頁完成事件（[TranslationManager.donePageEvents]），收到本章某頁翻好就換上該頁譯圖。
  *
  * **只有「正在讀的章」會觸發**（修「讀第 N 話卻把預取的 N±1 話也自動下載/翻譯」的 bug）：
  *  - [loadPage] **不再**自動排入翻譯——它只登記頁 + 顯示（manifest 命中換譯圖、否則顯示下載原圖）。
@@ -173,29 +173,27 @@ internal class TranslatingPageLoader(
     }
 
     /**
-     * 佇列觀察者（單一 coroutine、跟著 [scope]）：每次 [TranslationManager.queueState] 變動 →
-     * 讀**一次** [PageTranslator.donePages]（manifest 快照）→ 把 [tracked] 裡「檔名已在 done-set」的頁 [swapToFile]
-     * 換上譯圖、再從 tracked 移除。佇列每翻好一頁就刷一批 → 頁面隨翻譯進度逐步換成譯圖。
+     * 啟動「每頁翻好就換譯圖」的觀察者（由 [onActivated] 啟動、只一次）。
      *
-     * 由 [onActivated] 啟動（已下載章 → [tracked] 裡的頁串流本就指向下載檔，佇列翻好覆蓋的就是它）。
+     * 用 [TranslationManager.donePageEvents]（SharedFlow：佇列每翻好一頁推一筆 (章 id, 頁名)，有緩衝、不 conflate）：
+     * 收到本章某頁完成 → 找 [tracked] 裡該頁 → [swapToFile]（呼叫 [ReaderPage.reload] 叫 holder 重 decode 譯圖）。
+     * 取代舊的「觀察 conflated 的 queueState + 每次讀 manifest 檔輪詢」——那會 conflate 丟中間值 + 讀檔慢，
+     * 導致某頁翻好卻要等「後面頁的 emit」才被順便比中、更新延遲（即此 bug）。
+     *
+     * 事件當下不在 [tracked] 的頁（holder 還沒綁）＝跳過；之後該頁 holder 綁定時 [handleDownloadedPage] 的即時
+     * manifest 檢查會補上（已翻→直接換）。故 push + 綁定即時檢查涵蓋所有情況。
      */
     private fun startQueueObserver() {
         scope.launch {
-            translationManager.queueState.collect {
-                val dir = chapterDir ?: return@collect
-                // 沒有頁在等（都換完了）就不必讀 manifest。
-                val pending = synchronized(tracked) { tracked.isNotEmpty() }
-                if (!pending) return@collect
-                val done = pageTranslator.donePages(dir) // 一次讀檔、給這批所有 tracked 頁共用
-                // 蒐集這輪命中的頁（在鎖內挑出 + 移除），鎖外再 swap（swapToFile 內有 delay、不宜持鎖）。
-                val ready = synchronized(tracked) {
-                    val hit = tracked.filter { (_, page) ->
-                        pageFiles.getOrNull(page.index)?.name?.let { it in done } == true
-                    }
-                    hit.keys.forEach { tracked.remove(it) }
-                    hit.values.toList()
+            translationManager.donePageEvents.collect { (chapterId, name) ->
+                if (chapterId != chapter.chapter.id) return@collect
+                if (chapterDir == null) return@collect
+                val page = synchronized(tracked) {
+                    val hit = tracked.entries.firstOrNull { (_, p) -> pageFiles.getOrNull(p.index)?.name == name }
+                    if (hit != null) tracked.remove(hit.key)
+                    hit?.value
                 }
-                ready.forEach { swapToFile(it) }
+                page?.let { swapToFile(it) }
             }
         }
     }
@@ -235,52 +233,49 @@ internal class TranslatingPageLoader(
             // 解析不到章目錄/該頁檔（CBZ 即時翻 / 外部改動）→ 原圖已在畫面、不插手（不換頁）。
             return
         }
-        // manifest 命中：下載檔已是譯圖 → [swapToFile] 一次 Queue→Ready 讓 holder decode 譯檔（不進引擎、不長轉圈）。
-        // 涵蓋：佇列已先翻好這頁、退出再進的 page-level resume、重繪後刷新。
-        if (pageTranslator.isPageTranslated(dir, pageFile.name.orEmpty())) {
-            swapToFile(page)
-            return
-        }
-        // 尚未翻好 → 登記等佇列翻（維持原圖可讀）；觀察者在該頁落盤後換頁。本 loader 絕不在此進引擎翻。
+        // **先登記、再查 manifest**（順序很重要，修「有時某頁沒換成譯圖」的競態）：
+        // 若先查(miss)再登記，佇列可能在「查完、還沒登記」的空檔把這頁翻好並 emit，觀察者那輪見 tracked 沒這頁就略過；
+        // 之後若沒有新 emission（尤其正在看的頁 / 章末頁），這頁就一直停在原圖。登記在先 → 之後任何 emission 都看得到它。
         synchronized(tracked) { tracked[page.index] = page }
+        // 登記後立即查一次：涵蓋「登記前就已翻好」（page-level resume / 重繪後 / 佇列搶先翻好）與「登記瞬間剛翻好」。
+        // 命中就原子地從 tracked 取出再換（與觀察者互斥、同頁不重複換）。
+        if (pageTranslator.isPageTranslated(dir, pageFile.name.orEmpty())) {
+            val hit = synchronized(tracked) { tracked.remove(page.index) }
+            if (hit != null) swapToFile(page)
+        }
     }
 
     /**
-     * 換上落盤後的譯圖：驅動一次 **[Page.State.Queue] →（`delay()` 後）[Page.State.Ready]** 真轉換，
-     * 觸發 holder 重 decode `page.stream`（重開檔案）讀到譯圖。
+     * 換上落盤後的譯圖：呼叫 [ReaderPage.reload]（單調遞增計數）→ 顯示本頁的 holder（pager/webtoon）的 reload 觀察者
+     * 重 decode `page.stream`（重開檔案）讀到就地覆蓋的譯圖。
      *
-     * 為何要先 Queue：holder 進來時頁已是 Ready（顯示舊圖位元組），[Page.State.Ready] 是 `data object` 單例，
-     * 直接再設 Ready 屬同值 → StateFlow 不重發 → holder 不重 decode、換不上。先 Queue 再（`delay()` 撐住真實時間
-     * 讓 holder collect 到後）Ready 才是真轉換。這一閃只發生在「真的換了檔」的頁、且只在換檔當下，故不擋讀。回收後不動。
+     * 為何不用 status `Ready→Queue→Ready`：[Page.State.Ready] 是單例、回到 Ready 屬同值 → StateFlow 同值不重發 →
+     * holder 不重 decode（尤其滑動中 Main 忙、collector 採樣不到中間那一下 Queue），正是「翻完某頁卡原文」的根因。
+     * reload 計數每次都是新值、**永不**被 conflate 成 no-op → 可靠。只影響「真的換了檔」的頁、回收後不動。
      */
-    private suspend fun swapToFile(page: ReaderPage) {
+    private fun swapToFile(page: ReaderPage) {
         if (isRecycled) return
-        page.status = Page.State.Queue
-        // 撐住 Queue 一小段真實時間，確保 holder collector（可能在別 dispatcher）接到這次 Queue：
-        // Ready→Queue→Ready 太快會被 StateFlow conflate（collector 只見 Ready＝原值、同值不重發→不重 decode→不刷新，
-        // 正是「翻完沒重新顯示、要退出重進」的根因）。yield() 跨 dispatcher 不夠；delay 是真實等待、任何 collector 都來得及。
-        delay(SWAP_QUEUE_HOLD_MS)
-        if (!isRecycled) page.status = Page.State.Ready
+        page.reload()
     }
 
     /**
      * 重試（錯誤重試鈕 / 重繪後刷新）：本 loader 不翻，只做顯示層的對應動作。
-     *  - 已翻（manifest 命中）→ 只重 decode（[swapToFile] 一次 Queue→Ready，同 [DownloadPageLoader.retryPage]）。
+     *  - 已翻（manifest 命中）→ 只重 decode（[swapToFile] 呼叫 [ReaderPage.reload] 叫 holder 重畫當前檔）。
      *    重繪後刷新靠這條：[eu.kanade.tachiyomi.ui.reader.ReaderViewModel.reRenderPage] 重繪覆蓋檔後 → `retryPage` → 重 decode 顯示新圖。
      *  - 未翻 → 重新登記進 [tracked]；佇列翻到時觀察者換頁。**不**在此排入翻譯（排入只在 [onActivated]）。
      */
     override fun retryPage(page: ReaderPage) {
         if (isRecycled) return
         ensureResolved()
+        // 先登記再查（與 [handleDownloadedPage] 同：避免查→翻好→登記的競態漏換頁）。
+        synchronized(tracked) { tracked[page.index] = page }
         val dir = chapterDir
         val pageFile = pageFiles.getOrNull(page.index)
         if (dir != null && pageFile != null && pageTranslator.isPageTranslated(dir, pageFile.name.orEmpty())) {
-            // 已翻（含剛重繪覆蓋）→ 只需 [swapToFile] 一次 Queue→Ready 重 decode 那個檔（與 [DownloadPageLoader.retryPage] 等效）。
-            scope.launch { swapToFile(page) }
-            return
+            // 已翻（含剛重繪覆蓋）→ 原子取出再 [swapToFile] 重 decode 那個檔（與 [DownloadPageLoader.retryPage] 等效）。
+            val hit = synchronized(tracked) { tracked.remove(page.index) }
+            if (hit != null) swapToFile(page)
         }
-        // 未翻 → 重新登記等佇列（佇列負責翻，本 loader 不翻；排入在 onActivated）。
-        synchronized(tracked) { tracked[page.index] = page }
     }
 
     /**
@@ -296,8 +291,5 @@ internal class TranslatingPageLoader(
 
     companion object {
         private val IMAGE_EXT = setOf("jpg", "jpeg", "png", "webp")
-
-        /** swap 換頁時撐住 Queue 的真實時間：給 holder collector 接到 Queue，避免 Queue→Ready 被 StateFlow conflate（換不上譯圖）。 */
-        private const val SWAP_QUEUE_HOLD_MS = 150L
     }
 }

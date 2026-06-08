@@ -23,6 +23,7 @@ import eu.kanade.tachiyomi.data.saver.Image
 import eu.kanade.tachiyomi.data.saver.ImageSaver
 import eu.kanade.tachiyomi.data.saver.Location
 import eu.kanade.tachiyomi.data.translation.PageTranslator
+import eu.kanade.tachiyomi.data.translation.TranslationEngineService
 import eu.kanade.tachiyomi.data.translation.TranslationManager
 import eu.kanade.tachiyomi.data.translation.model.TranslationItem
 import eu.kanade.tachiyomi.source.model.Page
@@ -125,6 +126,9 @@ class ReaderViewModel @JvmOverloads constructor(
 
     /** 翻譯偏好（即時翻譯開關 [TranslationPreferences.liveTranslate] 由設定面板切，切換後重載章節套用包裝）。 */
     private val translationPreferences: TranslationPreferences = Injekt.get()
+
+    /** 常駐翻譯引擎服務：觀察其載入狀態（[TranslationEngineService.loading]）→ reader 角落指示器顯示「引擎載入中…」。 */
+    private val translationEngineService: TranslationEngineService = Injekt.get()
 
     /**
      * The manga loaded in the reader. It can be null when instantiated for a short time.
@@ -301,6 +305,12 @@ class ReaderViewModel @JvmOverloads constructor(
         }
             .distinctUntilChanged()
             .onEach { progress -> mutableState.update { it.copy(liveTranslateProgress = progress) } }
+            .launchIn(viewModelScope)
+
+        // 引擎載入狀態 → reader 角落指示器（「引擎載入中…」）。即時翻開時 app 啟動 / 首章會背景載 ~450MB，
+        // 這段時間在角落顯示載入中、讓使用者知道延遲是在掛載模型（非卡死）。建好後轉「翻譯中 X/Y」。
+        translationEngineService.loading
+            .onEach { loading -> mutableState.update { it.copy(engineLoading = loading) } }
             .launchIn(viewModelScope)
     }
 
@@ -1425,6 +1435,8 @@ class ReaderViewModel @JvmOverloads constructor(
          * 由 [translationManager] 的佇列與當前章 id 併流算得（見 init 區塊）。
          */
         val liveTranslateProgress: LiveTranslateProgress? = null,
+        /** 引擎是否正在載入（~450MB）：reader 角落指示器顯示「引擎載入中…」（[eu.kanade.presentation.reader.ReaderLiveTranslateIndicator]）。 */
+        val engineLoading: Boolean = false,
     ) {
         val currentChapter: ReaderChapter?
             get() = viewerChapters?.currChapter

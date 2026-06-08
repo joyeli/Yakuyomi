@@ -6,6 +6,9 @@ import eu.kanade.tachiyomi.BuildConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -52,6 +55,14 @@ class TranslationEngineService(private val context: Context) {
 
     /** 上次建引擎時的設定簽章（含去字法）；與當前簽章不同 → 設定/去字法改過 → 重建。只在 [mutex] 下讀寫。 */
     private var builtSignature: String? = null
+
+    /** 引擎是否正在建構（載入 ~450MB native）：給 reader 角落指示器顯示「引擎載入中…」。建構期間 true、完成/失敗轉 false。 */
+    private val _loading = MutableStateFlow(false)
+    val loading: StateFlow<Boolean> = _loading.asStateFlow()
+
+    /** 引擎是否已預載（warm，建好常駐中）：給書庫工具列圖示顯示「有/無預載」。建好＝true、釋放＝false。 */
+    private val _warm = MutableStateFlow(false)
+    val warm: StateFlow<Boolean> = _warm.asStateFlow()
 
     /** key：優先設定頁（BYOK）；空白時 fallback build-time key（與 [PageTranslator] 同規則）。 */
     private fun apiKey(): String =
@@ -116,6 +127,8 @@ class TranslationEngineService(private val context: Context) {
         // 設定/去字法改過 → 丟舊引擎重建（釋放舊 native session 才不疊加 ~450MB）。
         closeEngine()
 
+        // 真正建構（載入 ~450MB）期間 → loading=true，給 reader 指示器顯示「引擎載入中…」。finally 確保任何出口都歸位。
+        _loading.value = true
         return try {
             // 模型解析 + 字元表（SAF→filesDir 複製在此；缺模型回 null）。與離線翻共用同一份解析。
             val bundle = TranslationEngineConfig.resolveModelSet(context) ?: return null
@@ -123,11 +136,14 @@ class TranslationEngineService(private val context: Context) {
             val cfg = TranslationEngineConfig.buildEngineConfig(translationPreferences, methodRaw)
             engine = Yakuyomi.create(bundle.models, bundle.alphabet, apiKey(), cfg)
             builtSignature = signature
+            _warm.value = true
             engine
         } catch (e: Throwable) {
             logcat(LogPriority.ERROR, e) { "建翻譯引擎失敗" }
             closeEngine()
             null
+        } finally {
+            _loading.value = false
         }
     }
 
@@ -170,6 +186,7 @@ class TranslationEngineService(private val context: Context) {
         }
         engine = null
         builtSignature = null
+        _warm.value = false
     }
 
     /**

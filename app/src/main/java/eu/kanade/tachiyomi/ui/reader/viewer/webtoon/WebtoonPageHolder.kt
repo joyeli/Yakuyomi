@@ -21,6 +21,7 @@ import eu.kanade.tachiyomi.util.system.dpToPx
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
 import logcat.LogPriority
@@ -137,7 +138,11 @@ class WebtoonPageHolder(
             launchIO {
                 loader.loadPage(page)
             }
-            page.statusFlow.collectLatest { state ->
+            // 即時翻譯換頁：頁圖被就地覆蓋成譯圖後 loader 呼叫 page.reload()（單調遞增計數）。把 reloadFlow 併進
+            // statusFlow 的**同一個** collectLatest（combine）：reload 一變就以當前 state（Ready）重發 → collectLatest
+            // **取消上一個 setImage**（含綁定當下還在跑的原圖 decode）再跑新的 → 最新（譯圖）必勝；
+            // 也不會被 status 同值（Ready→Ready）conflate。修「檔已翻好但畫面卡原文」（兩個獨立 setImage 競爭、慢的原圖 decode 最後完成而勝出；尤其載入競態 / 第一頁）。
+            combine(page.statusFlow, page.reloadFlow) { state, _ -> state }.collectLatest { state ->
                 when (state) {
                     Page.State.Queue -> setQueued()
                     Page.State.LoadPage -> setLoading()
