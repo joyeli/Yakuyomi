@@ -1,21 +1,29 @@
 package eu.kanade.presentation.more.settings.screen
 
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.util.fastMap
 import eu.kanade.presentation.category.visualName
 import eu.kanade.presentation.more.settings.Preference
 import eu.kanade.presentation.more.settings.widget.TriStateListDialog
+import eu.kanade.tachiyomi.data.translation.TranslationEngineConfig
 import eu.kanade.tachiyomi.data.translation.TranslationEngineService
 import kotlinx.collections.immutable.persistentMapOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.collections.immutable.toImmutableMap
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import tachiyomi.domain.category.interactor.GetCategories
 import tachiyomi.domain.download.service.DownloadPreferences
 import tachiyomi.domain.translation.service.TranslationPreferences
@@ -24,9 +32,15 @@ import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.collectAsState
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import tachiyomi.core.common.preference.Preference as PreferenceData
 
 // 進階數值用字面繁中標題/說明（與既有 apiKey 標題同風格，免動 strings.xml）；說明含值域 + 極值效果，尾 %s＝現值。
 private typealias Item = Preference.PreferenceItem<out Any, out Any>
+
+/** 隱私揭露文案：揭露翻譯時「什麼會離開裝置」。資訊列 + 一次性同意對話框共用。 */
+private const val PRIVACY_DISCLOSURE =
+    "翻譯會把頁面文字（OCR 後）送到你設定的 LLM provider；圖像 / 偵測 / OCR / 去字全在裝置上、不外傳；" +
+        "API key 加密存在本機。"
 
 object SettingsTranslationScreen : SearchableSettings {
 
@@ -42,7 +56,19 @@ object SettingsTranslationScreen : SearchableSettings {
         // 「閱讀後刪除」綁下載偏好同一個 pref → 與下載設定頁連動（任一邊改都同步）。
         val downloadPrefs = remember { Injekt.get<DownloadPreferences>() }
         val showAdvanced by prefs.showAdvanced.collectAsState()
+        // 是否已看過隱私揭露（控制一次性同意對話框；看過後開關直接生效不再跳）。
+        val privacyAck by prefs.privacyAcknowledged.collectAsState()
         val cores = remember { Runtime.getRuntime().availableProcessors() }
+
+        // 模型狀態（BYOM）：只查 3 顆 onnx「是否存在」（不驗 checksum——模型會更新會誤判）。off-main 算一次、重開設定頁重檢。
+        val context = LocalContext.current
+        val modelPresence by produceState<List<Pair<String, Boolean>>?>(initialValue = null) {
+            value = withContext(Dispatchers.IO) { TranslationEngineConfig.modelPresence(context) }
+        }
+        val modelStatusSubtitle = modelPresence?.let { mp ->
+            mp.joinToString("・") { (n, ok) -> "$n ${if (ok) "✓" else "✗"}" } +
+                if (mp.all { it.second }) "" else "（缺＝把 3 顆 onnx 放到儲存位置的 models/）"
+        } ?: "檢查中…"
 
         // 即時翻譯分類過濾（包含/排除，鏡射下載「新章分類」）：取所有書庫分類 + tri-state 對話框狀態。
         val getCategories = remember { Injekt.get<GetCategories>() }
@@ -66,6 +92,38 @@ object SettingsTranslationScreen : SearchableSettings {
                 },
             )
         }
+
+        // 一次性隱私同意：使用者首次把「下載時翻譯」或「即時翻譯」打開時跳一次（看過後 privacyAcknowledged=true、不再跳）。
+        // 觸發的開關記在 pendingEnableSwitch：按「確定」＝記 ack + 把該開關真的開起來（含即時翻的預暖副作用）；
+        // 按「取消」/關閉＝什麼都不做（開關維持關，因為 onValueChanged 已回 false 沒讓它翻過去）。
+        var pendingEnableSwitch by remember { mutableStateOf<PreferenceData<Boolean>?>(null) }
+        if (pendingEnableSwitch != null) {
+            val pending = pendingEnableSwitch!!
+            AlertDialog(
+                onDismissRequest = { pendingEnableSwitch = null },
+                title = { Text(text = "隱私") },
+                text = { Text(text = PRIVACY_DISCLOSURE) },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            prefs.privacyAcknowledged.set(true)
+                            pending.set(true) // 同意後才真的開啟觸發的那個開關
+                            // 即時翻開關有預暖副作用（warm 引擎），這裡補上（onValueChanged 當初回 false、沒跑到）。
+                            if (pending === prefs.liveTranslate) engineService.warmUpAsync()
+                            pendingEnableSwitch = null
+                        },
+                    ) {
+                        Text(text = stringResource(MR.strings.action_ok))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingEnableSwitch = null }) {
+                        Text(text = stringResource(MR.strings.action_cancel))
+                    }
+                },
+            )
+        }
+
         // 裝置感知緒數選項：自動 + {2,4,6,8 ≤ 核數}（超過核數的隱藏）
         val threadEntries = remember(cores) {
             buildMap {
@@ -112,6 +170,15 @@ object SettingsTranslationScreen : SearchableSettings {
                         preference = prefs.translationEnabled,
                         title = "下載時翻譯章節",
                         subtitle = "偵測 / OCR / 去字在裝置上跑；翻譯走雲端 LLM",
+                        // 首次開啟＝先跳一次性隱私同意（回 false 不立即開；同意後對話框才真的開）。看過就直接開。
+                        onValueChanged = { enabled ->
+                            if (enabled && !privacyAck) {
+                                pendingEnableSwitch = prefs.translationEnabled
+                                false
+                            } else {
+                                true
+                            }
+                        },
                     ),
                     Preference.PreferenceItem.SwitchPreference(
                         preference = prefs.liveTranslate,
@@ -121,8 +188,21 @@ object SettingsTranslationScreen : SearchableSettings {
                         // ★ 必須 fire-and-forget（背景 IO）：warmUp 會載 ~450MB、shutdown 可能等鎖（背景正翻某頁）——
                         //   onValueChanged 跑在 UI，若在此 await 就會卡主執行緒 → ANR/crash（實測：關即時翻當機）。
                         onValueChanged = { enabled ->
-                            if (enabled) engineService.warmUpAsync() else engineService.shutdownAsync()
-                            true
+                            when {
+                                // 首次開啟＝先跳一次性隱私同意；回 false 暫不開、預暖延到對話框「確定」才做。
+                                enabled && !privacyAck -> {
+                                    pendingEnableSwitch = prefs.liveTranslate
+                                    false
+                                }
+                                enabled -> {
+                                    engineService.warmUpAsync()
+                                    true
+                                }
+                                else -> {
+                                    engineService.shutdownAsync()
+                                    true
+                                }
+                            }
                         },
                     ),
                     Preference.PreferenceItem.TextPreference(
@@ -153,6 +233,16 @@ object SettingsTranslationScreen : SearchableSettings {
                         preference = prefs.apiKey,
                         title = "API key (BYOK)",
                         subtitle = "翻譯 LLM 金鑰（OpenAI 相容，預設 DeepSeek）",
+                    ),
+                    // 隱私揭露（資訊列、無動作）：讓使用者翻譯前知道「什麼會離開裝置」。與一次性同意對話框同文案。
+                    Preference.PreferenceItem.TextPreference(
+                        title = "隱私",
+                        subtitle = PRIVACY_DISCLOSURE,
+                    ),
+                    // 模型狀態（BYOM）：顯示 3 顆 onnx 是否齊（只查存在、不驗 checksum）。幫 BYOM 設定 + 診斷「未啟動」。
+                    Preference.PreferenceItem.TextPreference(
+                        title = "模型狀態",
+                        subtitle = modelStatusSubtitle,
                     ),
                     Preference.PreferenceItem.ListPreference(
                         preference = prefs.targetLangName,

@@ -7,6 +7,7 @@ import eu.kanade.domain.track.service.TrackPreferences
 import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.tachiyomi.core.security.PrivacyPreferences
 import eu.kanade.tachiyomi.core.security.SecurityPreferences
+import eu.kanade.tachiyomi.data.translation.SecretCipher
 import eu.kanade.tachiyomi.network.NetworkPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.util.system.isDebugBuildType
@@ -61,7 +62,8 @@ class PreferenceModule(val app: Application) : InjektModule {
             DownloadPreferences(get())
         }
         addSingletonFactory {
-            TranslationPreferences(get())
+            // 注入 Keystore 加密器（SecretCipher）→ apiKey 落地加密（密文存 SharedPreferences、UI 仍見明文）。
+            TranslationPreferences(get(), SecretCipher)
         }
         addSingletonFactory {
             BackupPreferences(get())

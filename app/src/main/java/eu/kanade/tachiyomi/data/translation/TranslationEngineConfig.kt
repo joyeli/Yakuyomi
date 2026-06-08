@@ -61,6 +61,19 @@ object TranslationEngineConfig {
     }
 
     /**
+     * 各模型「是否存在」（逐顆，給設定頁顯示模型狀態 / BYOM 排錯 / 診斷「未啟動」）。
+     * **只查存在、不驗 checksum**——模型權重會更新（m-i-t / Koharu 後續版本），checksum 會誤判成「損毀」；BYOM 也允許換版。
+     */
+    fun modelPresence(context: Context): List<Pair<String, Boolean>> {
+        val m = modelsDir(context)
+        return listOf(
+            "偵測" to (m != null && findOnnx(m, "detect", "comictext") != null),
+            "OCR" to (m != null && findOnnx(m, "ocr") != null),
+            "去字" to (m != null && findOnnx(m, "lama") != null),
+        )
+    }
+
+    /**
      * 解析三顆模型 → 本機路徑 [ModelSet] + 載入 OCR 字元表。缺任一顆模型回 null（呼叫端應略過翻譯）。
      *
      * SAF 模型先串流複製到 filesDir（[ensureLocal]，off-heap 路徑載入，避開 512MB JVM heap OOM；§10）。

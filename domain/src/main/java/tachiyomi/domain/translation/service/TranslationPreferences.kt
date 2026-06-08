@@ -1,12 +1,20 @@
 package tachiyomi.domain.translation.service
 
+import tachiyomi.core.common.preference.EncryptedStringPreference
 import tachiyomi.core.common.preference.PreferenceStore
+import tachiyomi.core.common.preference.StringCrypto
 
 /**
  * Yakuyomi 翻譯偏好（BYOK + 語言對）。模型(BYOM)沿用 StoragePreferences 的儲存位置底下 models/。
- * 注意：API key 目前存一般 SharedPreferences（無加密）；正式版應改 Keystore。
+ *
+ * API key 落地加密：[apiKey] 是個 [EncryptedStringPreference]——對外仍是明文 [tachiyomi.core.common.preference.Preference]<String>
+ * （UI/讀取端無感），但磁碟上存的是 [crypto]（app 層的 Android Keystore 實作）加密後的密文（pref key `translation_api_key_enc`）。
+ * 並把舊的明文 key（`translation_api_key`）一次性遷移過去後清掉。[crypto] 為 null（如測試）時退化成不加密。
  */
-class TranslationPreferences(preferenceStore: PreferenceStore) {
+class TranslationPreferences(
+    preferenceStore: PreferenceStore,
+    crypto: StringCrypto? = null,
+) {
 
     /** 下載完成後自動翻譯該章（連同 isReady 的模型/key 檢查）。 */
     val translationEnabled = preferenceStore.getBoolean("translation_enabled", false)
@@ -27,8 +35,21 @@ class TranslationPreferences(preferenceStore: PreferenceStore) {
     /** 即時翻譯的「排除」分類：屬於這些分類的書一律不即時翻（優先於包含）。 */
     val liveTranslateCategoriesExclude = preferenceStore.getStringSet("translation_live_categories_exclude", emptySet())
 
-    /** 翻譯 LLM 的 API key（BYOK，OpenAI 相容，預設 DeepSeek）。 */
-    val apiKey = preferenceStore.getString("translation_api_key", "")
+    /**
+     * 翻譯 LLM 的 API key（BYOK，OpenAI 相容，預設 DeepSeek）。
+     *
+     * 落地加密：對外是明文 Preference<String>，但磁碟上存密文（`translation_api_key_enc`，由 [crypto] 加密）。
+     * 舊版明文 key（`translation_api_key`）在首次讀寫時一次性遷移＋清除。[crypto] 為 null 時退化成不加密（identity）。
+     */
+    val apiKey = EncryptedStringPreference(
+        backing = preferenceStore.getString("translation_api_key_enc", ""),
+        crypto = crypto ?: IdentityCrypto,
+        defaultValue = "",
+        legacyPlaintext = preferenceStore.getString("translation_api_key", ""),
+    )
+
+    /** 是否已看過翻譯隱私揭露（一次性同意對話框只跳一次）。 */
+    val privacyAcknowledged = preferenceStore.getBoolean("translation_privacy_ack", false)
 
     /** 目標語言（LLM 直接照這個翻）；預設台灣繁中，對齊引擎 TranslatorConfig.toLangName。 */
     val targetLangName = preferenceStore.getString("translation_target_lang", DEFAULT_TARGET_LANG)
@@ -83,4 +104,10 @@ class TranslationPreferences(preferenceStore: PreferenceStore) {
         const val DEFAULT_INTRA_THREADS = "auto"   // auto=硬體大核數估算；真機 6 緒最快（big.LITTLE）
         const val DEFAULT_COLOR_MODE = "auto"      // auto=依背景亮度判黑/白字
     }
+}
+
+/** 不加密的退化實作（未注入 [StringCrypto] 時用，如單元測試）：明文進、明文出。 */
+private object IdentityCrypto : StringCrypto {
+    override fun encrypt(plain: String): String = plain
+    override fun decrypt(encrypted: String): String? = encrypted.ifEmpty { null }
 }
