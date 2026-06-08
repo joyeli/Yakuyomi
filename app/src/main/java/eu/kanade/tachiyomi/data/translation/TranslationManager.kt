@@ -254,6 +254,31 @@ class TranslationManager(private val context: Context) {
     }
 
     /**
+     * 「改排版設定後」重繪：掃全庫已翻章，**各章用它自己原本的去字法**重繪（不升級/降級去字，只套用目前排版設定）。
+     * 與 [reRenderAllUpgradable] 的差別＝method 用每章 [PageTranslator.storedInpaintMethod]、非全域去字法
+     * （改排版不該順便動到去字）。同樣只鬆散 + 有素材章；按去字法分組批次排入（reRender 一次吃一個 method）。
+     * 回傳排入章數。IO 重（findChapterDir + 讀素材 json）。
+     */
+    suspend fun reRenderAllWithStoredMethod(): Int = withContext(Dispatchers.IO) {
+        var count = 0
+        for (manga in getFavorites.await()) {
+            if (translationCache.getTranslatedCount(manga) <= 0) continue
+            val byMethod = mutableMapOf<String, MutableList<Chapter>>()
+            for (ch in getChaptersByMangaId.await(manga.id)) {
+                val dir = chapterDir(manga, ch) ?: continue // 沒下載
+                if (!dir.isDirectory) continue // CBZ：素材在壓縮檔內、不便宜讀 → 跳過
+                val stored = pageTranslator.storedInpaintMethod(dir) ?: continue // 無素材 → 不可便宜重繪
+                byMethod.getOrPut(stored) { mutableListOf() }.add(ch)
+            }
+            byMethod.forEach { (method, chs) ->
+                reRender(manga, chs, method) // 各章用原去字法重繪：去字結果不變、套用目前排版
+                count += chs.size
+            }
+        }
+        count
+    }
+
+    /**
      * 改某章在佇列裡的去字方法（[method]＝boxfill / auto_whole / auto_tile）。
      * **QUEUE 或 TRANSLATING 皆可改**（ERROR / 已離開佇列的不可改）。翻譯項改 [Entry.method]；
      * 重繪項的方法在 [Entry.reRenderMethod]（val、不可改）→ 直接略過。

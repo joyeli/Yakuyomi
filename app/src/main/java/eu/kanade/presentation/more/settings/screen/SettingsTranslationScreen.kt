@@ -43,6 +43,9 @@ import tachiyomi.core.common.preference.Preference as PreferenceData
 // 進階數值用字面繁中標題/說明（與既有 apiKey 標題同風格，免動 strings.xml）；說明含值域 + 極值效果，尾 %s＝現值。
 private typealias Item = Preference.PreferenceItem<out Any, out Any>
 
+/** 「改設定後更新已翻章」對話框種類：UPGRADE＝改去字方法(升級重繪)、LAYOUT＝改排版(各章用原去字法重繪、只套新排版)。 */
+private enum class RenderUpdateKind { UPGRADE, LAYOUT }
+
 /** 隱私揭露文案：揭露翻譯時「什麼會離開裝置」。資訊列 + 一次性同意對話框共用。 */
 private const val PRIVACY_DISCLOSURE =
     "翻譯會把頁面文字（OCR 後）送到你設定的 LLM provider；圖像 / 偵測 / OCR / 去字全在裝置上、不外傳；" +
@@ -115,7 +118,7 @@ object SettingsTranslationScreen : SearchableSettings {
         // 按「取消」/關閉＝什麼都不做（開關維持關，因為 onValueChanged 已回 false 沒讓它翻過去）。
         var pendingEnableSwitch by remember { mutableStateOf<PreferenceData<Boolean>?>(null) }
         // 改去字方法時跳「要更新已翻章嗎」確認對話框（見下方 if 區塊）。
-        var showRenderUpdateDialog by remember { mutableStateOf(false) }
+        var pendingRenderUpdate by remember { mutableStateOf<RenderUpdateKind?>(null) }
         if (pendingEnableSwitch != null) {
             val pending = pendingEnableSwitch!!
             AlertDialog(
@@ -143,25 +146,35 @@ object SettingsTranslationScreen : SearchableSettings {
             )
         }
 
-        // 「改去字法後升級重繪」確認：改去字方法時跳，問是否用目前設定更新所有已翻章（只升級、不降級、僅有素材的鬆散章）。
-        if (showRenderUpdateDialog) {
+        // 「改設定後更新已翻章」確認：改去字方法→升級重繪(UPGRADE)；改排版→各章用原去字法重繪、只套新排版(LAYOUT)。
+        // 兩者都只動「有保留素材」的鬆散下載章。
+        pendingRenderUpdate?.let { kind ->
             AlertDialog(
-                onDismissRequest = { showRenderUpdateDialog = false },
+                onDismissRequest = { pendingRenderUpdate = null },
                 title = { Text(text = "更新已翻章節") },
                 text = {
                     Text(
-                        text = "去字方法已變更。要用目前設定重繪所有已翻章嗎？" +
-                            "只會「升級」去字品質、不會降級（保留最好結果）；僅含「有保留素材」的鬆散下載章。",
+                        text = when (kind) {
+                            RenderUpdateKind.UPGRADE ->
+                                "去字方法已變更。要用目前設定重繪所有已翻章嗎？" +
+                                    "只會「升級」去字品質、不會降級（保留最好結果）；僅含「有保留素材」的鬆散下載章。"
+                            RenderUpdateKind.LAYOUT ->
+                                "排版設定已變更。要用新排版重繪所有已翻章嗎？" +
+                                    "各章維持原本的去字法、只套用新排版；僅含「有保留素材」的鬆散下載章。"
+                        },
                     )
                 },
                 confirmButton = {
                     TextButton(
                         onClick = {
-                            showRenderUpdateDialog = false
+                            pendingRenderUpdate = null
                             scope.launch {
-                                val n = translationManager.reRenderAllUpgradable()
+                                val n = when (kind) {
+                                    RenderUpdateKind.UPGRADE -> translationManager.reRenderAllUpgradable()
+                                    RenderUpdateKind.LAYOUT -> translationManager.reRenderAllWithStoredMethod()
+                                }
                                 context.toast(
-                                    if (n > 0) "已排入 $n 章重繪" else "沒有可升級的已翻章（或未保留素材）",
+                                    if (n > 0) "已排入 $n 章重繪" else "沒有可更新的已翻章（或未保留素材）",
                                 )
                             }
                         },
@@ -170,7 +183,7 @@ object SettingsTranslationScreen : SearchableSettings {
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showRenderUpdateDialog = false }) {
+                    TextButton(onClick = { pendingRenderUpdate = null }) {
                         Text(text = stringResource(MR.strings.action_cancel))
                     }
                 },
@@ -329,10 +342,10 @@ object SettingsTranslationScreen : SearchableSettings {
                             "auto_tile" to stringResource(MR.strings.pref_translation_inpaint_auto_tile),
                         ),
                         title = stringResource(MR.strings.pref_translation_inpaint_method),
-                        // 改去字法 → 若有在用翻譯（下載時/即時任一開），跳對話框問是否用新設定升級重繪既有已翻章。
+                        // 改去字法 → 若有在用翻譯（下載時/即時任一開），跳對話框問是否升級重繪既有已翻章。
                         onValueChanged = { _ ->
                             if (prefs.translationEnabled.get() || prefs.liveTranslate.get()) {
-                                showRenderUpdateDialog = true
+                                pendingRenderUpdate = RenderUpdateKind.UPGRADE
                             }
                             true
                         },
@@ -368,6 +381,13 @@ object SettingsTranslationScreen : SearchableSettings {
                             "horizontal" to stringResource(MR.strings.pref_translation_orientation_horizontal),
                         ),
                         title = stringResource(MR.strings.pref_translation_orientation),
+                        // 改排版 → 跳對話框問是否用新排版重繪已翻章（各章維持原去字法）。
+                        onValueChanged = { _ ->
+                            if (prefs.translationEnabled.get() || prefs.liveTranslate.get()) {
+                                pendingRenderUpdate = RenderUpdateKind.LAYOUT
+                            }
+                            true
+                        },
                     ),
                     Preference.PreferenceItem.ListPreference(
                         preference = prefs.colorMode,
@@ -376,11 +396,23 @@ object SettingsTranslationScreen : SearchableSettings {
                             "mono" to "一律黑字白邊",
                         ),
                         title = "文字顏色",
+                        onValueChanged = { _ ->
+                            if (prefs.translationEnabled.get() || prefs.liveTranslate.get()) {
+                                pendingRenderUpdate = RenderUpdateKind.LAYOUT
+                            }
+                            true
+                        },
                     ),
                     Preference.PreferenceItem.SwitchPreference(
                         preference = prefs.fontBorder,
                         title = "文字描邊",
                         subtitle = "雜背景上的字加描邊更好讀",
+                        onValueChanged = { _ ->
+                            if (prefs.translationEnabled.get() || prefs.liveTranslate.get()) {
+                                pendingRenderUpdate = RenderUpdateKind.LAYOUT
+                            }
+                            true
+                        },
                     ),
                     advInt(showAdvanced, prefs.fontSizeMax, "字級上限 (px)", "20–120，太小大泡撐不滿、太大短句爆大"),
                     advInt(showAdvanced, prefs.fontSizeMin, "字級下限 (px)", "6–40，再小寧可溢出也不縮"),
