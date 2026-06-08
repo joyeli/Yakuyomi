@@ -36,6 +36,13 @@ class TranslationPreferences(
     val liveTranslateCategoriesExclude = preferenceStore.getStringSet("translation_live_categories_exclude", emptySet())
 
     /**
+     * 不自動翻譯的來源（source id 字串集合）：屬於這些來源的書，下載時翻譯與即時翻譯一律跳過（全域硬排除）。
+     * 手動翻譯（書籍頁翻譯鈕 / 多選 / 重繪）**不受此限**——被排除來源的書若仍想翻就手動觸發。
+     * 與分類過濾獨立：分類只作用於即時翻；來源排除作用於所有「自動」翻譯（下載時 + 即時）。
+     */
+    val translationSourcesExclude = preferenceStore.getStringSet("translation_sources_exclude", emptySet())
+
+    /**
      * 翻譯 LLM 的 API key（BYOK，OpenAI 相容，預設 DeepSeek）。
      *
      * 落地加密：對外是明文 Preference<String>，但磁碟上存密文（`translation_api_key_enc`，由 [crypto] 加密）。

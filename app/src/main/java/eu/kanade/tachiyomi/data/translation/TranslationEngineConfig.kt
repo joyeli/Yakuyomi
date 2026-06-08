@@ -103,6 +103,19 @@ object TranslationEngineConfig {
     }
 
     /**
+     * 去字法品質排名（高＝品質好）。用於「改去字法後升級重繪」（[TranslationManager.reRenderAllUpgradable]）的
+     * 向上/向下判斷：新 rank ≥ 已存 rank 才重繪（升級或持平套排版）、新 rank < 已存則保留（不降級＝保留最好結果）。
+     * original/無＝0 ＜ boxfill＝1 ＜ auto_whole/lama_whole＝2 ＜ auto_tile/lama_tile＝3。未知＝2（當整頁 lama 級）。
+     */
+    fun inpaintMethodRank(method: String?): Int = when (method) {
+        "original", null, "" -> 0
+        "boxfill" -> 1
+        "auto_tile", "lama_tile" -> 3
+        "auto_whole", "lama_whole" -> 2
+        else -> 2
+    }
+
+    /**
      * 用 [prefs] 組出完整 [EngineConfig]（偵測/OCR/翻譯/去字/排版）。
      *
      * @param methodRaw 去字方法原始字串（[TranslationPreferences.inpaintMethod] 值，或即時翻譯固定的 "boxfill"）。

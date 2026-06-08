@@ -14,11 +14,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import logcat.LogPriority
 import mihon.core.archive.ZipWriter
 import mihon.core.archive.archiveReader
 import tachiyomi.core.common.util.system.logcat
+import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
 import tachiyomi.domain.chapter.model.Chapter
+import tachiyomi.domain.manga.interactor.GetFavorites
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.domain.translation.service.TranslationPreferences
@@ -49,6 +52,10 @@ class TranslationManager(private val context: Context) {
     private val sourceManager: SourceManager = Injekt.get()
     private val translationCache: TranslationCache = Injekt.get()
     private val translationPreferences: TranslationPreferences = Injekt.get()
+
+    // 「改去字法後升級重繪」掃全庫用：列收藏書 + 各書章節（只在 reRenderAllUpgradable 用）。
+    private val getFavorites: GetFavorites = Injekt.get()
+    private val getChaptersByMangaId: GetChaptersByMangaId = Injekt.get()
 
     /** 常駐（warm）翻譯引擎服務：佇列翻完且**即時翻關著**時釋放它，別讓 ~450MB 閒置（即時翻開著則保 warm）。 */
     private val engineService: TranslationEngineService = Injekt.get()
@@ -123,6 +130,13 @@ class TranslationManager(private val context: Context) {
     /** 翻譯開關開 + key 有設 + 模型 3 顆齊，才排得了（給下載 hook 判斷）。 */
     fun isReady(): Boolean = pageTranslator.isReady()
 
+    /**
+     * 此書的來源是否在「不自動翻譯來源」排除集（per-source 開關）。命中＝自動翻（下載時 + 即時）一律跳過；
+     * 手動翻不查此。供 [eu.kanade.tachiyomi.data.download.Downloader] 下載 hook 與 ChapterLoader 共用同一判定。
+     */
+    fun isSourceExcluded(manga: Manga): Boolean =
+        manga.source.toString() in translationPreferences.translationSourcesExclude.get()
+
     private fun publish() {
         _queueState.value = synchronized(lock) {
             entries.map {
@@ -195,6 +209,37 @@ class TranslationManager(private val context: Context) {
         _isPaused.value = false // 明確要求重繪 → 解除暫停、直接開跑
         ensureDrain()
         TranslationJob.start(context)
+    }
+
+    /**
+     * 「改去字方法後」升級重繪：掃全庫已翻章，用**目前設定**把「去字法不會降級」的章排入重繪。回傳排入章數。
+     *
+     * 規則（對齊使用者需求「只去字法向上才重去字、向下不動、保留最好結果」）：
+     *   只重繪 `已存去字法 rank ≤ 目前 rank` 的章——升級或持平（套新排版）才重、降級則保留既有較佳結果。
+     * 範圍限制：
+     *   - 只鬆散下載章（CBZ 素材在壓縮檔內、不便宜讀 → 跳過）。
+     *   - 只「有保留素材」的章（[PageTranslator.storedInpaintMethod] 回 null＝無素材＝不能便宜重繪 → 跳過；需先開「保留重繪素材」）。
+     *   - 先用 [TranslationCache] 預篩有已翻章的書，避免掃整庫每章。
+     * IO 重（findChapterDir + 讀素材 json）→ 整段在 IO 跑。排入後走同一條翻譯佇列（顯示進度、可暫停/取消）。
+     */
+    suspend fun reRenderAllUpgradable(): Int = withContext(Dispatchers.IO) {
+        val newMethod = translationPreferences.inpaintMethod.get()
+        val newRank = TranslationEngineConfig.inpaintMethodRank(newMethod)
+        var count = 0
+        for (manga in getFavorites.await()) {
+            if (translationCache.getTranslatedCount(manga) <= 0) continue // 這本沒已翻章 → 跳過
+            val eligible = getChaptersByMangaId.await(manga.id).filter { ch ->
+                val dir = chapterDir(manga, ch) ?: return@filter false // 沒下載
+                if (!dir.isDirectory) return@filter false // CBZ：素材在壓縮檔內、不便宜讀 → 跳過
+                val stored = pageTranslator.storedInpaintMethod(dir) ?: return@filter false // 無素材 → 不可便宜重繪
+                TranslationEngineConfig.inpaintMethodRank(stored) <= newRank // 向上/持平才重、向下保留
+            }
+            if (eligible.isNotEmpty()) {
+                reRender(manga, eligible, newMethod)
+                count += eligible.size
+            }
+        }
+        count
     }
 
     /**

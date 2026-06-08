@@ -426,12 +426,13 @@ class Downloader(
             // findChapterDir 必能解析，TranslationManager 走獨立 scope 逐章翻、就地覆蓋（§11）。
             //
             // 兩條 gate（OR）：
-            //  - isReady()＝「下載時翻譯」總開關開 + key + 模型齊（離線整章翻的常規路徑）。
+            //  - 自動翻＝isReady()（「下載時翻譯」總開關 + key + 模型齊）**且**來源未被 per-source 排除
+            //    （[TranslationManager.isSourceExcluded]；排除的來源不自動翻、省 token）。
             //  - isPendingTranslate()＝這章被 reader 即時翻 / 控制鈕標記過（markForTranslate）→
-            //    即使總開關關著也要翻（使用者讀到/手動觸發＝明確意圖）。排入後清掉標記、用 atFront 插隊
+            //    即使總開關關著（或來源被排除）也要翻（使用者讀到/手動觸發＝明確意圖）。排入後清掉標記、用 atFront 插隊
             //    （正在讀的章優先翻），與 TranslatingPageLoader 的插隊語義一致。
             val pending = translationManager.isPendingTranslate(download.chapter.id)
-            if (translationManager.isReady() || pending) {
+            if ((translationManager.isReady() && !translationManager.isSourceExcluded(download.manga)) || pending) {
                 translationManager.translate(download.manga, listOf(download.chapter), atFront = pending)
                 if (pending) translationManager.clearPending(download.chapter.id)
             }

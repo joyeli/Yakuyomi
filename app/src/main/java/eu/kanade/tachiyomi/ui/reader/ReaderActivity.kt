@@ -269,10 +269,6 @@ class ReaderActivity : BaseActivity() {
                     ReaderViewModel.Event.ChapterTranslateStopped -> {
                         toast("已中止這話翻譯")
                     }
-                    is ReaderViewModel.Event.LiveTranslateStatus -> {
-                        // TODO(live): 暫時診斷，確認穩定後移除。即時翻譯開著時、章載完 toast 是否真的套上 TranslatingPageLoader。
-                        toast(event.message)
-                    }
                 }
             }
             .launchIn(lifecycleScope)

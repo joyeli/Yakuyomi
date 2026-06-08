@@ -268,6 +268,20 @@ class PageTranslator(private val context: Context) {
     fun donePages(chapterDir: UniFile): Set<String> = readDonePages(chapterDir)
 
     /**
+     * 讀某章已存的去字法（任一頁素材 json 的 method）；無素材＝null（不可便宜重繪）。
+     * 給「改去字法後升級重繪」（[TranslationManager.reRenderAllUpgradable]）判斷向上/向下：
+     * stored rank ≤ 新 rank 才重繪、向下保留最好結果。只看鬆散章（CBZ 素材在壓縮檔內、呼叫端不會傳進來）。
+     */
+    fun storedInpaintMethod(chapterDir: UniFile): String? {
+        val matDir = chapterDir.findFile(MATERIALS_DIR) ?: return null
+        val jsonFile = matDir.listFiles()?.firstOrNull { f ->
+            f.isFile && (f.name?.endsWith(".json") == true)
+        } ?: return null
+        val base = jsonFile.name?.removeSuffix(".json") ?: return null
+        return decodeMaterials(matDir, base)?.method
+    }
+
+    /**
      * 換去字法重繪整章（§ 不重跑偵測/OCR/翻譯）：對 [chapterDir] 內每頁「有保留素材」的頁，
      * 用 [newMethod]（[TranslationPreferences.inpaintMethod] 原始字串）重做**去字 + 排版**、就地覆蓋頁圖。
      *

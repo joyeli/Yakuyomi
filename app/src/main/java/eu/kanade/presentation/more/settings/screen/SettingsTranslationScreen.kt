@@ -10,19 +10,25 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.util.fastMap
+import eu.kanade.domain.source.interactor.GetSourcesWithFavoriteCount
 import eu.kanade.presentation.category.visualName
 import eu.kanade.presentation.more.settings.Preference
 import eu.kanade.presentation.more.settings.widget.TriStateListDialog
 import eu.kanade.tachiyomi.data.translation.TranslationEngineConfig
 import eu.kanade.tachiyomi.data.translation.TranslationEngineService
+import eu.kanade.tachiyomi.data.translation.TranslationManager
+import eu.kanade.tachiyomi.util.system.toast
+import kotlinx.collections.immutable.ImmutableMap
 import kotlinx.collections.immutable.persistentMapOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.collections.immutable.toImmutableMap
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import tachiyomi.domain.category.interactor.GetCategories
 import tachiyomi.domain.download.service.DownloadPreferences
@@ -55,6 +61,9 @@ object SettingsTranslationScreen : SearchableSettings {
         val engineService = remember { Injekt.get<TranslationEngineService>() }
         // 「閱讀後刪除」綁下載偏好同一個 pref → 與下載設定頁連動（任一邊改都同步）。
         val downloadPrefs = remember { Injekt.get<DownloadPreferences>() }
+        // 「改去字法後升級重繪」：掃全庫已翻章排入重繪（reRenderAllUpgradable）+ 跑它的 scope。
+        val translationManager = remember { Injekt.get<TranslationManager>() }
+        val scope = rememberCoroutineScope()
         val showAdvanced by prefs.showAdvanced.collectAsState()
         // 是否已看過隱私揭露（控制一次性同意對話框；看過後開關直接生效不再跳）。
         val privacyAck by prefs.privacyAcknowledged.collectAsState()
@@ -76,6 +85,14 @@ object SettingsTranslationScreen : SearchableSettings {
         val liveIncluded by prefs.liveTranslateCategories.collectAsState()
         val liveExcluded by prefs.liveTranslateCategoriesExclude.collectAsState()
         var showLiveCategoryDialog by rememberSaveable { mutableStateOf(false) }
+
+        // per-source 排除：列「書庫用到的線上來源」（有收藏、非 local）供多選不自動翻的來源。off-main flow 收集成 id→名稱 map。
+        val getSourcesWithFavoriteCount = remember { Injekt.get<GetSourcesWithFavoriteCount>() }
+        val librarySources by produceState<ImmutableMap<String, String>>(initialValue = persistentMapOf()) {
+            getSourcesWithFavoriteCount.subscribe().collect { list ->
+                value = list.associate { (src, _) -> src.id.toString() to src.name }.toImmutableMap()
+            }
+        }
         if (showLiveCategoryDialog) {
             TriStateListDialog(
                 title = "即時翻譯分類",
@@ -97,6 +114,8 @@ object SettingsTranslationScreen : SearchableSettings {
         // 觸發的開關記在 pendingEnableSwitch：按「確定」＝記 ack + 把該開關真的開起來（含即時翻的預暖副作用）；
         // 按「取消」/關閉＝什麼都不做（開關維持關，因為 onValueChanged 已回 false 沒讓它翻過去）。
         var pendingEnableSwitch by remember { mutableStateOf<PreferenceData<Boolean>?>(null) }
+        // 改去字方法時跳「要更新已翻章嗎」確認對話框（見下方 if 區塊）。
+        var showRenderUpdateDialog by remember { mutableStateOf(false) }
         if (pendingEnableSwitch != null) {
             val pending = pendingEnableSwitch!!
             AlertDialog(
@@ -118,6 +137,40 @@ object SettingsTranslationScreen : SearchableSettings {
                 },
                 dismissButton = {
                     TextButton(onClick = { pendingEnableSwitch = null }) {
+                        Text(text = stringResource(MR.strings.action_cancel))
+                    }
+                },
+            )
+        }
+
+        // 「改去字法後升級重繪」確認：改去字方法時跳，問是否用目前設定更新所有已翻章（只升級、不降級、僅有素材的鬆散章）。
+        if (showRenderUpdateDialog) {
+            AlertDialog(
+                onDismissRequest = { showRenderUpdateDialog = false },
+                title = { Text(text = "更新已翻章節") },
+                text = {
+                    Text(
+                        text = "去字方法已變更。要用目前設定重繪所有已翻章嗎？" +
+                            "只會「升級」去字品質、不會降級（保留最好結果）；僅含「有保留素材」的鬆散下載章。",
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showRenderUpdateDialog = false
+                            scope.launch {
+                                val n = translationManager.reRenderAllUpgradable()
+                                context.toast(
+                                    if (n > 0) "已排入 $n 章重繪" else "沒有可升級的已翻章（或未保留素材）",
+                                )
+                            }
+                        },
+                    ) {
+                        Text(text = stringResource(MR.strings.action_ok))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showRenderUpdateDialog = false }) {
                         Text(text = stringResource(MR.strings.action_cancel))
                     }
                 },
@@ -214,6 +267,13 @@ object SettingsTranslationScreen : SearchableSettings {
                         ),
                         onClick = { showLiveCategoryDialog = true },
                     ),
+                    // per-source 排除：勾選的來源不自動翻譯（下載時 + 即時皆跳過）；手動翻不受限。只列書庫用到的線上來源。
+                    Preference.PreferenceItem.MultiSelectListPreference(
+                        preference = prefs.translationSourcesExclude,
+                        entries = librarySources,
+                        title = "不翻譯的來源",
+                        subtitle = "勾選的來源不自動翻譯（手動翻不受限）：%s",
+                    ),
                     // 閱讀後刪除：綁下載偏好同一 pref（removeAfterReadSlots）→ 與下載設定頁完全連動。
                     // 即時翻譯讓「讀＝下載＋翻」會累積章節，這裡可就地設定讀完自動清。
                     Preference.PreferenceItem.ListPreference(
@@ -269,6 +329,13 @@ object SettingsTranslationScreen : SearchableSettings {
                             "auto_tile" to stringResource(MR.strings.pref_translation_inpaint_auto_tile),
                         ),
                         title = stringResource(MR.strings.pref_translation_inpaint_method),
+                        // 改去字法 → 若有在用翻譯（下載時/即時任一開），跳對話框問是否用新設定升級重繪既有已翻章。
+                        onValueChanged = { _ ->
+                            if (prefs.translationEnabled.get() || prefs.liveTranslate.get()) {
+                                showRenderUpdateDialog = true
+                            }
+                            true
+                        },
                     ),
                     advFloat(
                         showAdvanced,

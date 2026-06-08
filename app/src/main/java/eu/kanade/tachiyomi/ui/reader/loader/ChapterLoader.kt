@@ -154,7 +154,7 @@ class ChapterLoader(
         if (!isDownloaded) return false
         if (!translationPreferences.liveTranslate.get()) return false
         if (!translationEngineService.isReady()) return false
-        if (!categoryAllowed()) return false
+        if (!autoTranslateAllowed()) return false
 
         // 已整章翻好 → 不即時翻（DownloadPageLoader 直接服務已覆蓋的譯圖）。toDomainChapter null（無 id）時保守不即時翻。
         val domainChapter = chapter.chapter.toDomainChapter() ?: return false
@@ -163,13 +163,15 @@ class ChapterLoader(
     }
 
     /**
-     * 「即時翻譯分類」過濾（包含/排除）共用判定。語義對齊下載「新章分類」：
-     *   包含非空 → 書至少屬其一才翻；命中任一排除 → 不翻；包含與排除都空 → 全部翻。
+     * 「自動翻譯」是否該套用到本書（即時翻 + 線上自動翻共用）。兩道過濾 AND：
+     *  - **來源排除**（per-source，[TranslationPreferences.translationSourcesExclude]）：命中＝不翻（全域硬排除）。
+     *  - **分類過濾**（包含/排除，語義對齊下載「新章分類」）：包含非空→書至少屬其一才翻；命中任一排除→不翻；都空→全部翻。
      * 抽成 public 方法供 [shouldTranslateLive]（已下載）與
      * [eu.kanade.tachiyomi.ui.reader.ReaderViewModel] 的線上即時翻 gate 共用同一份語義
-     * （[ReaderViewModel] 持有同一個 [ChapterLoader] 實例，直接呼叫此方法）。
+     * （[ReaderViewModel] 持有同一個 [ChapterLoader] 實例，直接呼叫此方法）。手動翻不查此。
      */
-    suspend fun categoryAllowed(): Boolean {
+    suspend fun autoTranslateAllowed(): Boolean {
+        if (translationManager.isSourceExcluded(manga)) return false
         val mangaCats = getCategories.await(manga.id).map { it.id.toString() }.toSet()
         val include = translationPreferences.liveTranslateCategories.get()
         val exclude = translationPreferences.liveTranslateCategoriesExclude.get()

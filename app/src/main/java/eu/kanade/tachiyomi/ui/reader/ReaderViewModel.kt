@@ -392,29 +392,6 @@ class ReaderViewModel @JvmOverloads constructor(
                 )
             }
         }
-
-        // TODO(live): 暫時診斷，確認穩定後移除。即時翻譯開著卻沒生效時，使用者看不出原因（key/模型/分類/已翻/未下載都可能）。
-        // 章載完當下回報：currChapter 的 pageLoader 是不是 TranslatingPageLoader（＝即時翻真的套上了）。
-        if (translationPreferences.liveTranslate.get()) {
-            val active = chapter.pageLoader is TranslatingPageLoader
-            // 線上章（未下載且符合 gate）→ 走「下載 + 重載」路徑、即將自動翻；別誤報「未啟動」嚇人。
-            val mangaNow = manga
-            val online = !active && mangaNow != null && !downloadManager.isChapterDownloaded(
-                chapter.chapter.name,
-                chapter.chapter.scanlator,
-                chapter.chapter.url,
-                mangaNow.title,
-                mangaNow.source,
-                skipCache = true,
-            )
-            val msg = when {
-                active -> "即時翻譯：已啟動"
-                online && loader.engineReady() && loader.categoryAllowed() ->
-                    "即時翻譯：線上章，下載後自動翻並重載"
-                else -> "即時翻譯：未啟動（確認 API key／模型／分類，或此章已翻）"
-            }
-            eventChannel.trySend(Event.LiveTranslateStatus(msg))
-        }
         return newChapters
     }
 
@@ -458,10 +435,49 @@ class ReaderViewModel @JvmOverloads constructor(
         if (pageLoader is TranslatingPageLoader) {
             // 已下載 + 已包裝：整章插隊排入翻譯佇列（冪等；loader 內 enqueued 旗標去重）。
             pageLoader.onActivated()
+            // 跨章預取：背景先翻下一章（已下載 + 合格 + 未翻），等使用者翻過去時已（部分）翻好＝體感即時。
+            prefetchNextChapters(chapter)
             return
         }
         // 原生 loader：只有「線上（未下載）且符合即時翻 gate」才觸發下載 + 重載。
         maybeTriggerOnlineLiveTranslate(chapter)
+    }
+
+    /**
+     * 跨章預取（即時翻譯的「體感即時」真解）：讀某 live 章時，背景把**下一章**也排入翻譯佇列（不插隊、不搶當前章），
+     * 翻到下一章時已（部分）翻好、page-level resume 接續。
+     *
+     * 章內預取早已有（[TranslatingPageLoader.onActivated] 把整章一次排入 → 讀第 1 頁時 2..N 已在翻）；這裡補的是跨「章」。
+     * 跨頁併發（多頁同時推論）刻意不做：CPU 已到頂、多頁併發不加速（見 CLAUDE.md §8）。
+     *
+     * 範圍：只預取**已下載**的下一章（不在此自動下載未下載章——尊重資料/電量；未下載章仍由原路徑在讀到時處理）。
+     * gate 與即時翻一致（開關 + 引擎就緒 + 來源/分類），且跳過已整章翻好的章。深度＝下 1 章（保守、夠用）。
+     */
+    private suspend fun prefetchNextChapters(current: ReaderChapter) {
+        val manga = manga ?: return
+        val loader = loader ?: return
+        if (!translationPreferences.liveTranslate.get()) return
+        if (!loader.engineReady()) return
+        if (!loader.autoTranslateAllowed()) return
+        val currentId = current.chapter.id ?: return
+        val nextChapters = getNextChapters.await(manga.id, currentId, onlyUnread = false)
+            .filter { it.id != currentId } // await 回傳含當前章起 → 去掉自己
+            .take(1) // 預取深度＝下 1 章
+        for (next in nextChapters) {
+            if (translationManager.isTranslated(manga, next)) continue // 已整章翻好 → 不重排
+            val downloaded = downloadManager.isChapterDownloaded(
+                next.name,
+                next.scanlator,
+                next.url,
+                manga.title,
+                manga.source,
+                skipCache = true,
+            )
+            if (downloaded) {
+                // 背景翻（非 atFront）：當前章已被 onActivated 插隊到最前、優先翻完，下一章接著翻。
+                translationManager.translate(manga, listOf(next))
+            }
+        }
     }
 
     /**
@@ -480,7 +496,7 @@ class ReaderViewModel @JvmOverloads constructor(
         //   「只開即時翻、沒開下載時翻」的使用者會被它擋掉（線上顯示「未啟動」即此 bug）。
         if (!translationPreferences.liveTranslate.get()) return
         if (!loader.engineReady()) return
-        if (!loader.categoryAllowed()) return
+        if (!loader.autoTranslateAllowed()) return
 
         // 必須是「線上、尚未下載」才走此路徑（已下載章由 TranslatingPageLoader 路徑處理）。
         val isDownloaded = downloadManager.isChapterDownloaded(
@@ -1466,9 +1482,6 @@ class ReaderViewModel @JvmOverloads constructor(
 
         /** 已中止當前章翻譯（取消佇列項 / 中止進行中），給 UI 提示「已中止」。 */
         data object ChapterTranslateStopped : Event
-
-        /** TODO(live): 暫時診斷，確認穩定後移除。即時翻譯開著時、章載完回報是否真的套上 TranslatingPageLoader（給 UI toast）。 */
-        data class LiveTranslateStatus(val message: String) : Event
     }
 
     companion object {
