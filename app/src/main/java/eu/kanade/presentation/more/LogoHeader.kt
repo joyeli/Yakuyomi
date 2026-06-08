@@ -11,6 +11,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import eu.kanade.tachiyomi.R
@@ -24,9 +25,9 @@ fun LogoHeader(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Icon(
-            painter = painterResource(R.drawable.ic_mihon),
+            painter = painterResource(R.drawable.ic_yakuyomi_logo),
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurface,
+            tint = Color.Unspecified, // 彩色 logo，不染色
             modifier = Modifier
                 .padding(iconPadding)
                 .size(64.dp),

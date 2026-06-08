@@ -168,13 +168,6 @@ fun MoreScreen(
             }
             item {
                 TextPreferenceWidget(
-                    title = stringResource(MR.strings.label_support_us),
-                    icon = Icons.Default.VolunteerActivism,
-                    onPreferenceClick = onClickSupport,
-                )
-            }
-            item {
-                TextPreferenceWidget(
                     title = stringResource(MR.strings.pref_category_about),
                     icon = Icons.Outlined.Info,
                     onPreferenceClick = onClickAbout,

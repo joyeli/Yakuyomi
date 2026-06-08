@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Yakuyomi 啟動畫面背景（深色模式同樣走品牌藍，維持一致） -->
+    <color name="splash">#5B92C9</color>
+</resources>
