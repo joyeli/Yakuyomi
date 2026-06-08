@@ -6,6 +6,7 @@ import com.hippo.unifile.UniFile
 import li.joye.yakuyomi.engine.DetectorConfig
 import li.joye.yakuyomi.engine.EngineConfig
 import li.joye.yakuyomi.engine.InpainterConfig
+import li.joye.yakuyomi.engine.LlmProviders
 import li.joye.yakuyomi.engine.ModelSet
 import li.joye.yakuyomi.engine.OcrConfig
 import li.joye.yakuyomi.engine.RenderConfig
@@ -58,6 +59,15 @@ object TranslationEngineConfig {
         return findOnnx(m, "detect", "comictext") != null &&
             findOnnx(m, "ocr") != null &&
             findOnnx(m, "lama") != null
+    }
+
+    /**
+     * 自架 / 自訂 provider（sakura/custom）是否缺 API base。給 isReady 擋下——base 空＝聊天端點空＝必失敗，
+     * 與其讓整章標 Failed，不如 isReady 先回 false（不啟動）。內建端點的 provider 一律回 false（不受影響）。
+     */
+    fun isProviderBaseMissing(prefs: TranslationPreferences): Boolean {
+        val preset = LlmProviders.byId(prefs.provider.get())
+        return preset.baseEditable && prefs.apiBase.get().isBlank()
     }
 
     /**
@@ -125,9 +135,17 @@ object TranslationEngineConfig {
      * 進階數值 parse + clamp、改目標語言時清掉內建 few-shot。
      */
     fun buildEngineConfig(prefs: TranslationPreferences, methodRaw: String): EngineConfig {
+        // 供應商：解析預設表 → 聊天端點 + 模型（per-provider，見引擎 LlmProviders / 設定頁）。
+        // 全 OpenAI 相容（含 Gemini 的 compat 端點）⇒ LlmTranslator 不變，只是換 apiBase/model。
+        val preset = LlmProviders.byId(prefs.provider.get())
+        val chatUrl = LlmProviders.chatUrlOf(preset, prefs.apiBase.get())
         // 語言對（預設日→繁中）。改目標語言就清掉引擎內建的日→繁中 few-shot，免得範例語言跟新目標衝突、把輸出帶偏。
         val target = prefs.targetLangName.get()
         var translatorCfg = TranslatorConfig(
+            provider = preset.id,
+            model = prefs.model.get().ifBlank { preset.defaultModel },
+            // base 空（自架/自訂未填）→ isReady 已擋；萬一漏 → LlmTranslator 拋例外標 Failed（不靜默）。
+            apiBase = chatUrl,
             toLangName = target,
             fromLangName = prefs.sourceLangName.get(),
         )

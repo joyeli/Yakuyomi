@@ -66,7 +66,10 @@ class TranslationEngineService(private val context: Context) {
 
     /** key：優先設定頁（BYOK）；空白時 fallback build-time key（與 [PageTranslator] 同規則）。 */
     private fun apiKey(): String =
-        translationPreferences.apiKey.get().ifBlank { BuildConfig.DEEPSEEK_API_KEY }
+        translationPreferences.activeApiKey().ifBlank {
+            // baked key 只是 DeepSeek 的冒煙測試後備；換 provider 後不套用（免拿 DeepSeek key 去打別家）。
+            if (translationPreferences.provider.get() == "deepseek") BuildConfig.DEEPSEEK_API_KEY else ""
+        }
 
     /**
      * 引擎是否就緒：key 有設 + 3 顆模型齊。給 [ChapterLoader] 決定要不要包 [TranslatingPageLoader]。
@@ -77,6 +80,7 @@ class TranslationEngineService(private val context: Context) {
      */
     fun isReady(): Boolean {
         if (apiKey().isBlank()) return false
+        if (TranslationEngineConfig.isProviderBaseMissing(translationPreferences)) return false
         return TranslationEngineConfig.hasAllModels(context)
     }
 

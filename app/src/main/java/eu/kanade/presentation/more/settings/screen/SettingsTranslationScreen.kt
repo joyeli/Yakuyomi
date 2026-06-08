@@ -1,5 +1,11 @@
 package eu.kanade.presentation.more.settings.screen
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -13,7 +19,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastMap
 import eu.kanade.domain.source.interactor.GetSourcesWithFavoriteCount
 import eu.kanade.presentation.category.visualName
@@ -30,6 +38,8 @@ import kotlinx.collections.immutable.toImmutableMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import li.joye.yakuyomi.engine.LlmModels
+import li.joye.yakuyomi.engine.LlmProviders
 import tachiyomi.domain.category.interactor.GetCategories
 import tachiyomi.domain.download.service.DownloadPreferences
 import tachiyomi.domain.translation.service.TranslationPreferences
@@ -71,6 +81,17 @@ object SettingsTranslationScreen : SearchableSettings {
         // 是否已看過隱私揭露（控制一次性同意對話框；看過後開關直接生效不再跳）。
         val privacyAck by prefs.privacyAcknowledged.collectAsState()
         val cores = remember { Runtime.getRuntime().availableProcessors() }
+
+        // —— 多 LLM 供應商（m-i-t 全部 + OpenRouter，全 OpenAI 相容）+ 自動撈模型清單（借鏡 nextai）——
+        // provider 變更 → 重組金鑰/base/模型欄（每家一格）。撈清單對話框 modelPicker、抓取中旗標 fetchingModels。
+        val providerId by prefs.provider.collectAsState()
+        val providerPreset = remember(providerId) { LlmProviders.byId(providerId) }
+        val modelVal by prefs.model.collectAsState()
+        val providerEntries = remember {
+            LlmProviders.ALL.associate { it.id to it.displayName }.toImmutableMap()
+        }
+        var modelPicker by remember { mutableStateOf<List<String>?>(null) } // 非 null＝顯示挑選對話框
+        var fetchingModels by remember { mutableStateOf(false) }
 
         // 模型狀態（BYOM）：只查 3 顆 onnx「是否存在」（不驗 checksum——模型會更新會誤判）。off-main 算一次、重開設定頁重檢。
         val context = LocalContext.current
@@ -190,6 +211,36 @@ object SettingsTranslationScreen : SearchableSettings {
             )
         }
 
+        // 抓取模型清單對話框：撈到後挑一個 → 寫入 prefs.model。長清單（如 OpenRouter 340）可滾動。
+        modelPicker?.let { models ->
+            AlertDialog(
+                onDismissRequest = { modelPicker = null },
+                title = { Text(text = "選擇模型（${models.size}）") },
+                text = {
+                    LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
+                        items(models) { id ->
+                            Text(
+                                text = id,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        prefs.model.set(id)
+                                        modelPicker = null
+                                    }
+                                    .padding(vertical = 12.dp),
+                            )
+                        }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = {
+                    TextButton(onClick = { modelPicker = null }) {
+                        Text(text = stringResource(MR.strings.action_cancel))
+                    }
+                },
+            )
+        }
+
         // 裝置感知緒數選項：自動 + {2,4,6,8 ≤ 核數}（超過核數的隱藏）
         val threadEntries = remember(cores) {
             buildMap {
@@ -302,10 +353,59 @@ object SettingsTranslationScreen : SearchableSettings {
                         title = stringResource(MR.strings.pref_remove_after_read),
                         subtitle = "%s（與下載設定連動）",
                     ),
+                    // —— LLM 供應商（m-i-t 全部 + OpenRouter，全 OpenAI 相容；切換只換端點/模型/金鑰）——
+                    Preference.PreferenceItem.ListPreference(
+                        preference = prefs.provider,
+                        entries = providerEntries,
+                        title = "LLM 供應商",
+                        subtitle = "%s · 切換保留各家金鑰",
+                        // 換供應商 → 清模型 id（免沿用上一家的；改用新家預設或重新抓取）。
+                        onValueChanged = { _ ->
+                            prefs.model.set("")
+                            true
+                        },
+                    ),
+                    // 自架 / 自訂（sakura/custom）才顯示 base 欄；其餘用內建端點。
                     Preference.PreferenceItem.EditTextPreference(
-                        preference = prefs.apiKey,
+                        preference = prefs.apiBase,
+                        title = "API base",
+                        subtitle = "自架 / 自訂端點，例 http://192.168.1.5:8080/v1",
+                    ).takeIf { providerPreset.baseEditable },
+                    // 金鑰：綁「目前供應商」那一格（§2.1 每家一格、切換不丟、加密落地）。
+                    Preference.PreferenceItem.EditTextPreference(
+                        preference = prefs.apiKeyFor(providerId),
                         title = "API key (BYOK)",
-                        subtitle = "翻譯 LLM 金鑰（OpenAI 相容，預設 DeepSeek）",
+                        subtitle = "${providerPreset.displayName} 金鑰（加密存本機）",
+                    ),
+                    // 模型：手填 id，或用下方「抓取模型」撈清單選；空＝用該供應商預設。
+                    Preference.PreferenceItem.EditTextPreference(
+                        preference = prefs.model,
+                        title = "模型",
+                        subtitle = modelVal.ifBlank { "預設：${providerPreset.defaultModel}" },
+                    ),
+                    // 抓取可用模型（借鏡 nextai listModels：OpenAI /v1/models、Gemini /v1beta/models；撈不到→手填）。
+                    Preference.PreferenceItem.TextPreference(
+                        title = "↻ 抓取可用模型",
+                        subtitle = if (fetchingModels) "抓取中…" else "從供應商撈最新清單供選（需先填 key）",
+                        onClick = {
+                            if (!fetchingModels) {
+                                scope.launch {
+                                    fetchingModels = true
+                                    val url = LlmProviders.modelsUrlOf(providerPreset, prefs.apiBase.get())
+                                    val list = LlmModels.list(
+                                        url,
+                                        providerPreset.modelSource,
+                                        prefs.apiKeyFor(providerId).get(),
+                                    )
+                                    fetchingModels = false
+                                    if (list.isEmpty()) {
+                                        context.toast("撈不到模型清單，請手動輸入 model id")
+                                    } else {
+                                        modelPicker = list.map { it.id }
+                                    }
+                                }
+                            }
+                        },
                     ),
                     // 隱私揭露（資訊列、無動作）：讓使用者翻譯前知道「什麼會離開裝置」。與一次性同意對話框同文案。
                     Preference.PreferenceItem.TextPreference(

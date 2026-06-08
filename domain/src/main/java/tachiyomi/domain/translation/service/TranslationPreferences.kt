@@ -1,6 +1,7 @@
 package tachiyomi.domain.translation.service
 
 import tachiyomi.core.common.preference.EncryptedStringPreference
+import tachiyomi.core.common.preference.Preference
 import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.core.common.preference.StringCrypto
 
@@ -12,9 +13,12 @@ import tachiyomi.core.common.preference.StringCrypto
  * 並把舊的明文 key（`translation_api_key`）一次性遷移過去後清掉。[crypto] 為 null（如測試）時退化成不加密。
  */
 class TranslationPreferences(
-    preferenceStore: PreferenceStore,
+    private val preferenceStore: PreferenceStore,
     crypto: StringCrypto? = null,
 ) {
+
+    /** 給 [apiKeyFor] 為非預設 provider 建金鑰偏好用（與 [apiKey] 同一把 keystore cipher）。 */
+    private val cipher: StringCrypto = crypto ?: IdentityCrypto
 
     /** 下載完成後自動翻譯該章（連同 isReady 的模型/key 檢查）。 */
     val translationEnabled = preferenceStore.getBoolean("translation_enabled", false)
@@ -54,6 +58,41 @@ class TranslationPreferences(
         defaultValue = "",
         legacyPlaintext = preferenceStore.getString("translation_api_key", ""),
     )
+
+    /**
+     * 目前選用的 LLM 供應商 id（對應引擎 `LlmProviders` 預設表：deepseek/openai/gemini/groq/qwen/openrouter/sakura/custom）。
+     * 切換 provider 不改聊天協定（全 OpenAI 相容），只換 apiBase/model/key（每家一格，見 [apiKeyFor]）。
+     */
+    val provider = preferenceStore.getString("translation_provider", "deepseek")
+
+    /** 選用的 model id（空＝用該 provider 的預設模型）。可手填或從「抓取模型」清單選（引擎 `LlmModels.list`）。 */
+    val model = preferenceStore.getString("translation_model", "")
+
+    /** 自架 / 自訂 provider（sakura/custom）的 API base，例 `http://192.168.1.5:8080/v1`；其餘 provider 用內建端點時忽略。 */
+    val apiBase = preferenceStore.getString("translation_api_base", "")
+
+    /** 每個 provider 一格的金鑰快取（§2.1：切換 provider 保留各家 key）。 */
+    private val apiKeyCache = HashMap<String, Preference<String>>()
+
+    /**
+     * 取某 provider 的金鑰偏好（每家一格，加密落地）。
+     * `deepseek` 沿用既有 slot（`translation_api_key_enc`，含舊明文遷移、保留現有 key）；其餘為 `translation_api_key_enc__<id>`。
+     */
+    @Synchronized
+    fun apiKeyFor(providerId: String): Preference<String> = apiKeyCache.getOrPut(providerId) {
+        if (providerId == "deepseek") {
+            apiKey
+        } else {
+            EncryptedStringPreference(
+                backing = preferenceStore.getString("translation_api_key_enc__$providerId", ""),
+                crypto = cipher,
+                defaultValue = "",
+            )
+        }
+    }
+
+    /** 目前 provider 的金鑰（明文；引擎建構用）。 */
+    fun activeApiKey(): String = apiKeyFor(provider.get()).get()
 
     /** 是否已看過翻譯隱私揭露（一次性同意對話框只跳一次）。 */
     val privacyAcknowledged = preferenceStore.getBoolean("translation_privacy_ack", false)
@@ -102,6 +141,9 @@ class TranslationPreferences(
     val fontScale = preferenceStore.getString("translation_font_scale", "0.85")             // 0.3–1.5
 
     companion object {
+        // ⚠️ 與引擎 TranslatorConfig.toLangName / fromLangName 預設「逐字一致」（引擎＝真理來源）。
+        //   鏡像而非共用：本類在 :domain，:domain 不依賴引擎（只 :app 依賴）→ 不能 import 引擎常數。
+        //   改一邊請同步改 engine/Config.kt，否則 few-shot 保留/清除判斷會 drift。
         /** 預設目標＝台灣繁中。非此值時 PageTranslator 不放引擎內建的日→繁中 few-shot（避免範例語言衝突）。 */
         const val DEFAULT_TARGET_LANG = "Traditional Chinese (Taiwan, 台灣慣用的繁體中文用語)"
         const val DEFAULT_SOURCE_LANG = "Japanese"
