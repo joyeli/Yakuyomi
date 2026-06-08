@@ -64,6 +64,7 @@ import tachiyomi.core.common.preference.Preference
 import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.core.common.util.system.ImageUtil
 import tachiyomi.core.common.util.system.logcat
+import tachiyomi.domain.translation.service.TranslationPreferences
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.widget.WidgetManager
 import uy.kohesive.injekt.Injekt
@@ -159,6 +160,16 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
 
         // Updates widget update
         WidgetManager(Injekt.get(), Injekt.get()).apply { init(scope) }
+
+        // 即時翻譯開著且引擎就緒（key + 模型）→ app 一啟動就背景預暖引擎（~450MB ONNX），
+        // 避免進第一章翻第一頁時才現載模型而特別久。fire-and-forget（背景 IO scope、不卡啟動）；
+        // 釋放仍由原機制管（即時翻關 / onTrimMemory / 佇列空且即時翻關）。
+        runCatching {
+            val translationEngineService = Injekt.get<TranslationEngineService>()
+            if (Injekt.get<TranslationPreferences>().liveTranslate.get() && translationEngineService.isReady()) {
+                translationEngineService.warmUpAsync()
+            }
+        }
 
         if (!LogcatLogger.isInstalled) {
             val minLogPriority = when {
