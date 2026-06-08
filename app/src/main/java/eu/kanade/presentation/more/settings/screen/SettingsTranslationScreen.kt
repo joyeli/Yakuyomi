@@ -27,6 +27,7 @@ import eu.kanade.domain.source.interactor.GetSourcesWithFavoriteCount
 import eu.kanade.presentation.category.visualName
 import eu.kanade.presentation.more.settings.Preference
 import eu.kanade.presentation.more.settings.widget.TriStateListDialog
+import eu.kanade.tachiyomi.data.translation.ModelDownloadManager
 import eu.kanade.tachiyomi.data.translation.TranslationEngineConfig
 import eu.kanade.tachiyomi.data.translation.TranslationEngineService
 import eu.kanade.tachiyomi.data.translation.TranslationManager
@@ -95,12 +96,17 @@ object SettingsTranslationScreen : SearchableSettings {
 
         // 模型狀態（BYOM）：只查 3 顆 onnx「是否存在」（不驗 checksum——模型會更新會誤判）。off-main 算一次、重開設定頁重檢。
         val context = LocalContext.current
-        val modelPresence by produceState<List<Pair<String, Boolean>>?>(initialValue = null) {
+        // 模型自動下載（從 release 抓 + sha256 驗，落 filesDir/models，與 BYOM 並存）。
+        val modelDownloadManager = remember { Injekt.get<ModelDownloadManager>() }
+        val modelDownloadState by modelDownloadManager.state.collectAsState()
+        // 下載完成才重算模型狀態（用 Boolean 當 key，避免每個進度 tick 都重掃）。
+        val modelsJustDownloaded = modelDownloadState is ModelDownloadManager.State.Done
+        val modelPresence by produceState<List<Pair<String, Boolean>>?>(initialValue = null, modelsJustDownloaded) {
             value = withContext(Dispatchers.IO) { TranslationEngineConfig.modelPresence(context) }
         }
         val modelStatusSubtitle = modelPresence?.let { mp ->
             mp.joinToString("・") { (n, ok) -> "$n ${if (ok) "✓" else "✗"}" } +
-                if (mp.all { it.second }) "" else "（缺＝把 3 顆 onnx 放到儲存位置的 models/）"
+                if (mp.all { it.second }) "" else "（缺＝把 3 顆 onnx 放到儲存位置的 models/，或用下方「下載模型」）"
         } ?: "檢查中…"
 
         // 即時翻譯分類過濾（包含/排除，鏡射下載「新章分類」）：取所有書庫分類 + tri-state 對話框狀態。
@@ -416,6 +422,17 @@ object SettingsTranslationScreen : SearchableSettings {
                     Preference.PreferenceItem.TextPreference(
                         title = "模型狀態",
                         subtitle = modelStatusSubtitle,
+                    ),
+                    // 下載模型：從 release 自動抓 3 顆 + sha256 驗（落 filesDir/models）。與 BYOM 並存、冪等可重按。
+                    Preference.PreferenceItem.TextPreference(
+                        title = "下載模型",
+                        subtitle = when (val s = modelDownloadState) {
+                            is ModelDownloadManager.State.Running -> "${s.label}　${s.percent}%"
+                            ModelDownloadManager.State.Done -> "下載完成"
+                            is ModelDownloadManager.State.Error -> "失敗：${s.message}（點選重試）"
+                            ModelDownloadManager.State.Idle -> "從 release 自動下載 3 顆模型（約 467 MB）+ sha256 驗證"
+                        },
+                        onClick = { modelDownloadManager.download() },
                     ),
                     Preference.PreferenceItem.ListPreference(
                         preference = prefs.targetLangName,

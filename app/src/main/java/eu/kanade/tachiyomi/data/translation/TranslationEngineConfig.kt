@@ -50,15 +50,36 @@ object TranslationEngineConfig {
             n.endsWith(".onnx") && keywords.any { n.contains(it) }
         }
 
+    /** 自動下載落點：app 私有 `filesDir/models/`（[ModelDownloadManager] 寫這、引擎直接從此載入，免 SAF）。 */
+    fun downloadedDir(context: Context): File = File(context.filesDir, MODELS_DIR)
+
+    /** 在自動下載區找符合 [keywords] 的 `.onnx`（已是本機 [File]、免複製）。 */
+    private fun downloadedOnnx(context: Context, vararg keywords: String): File? =
+        downloadedDir(context).takeIf { it.isDirectory }?.listFiles()?.firstOrNull { f ->
+            val n = f.name.lowercase()
+            n.endsWith(".onnx") && keywords.any { n.contains(it) }
+        }
+
+    /** 某角色是否存在（自動下載區 或 SAF BYOM 區，皆不複製）。 */
+    private fun rolePresent(context: Context, saf: UniFile?, vararg keywords: String): Boolean =
+        downloadedOnnx(context, *keywords) != null || (saf != null && findOnnx(saf, *keywords) != null)
+
+    /** 解析某角色 → 本機檔路徑：自動下載區直接用、否則 SAF + [ensureLocal] 複製。缺＝null。 */
+    private fun resolveRole(context: Context, saf: UniFile?, vararg keywords: String): String? {
+        downloadedOnnx(context, *keywords)?.let { return it.absolutePath }
+        val u = saf?.let { findOnnx(it, *keywords) } ?: return null
+        return ensureLocal(context, u)
+    }
+
     /**
      * 模型三顆是否齊（detector/ocr/lama）。給 [PageTranslator.isReady] / [TranslationEngineService.isReady] 共用，
-     * 避免兩處各寫一份檔名比對。
+     * 避免兩處各寫一份檔名比對。自動下載區 + SAF BYOM 區擇一即可。
      */
     fun hasAllModels(context: Context): Boolean {
-        val m = modelsDir(context) ?: return false
-        return findOnnx(m, "detect", "comictext") != null &&
-            findOnnx(m, "ocr") != null &&
-            findOnnx(m, "lama") != null
+        val saf = modelsDir(context)
+        return rolePresent(context, saf, "detect", "comictext") &&
+            rolePresent(context, saf, "ocr") &&
+            rolePresent(context, saf, "lama")
     }
 
     /**
@@ -75,11 +96,11 @@ object TranslationEngineConfig {
      * **只查存在、不驗 checksum**——模型權重會更新（m-i-t / Koharu 後續版本），checksum 會誤判成「損毀」；BYOM 也允許換版。
      */
     fun modelPresence(context: Context): List<Pair<String, Boolean>> {
-        val m = modelsDir(context)
+        val saf = modelsDir(context)
         return listOf(
-            "偵測" to (m != null && findOnnx(m, "detect", "comictext") != null),
-            "OCR" to (m != null && findOnnx(m, "ocr") != null),
-            "去字" to (m != null && findOnnx(m, "lama") != null),
+            "偵測" to rolePresent(context, saf, "detect", "comictext"),
+            "OCR" to rolePresent(context, saf, "ocr"),
+            "去字" to rolePresent(context, saf, "lama"),
         )
     }
 
@@ -90,13 +111,12 @@ object TranslationEngineConfig {
      * 複製在背景執行緒（呼叫端的 suspend translate 內）發生、不卡 UI。
      */
     fun resolveModelSet(context: Context): ModelSetBundle? {
-        val m = modelsDir(context) ?: return null
-        val detU = findOnnx(m, "detect", "comictext") ?: return null
-        val ocrU = findOnnx(m, "ocr") ?: return null
-        val lamaU = findOnnx(m, "lama") ?: return null
+        val saf = modelsDir(context)
+        val det = resolveRole(context, saf, "detect", "comictext") ?: return null
+        val ocr = resolveRole(context, saf, "ocr") ?: return null
+        val lama = resolveRole(context, saf, "lama") ?: return null
         val alphabet = context.assets.open(ALPHABET).bufferedReader().use { it.readLines() }
-        val models = ModelSet(ensureLocal(context, detU), ensureLocal(context, ocrU), ensureLocal(context, lamaU))
-        return ModelSetBundle(models, alphabet)
+        return ModelSetBundle(ModelSet(det, ocr, lama), alphabet)
     }
 
     /**

@@ -41,6 +41,7 @@ object Notifications {
     const val ID_DOWNLOAD_CHAPTER_ERROR = -202
     const val CHANNEL_TRANSLATOR_PROGRESS = "translator_progress_channel"
     const val ID_TRANSLATION_PROGRESS = -210
+    const val ID_MODEL_DOWNLOAD = -211
 
     /**
      * Notification channel and ids used by the library updater.
