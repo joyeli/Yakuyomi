@@ -24,7 +24,6 @@ import li.joye.yakuyomi.engine.Renderer
 import li.joye.yakuyomi.engine.TextLine
 import li.joye.yakuyomi.engine.TextOrientation
 import li.joye.yakuyomi.engine.TextRegion
-import li.joye.yakuyomi.engine.Yakuyomi
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.translation.service.TranslationPreferences
@@ -44,6 +43,13 @@ import uy.kohesive.injekt.api.get
 class PageTranslator(private val context: Context) {
 
     private val translationPreferences: TranslationPreferences = Injekt.get()
+
+    /**
+     * 常駐（warm）翻譯引擎服務（process singleton）：[translateChapter] 逐頁透過它翻，
+     * 引擎跨章復用、不每章重載 ~450MB（M4 ⑦）。本服務內部以 Mutex 序列化引擎存取；
+     * drain 本就是單一消費者，故這裡的呼叫天然序列、額外鎖只是保險。
+     */
+    private val engineService: TranslationEngineService = Injekt.get()
 
     /**
      * 保護 manifest 的「讀-改-寫」（[persistLivePage] 可能多頁併發落地）。
@@ -80,8 +86,8 @@ class PageTranslator(private val context: Context) {
         onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
         shouldStop: () -> Boolean = { false },
     ): Int {
-        // 模型解析 + 字元表（缺任一顆模型回 null → 不翻）：委派共用 [TranslationEngineConfig]（與即時翻譯同一份）。
-        val bundle = TranslationEngineConfig.resolveModelSet(context) ?: return 0
+        // 模型齊備才翻（缺任一顆 → 不翻）。引擎本身由 [engineService] 持有/建構（warm、跨章復用），這裡不再自建。
+        if (!TranslationEngineConfig.hasAllModels(context)) return 0
         val images = chapterDir.listFiles()
             ?.filter { f -> f.isFile && (f.name?.substringAfterLast('.', "")?.lowercase() ?: "") in IMAGE_EXT }
             ?.sortedBy { it.name.orEmpty() }
@@ -102,47 +108,43 @@ class PageTranslator(private val context: Context) {
         val keepMaterials = translationPreferences.keepMaterials.get() || translationPreferences.liveTranslate.get()
         // 去字方法原始字串（round-trip 用）：素材記成它，重繪時照 method 還原（不存 boxfill/auto 那層映射後值）。
         // 由參數帶入（佇列逐章擷取的去字法、可在排隊時被改）——預設＝全域偏好，與舊版讀 pref 行為一致。
+        // 同時也是傳給 [engineService.translatePage] 的去字法：與引擎當前去字法不同時，服務會重建引擎（章與章間換法才重載）。
         val inpaintMethodRaw = method
-
-        // 引擎設定（偵測/OCR/翻譯/去字/排版）：委派共用 [TranslationEngineConfig]（與即時翻譯同一份、避免飄移）。
-        // 離線整章翻＝照使用者選的去字方法（inpaintMethodRaw）；即時逐頁翻才固定 boxfill。
-        val cfg = TranslationEngineConfig.buildEngineConfig(translationPreferences, inpaintMethodRaw)
 
         val total = images.size
         var processed = total - pending.size // resume：已完成頁先計入進度
         onProgress(processed, total)
         var translated = 0
         try {
-            // 工廠取引擎、`use { }` 自動釋放三顆模型
-            Yakuyomi.create(bundle.models, bundle.alphabet, apiKey(), cfg).use { engine ->
-                for (img in pending) {
-                    if (shouldStop()) break // 合作式中止：暫停/取消 → 停在頁邊界
-                    val name = img.name ?: continue
-                    val bmp = context.contentResolver.openInputStream(img.uri)
-                        ?.use { BitmapFactory.decodeStream(it) } ?: continue
-                    when (val r = engine.translatePage(bmp)) {
-                        is PageResult.Translated -> {
-                            writeBack(img, r.page)
-                            // 保留重繪素材（best-effort、不擋翻譯）：bmp 為剛解碼的原圖（引擎不會 mutate 輸入、回的是新 bitmap）。
-                            if (keepMaterials && r.analysis != null) {
-                                saveMaterials(chapterDir, name, bmp, r.analysis!!, inpaintMethodRaw)
-                            }
-                            translated++
-                            done.add(name)
-                            writeManifest(chapterDir, done)
+            // 逐頁透過 warm [engineService] 翻（引擎跨章常駐、不每章重載 ~450MB）。
+            // 服務內部以 Mutex 序列化引擎存取；drain 是單一消費者故呼叫天然序列。§11 三態處理與舊版完全一致。
+            for (img in pending) {
+                if (shouldStop()) break // 合作式中止：暫停/取消 → 停在頁邊界
+                val name = img.name ?: continue
+                val bmp = context.contentResolver.openInputStream(img.uri)
+                    ?.use { BitmapFactory.decodeStream(it) } ?: continue
+                when (val r = engineService.translatePage(bmp, inpaintMethodRaw)) {
+                    is PageResult.Translated -> {
+                        writeBack(img, r.page)
+                        // 保留重繪素材（best-effort、不擋翻譯）：bmp 為剛解碼的原圖（引擎不會 mutate 輸入、回的是新 bitmap）。
+                        if (keepMaterials && r.analysis != null) {
+                            saveMaterials(chapterDir, name, bmp, r.analysis!!, inpaintMethodRaw)
                         }
-                        is PageResult.Skipped -> {
-                            logcat { "翻譯略過 $name：${r.reason}" }
-                            done.add(name)
-                            writeManifest(chapterDir, done) // 略過＝沒字可翻、算處理過、不重試
-                        }
-                        is PageResult.Failed ->
-                            logcat(LogPriority.WARN) { "翻譯失敗 $name：${r.reason}" } // 不標記、下次重試
+                        translated++
+                        done.add(name)
+                        writeManifest(chapterDir, done)
                     }
-                    bmp.recycle()
-                    processed++
-                    onProgress(processed, total)
+                    is PageResult.Skipped -> {
+                        logcat { "翻譯略過 $name：${r.reason}" }
+                        done.add(name)
+                        writeManifest(chapterDir, done) // 略過＝沒字可翻、算處理過、不重試
+                    }
+                    is PageResult.Failed ->
+                        logcat(LogPriority.WARN) { "翻譯失敗 $name：${r.reason}" } // 不標記、下次重試（含引擎不可用）
                 }
+                bmp.recycle()
+                processed++
+                onProgress(processed, total)
             }
         } catch (e: Throwable) {
             logcat(LogPriority.ERROR, e) { "translateChapter 例外（保留原圖）" }
@@ -198,6 +200,60 @@ class PageTranslator(private val context: Context) {
         }.getOrElse { e ->
             logcat(LogPriority.WARN, e) { "即時翻譯落地頁失敗 $name" }
             false
+        }
+    }
+
+    /**
+     * 翻譯「單一頁」（reader 內「翻譯這頁」控制鈕用）：讀 [chapterDir] 內檔名 == [pageFileName] 的頁圖 →
+     * 透過 warm [engineService] 翻 → [PageResult.Translated] 時用 [persistLivePage] 落地
+     * （覆蓋下載檔 + 強制存重繪素材 + 記 manifest，與佇列逐頁完全相同的形狀）→ 回傳是否翻成功。
+     *
+     * 與佇列共用同一條路：
+     *  - **引擎鎖**：走 [engineService.translatePage]，內部 [Mutex] 與佇列 drain 序列化（同實例不會並發翻多頁）。
+     *  - **manifest 鎖**：[persistLivePage] 的 manifest 讀-改-寫經 [manifestMutex] 序列化（與佇列逐頁落地不互相蓋掉）。
+     *
+     * §11：只有 [PageResult.Translated] 才覆蓋；[PageResult.Skipped]（無字）/[PageResult.Failed]（網路/引擎）→
+     * 不動原圖、回 false（呼叫端據此提示、頁面維持原圖）。只對「已下載章（頁圖在磁碟、鬆散資料夾）」有意義。
+     *
+     * @param method 去字法原始字串（boxfill / auto_whole / auto_tile）；預設＝目前全域偏好。傳給引擎、也存進素材。
+     * @return true＝翻成功並已覆蓋落地；false＝略過/失敗/解析不到檔（原圖未動）。
+     */
+    suspend fun translateSinglePage(
+        chapterDir: UniFile,
+        pageFileName: String,
+        method: String = translationPreferences.inpaintMethod.get(),
+    ): Boolean {
+        if (!TranslationEngineConfig.hasAllModels(context)) return false
+        // 解析目標頁圖檔（頂層、副檔名為圖、檔名 == pageFileName）。
+        val pageFile = chapterDir.listFiles()
+            ?.firstOrNull { f ->
+                f.isFile &&
+                    (f.name?.substringAfterLast('.', "")?.lowercase() ?: "") in IMAGE_EXT &&
+                    f.name == pageFileName
+            }
+            ?: return false
+        val original = context.contentResolver.openInputStream(pageFile.uri)
+            ?.use { BitmapFactory.decodeStream(it) }
+            ?: return false
+        return try {
+            when (val r = engineService.translatePage(original, method)) {
+                is PageResult.Translated -> {
+                    // 與佇列逐頁一致：覆蓋下載檔 + 強制存素材（重繪用）+ 記 manifest（manifestMutex 序列化）。
+                    persistLivePage(chapterDir, pageFile, original, r.page, r.analysis, method)
+                    r.page.recycle()
+                    true
+                }
+                is PageResult.Skipped -> {
+                    logcat { "翻譯這頁略過 $pageFileName：${r.reason}" } // 無字可翻：不覆蓋、不算成功
+                    false
+                }
+                is PageResult.Failed -> {
+                    logcat(LogPriority.WARN) { "翻譯這頁失敗 $pageFileName：${r.reason}" } // 網路/引擎：留原圖、可重試
+                    false
+                }
+            }
+        } finally {
+            original.recycle()
         }
     }
 

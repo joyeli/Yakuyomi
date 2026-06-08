@@ -26,6 +26,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
@@ -53,6 +55,7 @@ import eu.kanade.presentation.reader.DisplayRefreshHost
 import eu.kanade.presentation.reader.OrientationSelectDialog
 import eu.kanade.presentation.reader.ReRenderMethodDialog
 import eu.kanade.presentation.reader.ReaderContentOverlay
+import eu.kanade.presentation.reader.ReaderLiveTranslateIndicator
 import eu.kanade.presentation.reader.ReaderPageActionsDialog
 import eu.kanade.presentation.reader.ReaderPageIndicator
 import eu.kanade.presentation.reader.ReadingModeSelectDialog
@@ -252,6 +255,20 @@ class ReaderActivity : BaseActivity() {
                         // 重繪結果提示：成功＝頁已重繪（holder 已自動刷新）；失敗＝無素材或出錯（原圖保留不動）。
                         toast(if (event.success) "已重繪此頁" else "重繪失敗（無素材或出錯）")
                     }
+                    ReaderViewModel.Event.TranslatePageStarted -> {
+                        // 開始翻譯當頁提示：頁面同時顯示 per-page 轉圈圈；IO 約數秒。
+                        toast("翻譯這頁中…")
+                    }
+                    is ReaderViewModel.Event.TranslatePageResult -> {
+                        // 翻譯當頁結果：成功＝頁已覆蓋（holder 已自動刷新）；失敗/略過＝原圖保留不動（§11）。
+                        toast(if (event.success) "已翻譯此頁" else "翻譯失敗（略過或出錯）")
+                    }
+                    ReaderViewModel.Event.ChapterTranslateStarted -> {
+                        toast("已開始翻譯這話")
+                    }
+                    ReaderViewModel.Event.ChapterTranslateStopped -> {
+                        toast("已中止這話翻譯")
+                    }
                     is ReaderViewModel.Event.LiveTranslateStatus -> {
                         // TODO(live): 暫時診斷，確認穩定後移除。即時翻譯開著時、章載完 toast 是否真的套上 TranslatingPageLoader。
                         toast(event.message)
@@ -284,6 +301,24 @@ class ReaderActivity : BaseActivity() {
             }
 
             ContentOverlay(state = state)
+
+            // 即時翻譯指示器：當前章正在翻譯/排隊時，左上角（狀態列下方）顯示小藥丸。
+            // 進度為 null（當前章不在佇列）→ 整個不組合、不顯示。
+            // 選單開啟時隱藏，避免疊到頂部 app bar 的返回鈕／章名（選單開著時章資訊已在 app bar）；
+            // 這是「選單收起」狀態下的常駐進度。Surface 不可點 ⇒ 觸控穿透、不影響點擊切換選單。
+            if (!state.menuVisible) {
+                state.liveTranslateProgress?.let { progress ->
+                    ReaderLiveTranslateIndicator(
+                        translating = !progress.queued,
+                        done = progress.done,
+                        total = progress.total,
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .statusBarsPadding()
+                            .padding(8.dp),
+                    )
+                }
+            }
 
             AppBars(state = state)
         }
@@ -337,18 +372,22 @@ class ReaderActivity : BaseActivity() {
             }
             is ReaderViewModel.Dialog.PageActions -> {
                 val page = dialog.page
+                // 已下載章＝頁圖在磁碟（可重繪/可單頁翻）；DownloadPageLoader＝已下載、TranslatingPageLoader＝即時翻（同樣落盤）。
+                val pageOnDisk = page.chapter.pageLoader is DownloadPageLoader ||
+                    page.chapter.pageLoader is TranslatingPageLoader
                 ReaderPageActionsDialog(
                     onDismissRequest = onDismissRequest,
                     onSetAsCover = viewModel::setAsCover,
                     onShare = viewModel::shareImage,
                     onSave = viewModel::saveImage,
                     // 只有已下載章（頁圖在磁碟、可能留有重繪素材）才顯示「重繪」鈕；線上/封存頁無素材，不給此選項。
-                    // DownloadPageLoader＝已整章翻好直接服務譯圖；TranslatingPageLoader＝即時翻（同樣落盤、逐頁存素材）→ 兩者都允許重繪。
-                    onReRender = { viewModel.openReRenderDialog(page) }
-                        .takeIf {
-                            page.chapter.pageLoader is DownloadPageLoader ||
-                                page.chapter.pageLoader is TranslatingPageLoader
-                        },
+                    onReRender = { viewModel.openReRenderDialog(page) }.takeIf { pageOnDisk },
+                    // 「翻譯這頁」：只在已下載章提供（單頁進引擎翻、就地覆蓋）；線上章本里程碑先不給。
+                    onTranslatePage = viewModel::translateThisPage.takeIf { pageOnDisk },
+                    // 「開始/中止這話翻譯」：依當前章是否在翻譯佇列（liveTranslateProgress != null）二選一顯示。
+                    onStartChapterTranslate = viewModel::startChapterTranslate,
+                    onStopChapterTranslate = viewModel::stopChapterTranslate,
+                    isChapterTranslating = state.liveTranslateProgress != null,
                 )
             }
             is ReaderViewModel.Dialog.ReRenderMethod -> {

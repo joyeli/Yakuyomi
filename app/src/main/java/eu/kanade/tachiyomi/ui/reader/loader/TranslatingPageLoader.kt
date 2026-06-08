@@ -14,8 +14,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.yield
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.manga.model.Manga
@@ -23,37 +23,41 @@ import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
 /**
- * 即時翻譯（reader 邊讀邊翻）loader——**包**在另一個 [PageLoader] 外面（本里程碑＝[DownloadPageLoader]，已下載章）。
+ * 即時翻譯（reader 邊讀邊翻）loader——**包**在 [DownloadPageLoader] 外面（**只服務已下載章**）。
  *
- * **設計（顯示層、不自己翻）**：開章時把**整章**排入受管理的翻譯佇列（[TranslationManager.translate]，與
- * 「下載時翻譯」「漫畫頁翻譯鈕」同一條），由佇列在背景用 [PageTranslator.translateChapter] 整章翻、就地覆蓋頁圖 +
- * 存重繪素材 + 記 manifest。本 loader **不再進引擎翻**任何頁，只負責：
- *  - 顯示原圖，直到某頁被佇列翻好（manifest 命中）才**換上**譯圖。
+ * **線上（未下載）章不再由本 loader 處理**：舊版「包住 [HttpPageLoader]、開章觸發下載、同 session 串流改指」這條
+ * 在實機不可靠（下載完同 session 不換、要退出重進），已整段移除。線上的即時翻改由 [ReaderViewModel] 在
+ * 「當前正在讀的章」上：下載該章 → 完成後**重載章節**進入可靠的「已下載路徑」（reload 後章變已下載 →
+ * [ChapterLoader.shouldTranslateLive] 才把它包進本 loader）。淨效果不變，但靠成熟的下載路徑、可靠。
+ *
+ * **設計（顯示層、不自己翻）**：**被啟動時**（[onActivated]，只有「正在讀的章」會被 [ReaderViewModel] 啟動）把
+ * **整章**排入受管理的翻譯佇列（[TranslationManager.translate]，與「下載時翻譯」「漫畫頁翻譯鈕」同一條），由佇列
+ * 在背景用 [PageTranslator.translateChapter] 整章翻、就地覆蓋頁圖 + 存重繪素材 + 記 manifest。本 loader **不進引擎翻**
+ * 任何頁，只負責：
+ *  - 顯示下載原檔，直到某頁被佇列翻好（manifest 命中）才**換上**譯圖。
  *  - 觀察佇列狀態（[TranslationManager.queueState]），每次變動掃一次 manifest，把新翻好的頁批次換頁。
  *
- * 這把舊版「loader 自己逐頁進引擎翻、只翻讀到/預取的 2-3 頁」改成「整章持續翻、且在受管理佇列裡」：
- *  - 整章都會被翻（不只讀到的幾頁）。
- *  - 進佇列 ⇒ 可暫停/取消/重試、在「翻譯佇列」畫面可見。
- *  - 章節清單指示器觀察同一個 [TranslationManager.queueState] ⇒ 自動顯示「排隊中／翻譯中」（免額外接線）。
+ * **只有「正在讀的章」會觸發**（修「讀第 N 話卻把預取的 N±1 話也自動下載/翻譯」的 bug）：
+ *  - [loadPage] **不再**自動排入翻譯——它只登記頁 + 顯示（manifest 命中換譯圖、否則顯示下載原圖）。
+ *  - 排入翻譯只發生在 [onActivated]，而 [onActivated] 只由 [ReaderViewModel] 對**當前章**呼叫；
+ *    預取/相鄰章的 loader 會被建立、會 [getPages]/[loadPage]，但**永不被啟動** → 永不排入翻譯佇列。
  *
  * **持久化 / resume**：全交給佇列的 [PageTranslator.translateChapter]——譯圖覆蓋下載檔 + 存素材（`.yakuyomi/`，
  * 即時翻時 [PageTranslator] 強制存）+ 記 manifest（`.yakuyomi_translated`）。退出再進章節 → manifest 命中、
  * 本 loader 直接換上已覆蓋的譯圖（不重翻）；page-level resume 只補沒翻的頁。
  *
  * **換頁機制（不擋讀：翻譯期間維持原圖、譯好才換）**（與 [DownloadPageLoader.retryPage] 同套）：
- * holder 同時 `loadPage(page)` 並 `statusFlow.collectLatest { Ready -> setImage() }`；已下載頁一開始就是 Ready →
- * 先 decode 一次原圖（可讀）。本 loader 在佇列把某頁翻好後，用 [swapToFile] 驅動一次 [Page.State.Queue] →
- * （`yield()` 後）[Page.State.Ready] 真轉換，觸發 holder 重 decode `page.stream`（重開已被覆蓋的下載檔）讀到譯圖。
- * 這一閃只發生在「真的換了檔」的頁、且只在翻好的當下，故不擋讀。
+ * holder 同時 `loadPage(page)` 並 `statusFlow.collectLatest { Ready -> setImage() }`。本 loader 在「翻好的譯圖」落盤時
+ * 用 [swapToFile] 驅動一次 [Page.State.Queue] →（`delay()` 後）[Page.State.Ready] 真轉換，
+ * 觸發 holder 重 decode `page.stream` 讀到譯圖。這一閃只發生在「真的換了檔」的頁、且只在該當下，故不擋讀。
  *
- * §11：翻譯失敗/略過 → 下載檔維持原圖（[PageTranslator.translateChapter] 只覆蓋成功頁、只把成功頁記進 manifest），
- * 本 loader 對未命中 manifest 的頁**不換頁** → 原圖持續可讀，絕不顯示空白/更糟的頁。
+ * §11：永不顯示比來源更糟的東西——維持下載原檔、譯好才換譯圖；翻譯失敗/略過 → 下載檔維持原圖
+ * （[PageTranslator.translateChapter] 只覆蓋成功頁、只把成功頁記進 manifest），本 loader 對未命中 manifest 的頁
+ * **不換頁** → 原圖持續可讀，絕不顯示空白/更糟的頁。
  *
- * **佇列優先序（正在讀的章插隊）**：開章＝把這章插到佇列**最前**（[TranslationManager.translate] `atFront=true`），
- * 搶在其他排隊章之前翻 → 讀者不必盯著原圖等前面整批章翻完。
+ * **佇列優先序（正在讀的章插隊）**：[onActivated] ＝把這章插到佇列**最前**（[TranslationManager.translate] `atFront=true`），
+ * 搶在其他排隊章之前翻 → 讀者不必盯著原圖等其他排隊章翻完。
  * **仍有的限制**：若**另一章正在翻中**（TRANSLATING），那章不被中途搶占（會翻完當前章才輪到本章）；本章會排到所有 QUEUE 項之前。
- *
- * TODO(live): 線上（未下載）路徑——包 [HttpPageLoader]，把下載到的原圖落地後排入佇列翻（本里程碑只做下載路徑）。
  */
 internal class TranslatingPageLoader(
     private val delegate: PageLoader,
@@ -73,7 +77,7 @@ internal class TranslatingPageLoader(
 
     /**
      * 章目錄（下載夾）：lazy 解析一次（[ensureResolved]），之後查 manifest / 換頁都用它。
-     * null＝解析不到（理論上即時翻只在已下載章啟用、不該 null；保險起見 null 時退回純顯示原圖、不換頁）。
+     * null＝解析不到（CBZ 即時翻不支援）→ 退回純顯示原圖、不換頁。
      */
     @Volatile
     private var chapterDir: UniFile? = null
@@ -90,13 +94,13 @@ internal class TranslatingPageLoader(
     @Volatile
     private var resolved = false
 
-    /** 是否已把整章排入佇列 + 啟動佇列觀察者（只做一次）。在 [this] 鎖下寫、@Volatile 供 [loadPage] 無鎖快檢。 */
+    /** 是否已把整章排入佇列 + 啟動佇列觀察者（只做一次）。在 [this] 鎖下寫、@Volatile 供無鎖快檢。 */
     @Volatile
     private var enqueued = false
 
     /**
-     * 還在顯示原圖、等佇列翻好的頁（`page.index → ReaderPage`）。佇列觀察者每次掃 manifest，把命中的頁
-     * [swapToFile] 換上譯圖後從這移除。存取都在 synchronized([tracked]) 下。
+     * 仍在顯示下載原檔、等佇列翻好換譯圖的頁（`page.index → ReaderPage`）。
+     * 佇列觀察者把命中 manifest 的頁換譯圖後從這移除。存取都在 synchronized([tracked]) 下。
      */
     private val tracked = mutableMapOf<Int, ReaderPage>()
 
@@ -138,17 +142,21 @@ internal class TranslatingPageLoader(
     }
 
     /**
-     * 第一次需要時：把**整章**排入翻譯佇列、並啟動佇列觀察者（只做一次）。
+     * **啟動本 loader**：把整章排入翻譯佇列 + 啟動佇列觀察者（冪等、只做一次）。
+     *
+     * **只由 [eu.kanade.tachiyomi.ui.reader.ReaderViewModel] 對「當前正在讀的章」呼叫**（修預取章被自動翻的 bug）：
+     *  - 預取/相鄰章的 loader 雖會 [getPages]/[loadPage]，但 [ReaderViewModel] 不會對它們呼叫本方法 → 永不排入翻譯。
+     *  - [loadPage] 本身**不**排入翻譯（只顯示），故「載了頁」≠「會翻」；只有「被啟動」才會翻。
      *
      * 走 [TranslationManager.translate]（與下載 hook / 翻譯鈕同一條）：
      *  - 佇列在背景整章翻、覆蓋頁圖 + 記 manifest（loader 不自己翻）。
      *  - 章節清單指示器觀察同一 [TranslationManager.queueState] → 自動顯示「翻譯中」。
-     *  - [translate] **不**綁「下載時翻譯」開關（gate 只在呼叫端；這裡的呼叫端＝[ChapterLoader.shouldTranslateLive]
-     *    已確認引擎就緒），故即時翻使用者就算關掉「下載時翻譯」也能排入。
+     *  - atFront＝true：正在讀的章插隊到佇列最前（搶在其他排隊章之前翻）。
+     *  - [translate] **不**綁「下載時翻譯」開關（gate 只在呼叫端＝[ChapterLoader.shouldTranslateLive] 已確認引擎就緒）。
      *
-     * toDomainChapter null（無 id）時排不了——理論上已下載章必有 id，保險起見只記 log、跳過排入（仍顯示原圖）。
+     * toDomainChapter null（無 id）時排不了——理論上有 id，保險起見只記 log、跳過排入（仍顯示原圖）。
      */
-    private fun enqueueOnce() {
+    fun onActivated() {
         if (enqueued) return
         synchronized(this) {
             if (enqueued) return
@@ -158,9 +166,7 @@ internal class TranslatingPageLoader(
                 logcat(LogPriority.WARN) { "即時翻：章無 id、無法排入佇列（維持顯示原圖）" }
                 return
             }
-            // 整章排入受管理佇列（背景翻、可暫停/取消/重試、清單顯示翻譯中）。
-            // atFront＝true：正在讀的章插隊到佇列最前（搶在其他排隊章之前翻），讀者不用盯著原圖等前面章翻完
-            // （已修上面「已知限制」段的 FIFO 等待問題；唯一仍會等的是「另一章正在翻中」，那章不被中途搶占）。
+            // 整章排入受管理佇列（背景翻、可暫停/取消/重試、清單顯示翻譯中）。atFront＝true：正在讀的章插隊到最前。
             translationManager.translate(manga, listOf(domainChapter), atFront = true)
             startQueueObserver()
         }
@@ -170,6 +176,8 @@ internal class TranslatingPageLoader(
      * 佇列觀察者（單一 coroutine、跟著 [scope]）：每次 [TranslationManager.queueState] 變動 →
      * 讀**一次** [PageTranslator.donePages]（manifest 快照）→ 把 [tracked] 裡「檔名已在 done-set」的頁 [swapToFile]
      * 換上譯圖、再從 tracked 移除。佇列每翻好一頁就刷一批 → 頁面隨翻譯進度逐步換成譯圖。
+     *
+     * 由 [onActivated] 啟動（已下載章 → [tracked] 裡的頁串流本就指向下載檔，佇列翻好覆蓋的就是它）。
      */
     private fun startQueueObserver() {
         scope.launch {
@@ -179,7 +187,7 @@ internal class TranslatingPageLoader(
                 val pending = synchronized(tracked) { tracked.isNotEmpty() }
                 if (!pending) return@collect
                 val done = pageTranslator.donePages(dir) // 一次讀檔、給這批所有 tracked 頁共用
-                // 蒐集這輪命中的頁（在鎖內挑出 + 移除），鎖外再 swap（swapToFile 內有 yield、不宜持鎖）。
+                // 蒐集這輪命中的頁（在鎖內挑出 + 移除），鎖外再 swap（swapToFile 內有 delay、不宜持鎖）。
                 val ready = synchronized(tracked) {
                     val hit = tracked.filter { (_, page) ->
                         pageFiles.getOrNull(page.index)?.name?.let { it in done } == true
@@ -193,65 +201,65 @@ internal class TranslatingPageLoader(
     }
 
     /**
-     * 顯示這一頁：本 loader **不翻**，只決定「直接換上譯圖」還是「先顯示原圖、登記等佇列翻好」。
+     * 顯示這一頁（已下載章）。本 loader **不翻、也不排入翻譯**——只決定顯示原圖還是換譯圖。
+     * （排入翻譯改由 [onActivated]，且只對「正在讀的章」觸發 → 修預取章被自動翻的 bug。）
      *
      * 流程（背景 IO，狀態預設不動 → 維持 holder 已在顯示的可讀原圖）：
-     *  1. 先排入整章 + 啟動觀察者（[enqueueOnce]，只做一次）。
-     *  2. 讓被包 loader 完成前置（CBZ：把該頁解出來確保 stream 可讀；目錄頁＝no-op）。
-     *  3. 對不上章目錄/該頁檔（CBZ / 外部改動）→ 不插手、原圖留著（不換頁）。
-     *  4. **manifest 命中**（該頁已翻、下載檔已是譯圖）→ [swapToFile] 一次 Queue→Ready 讓 holder 重 decode 譯檔
-     *     （涵蓋退出再進的 resume、重繪後刷新、佇列已先翻好這頁）。
-     *  5. 否則 → 登記進 [tracked]、**維持原圖**（不轉圈、可讀），等佇列翻到這頁時觀察者換頁。
+     *  1. 讓 delegate 完成前置（CBZ 解頁；目錄頁＝no-op）。狀態不動。
+     *  2. 解析章目錄；對不上章目錄/該頁檔 → 不插手、原圖留著（不換頁）。
+     *  3. manifest 命中 → [swapToFile] 換譯圖。
+     *  4. 否則 → 登記 [tracked]、維持原圖，等佇列翻好（由 [onActivated] 排入）後換頁。
      */
     override suspend fun loadPage(page: ReaderPage) {
         if (isRecycled) return
 
-        // 不在開頭壓 Queue：已下載頁進來就是 Ready、holder 正顯示可讀原圖。翻譯整段維持原圖（不轉圈），
-        // 只有在該頁被佇列翻好（manifest 命中）後才用 [swapToFile] 驅動 Queue→Ready 換上譯圖。
         scope.launch {
-            // 開章即排入整章 + 啟動觀察者（只做一次）。
-            enqueueOnce()
-
             // 讓被包 loader 完成其前置（CBZ：把該頁從封存解出來、確保 stream 可讀；目錄頁＝no-op）。狀態不動。
             try {
                 delegate.loadPage(page)
             } catch (e: Throwable) {
                 logcat(LogPriority.WARN, e) { "delegate.loadPage 失敗，維持顯示原圖" }
             }
-
-            ensureResolved()
-            val dir = chapterDir
-            val pageFile = pageFiles.getOrNull(page.index)
-            if (dir == null || pageFile == null) {
-                // 解析不到章目錄/該頁檔（CBZ 即時翻 / 外部改動）→ 原圖已在畫面、不插手（不換頁）。
-                return@launch
-            }
-
-            // manifest 命中：下載檔已是譯圖 → [swapToFile] 一次 Queue→Ready 讓 holder decode 譯檔（不進引擎、不長轉圈）。
-            // 涵蓋：佇列已先翻好這頁、退出再進的 page-level resume、重繪後刷新。
-            if (pageTranslator.isPageTranslated(dir, pageFile.name.orEmpty())) {
-                swapToFile(page)
-                return@launch
-            }
-
-            // 尚未翻好 → 登記等佇列翻（維持原圖可讀）；觀察者在該頁落盤後換頁。本 loader 絕不在此進引擎翻。
-            synchronized(tracked) { tracked[page.index] = page }
+            handleDownloadedPage(page)
         }
     }
 
     /**
-     * 換上落盤後的檔（譯圖）：驅動一次 **[Page.State.Queue] →（`yield()` 後）[Page.State.Ready]** 真轉換，
-     * 觸發 holder 重 decode `page.stream`（重開檔案）讀到已覆蓋的譯圖。
+     * 逐頁處理：解析章目錄 → manifest 命中換譯圖、否則登記等佇列。**不**在此排入翻譯（見 [onActivated]）。
+     */
+    private suspend fun handleDownloadedPage(page: ReaderPage) {
+        ensureResolved()
+        val dir = chapterDir
+        val pageFile = pageFiles.getOrNull(page.index)
+        if (dir == null || pageFile == null) {
+            // 解析不到章目錄/該頁檔（CBZ 即時翻 / 外部改動）→ 原圖已在畫面、不插手（不換頁）。
+            return
+        }
+        // manifest 命中：下載檔已是譯圖 → [swapToFile] 一次 Queue→Ready 讓 holder decode 譯檔（不進引擎、不長轉圈）。
+        // 涵蓋：佇列已先翻好這頁、退出再進的 page-level resume、重繪後刷新。
+        if (pageTranslator.isPageTranslated(dir, pageFile.name.orEmpty())) {
+            swapToFile(page)
+            return
+        }
+        // 尚未翻好 → 登記等佇列翻（維持原圖可讀）；觀察者在該頁落盤後換頁。本 loader 絕不在此進引擎翻。
+        synchronized(tracked) { tracked[page.index] = page }
+    }
+
+    /**
+     * 換上落盤後的譯圖：驅動一次 **[Page.State.Queue] →（`delay()` 後）[Page.State.Ready]** 真轉換，
+     * 觸發 holder 重 decode `page.stream`（重開檔案）讀到譯圖。
      *
-     * 為何要先 Queue：holder 進來時頁已是 Ready（顯示原圖檔位元組），[Page.State.Ready] 是 `data object` 單例，
-     * 直接再設 Ready 屬同值 → StateFlow 不重發 → holder 不重 decode、換不上譯圖。先 Queue 再（`yield()` 讓 holder collect 到後）Ready
-     * 才是真轉換。這一閃只發生在「真的換了檔」的頁、且只在翻好當下，故不擋讀。回收後不動。
+     * 為何要先 Queue：holder 進來時頁已是 Ready（顯示舊圖位元組），[Page.State.Ready] 是 `data object` 單例，
+     * 直接再設 Ready 屬同值 → StateFlow 不重發 → holder 不重 decode、換不上。先 Queue 再（`delay()` 撐住真實時間
+     * 讓 holder collect 到後）Ready 才是真轉換。這一閃只發生在「真的換了檔」的頁、且只在換檔當下，故不擋讀。回收後不動。
      */
     private suspend fun swapToFile(page: ReaderPage) {
         if (isRecycled) return
         page.status = Page.State.Queue
-        // 讓 holder 先 collect 到 Queue，下面設 Ready 才是真轉換（StateFlow conflate：太快連設可能吞掉 Queue）。
-        yield()
+        // 撐住 Queue 一小段真實時間，確保 holder collector（可能在別 dispatcher）接到這次 Queue：
+        // Ready→Queue→Ready 太快會被 StateFlow conflate（collector 只見 Ready＝原值、同值不重發→不重 decode→不刷新，
+        // 正是「翻完沒重新顯示、要退出重進」的根因）。yield() 跨 dispatcher 不夠；delay 是真實等待、任何 collector 都來得及。
+        delay(SWAP_QUEUE_HOLD_MS)
         if (!isRecycled) page.status = Page.State.Ready
     }
 
@@ -259,7 +267,7 @@ internal class TranslatingPageLoader(
      * 重試（錯誤重試鈕 / 重繪後刷新）：本 loader 不翻，只做顯示層的對應動作。
      *  - 已翻（manifest 命中）→ 只重 decode（[swapToFile] 一次 Queue→Ready，同 [DownloadPageLoader.retryPage]）。
      *    重繪後刷新靠這條：[eu.kanade.tachiyomi.ui.reader.ReaderViewModel.reRenderPage] 重繪覆蓋檔後 → `retryPage` → 重 decode 顯示新圖。
-     *  - 未翻 → 重新登記進 [tracked] + 確保整章已排入佇列（[enqueueOnce]）；佇列翻到時觀察者換頁。
+     *  - 未翻 → 重新登記進 [tracked]；佇列翻到時觀察者換頁。**不**在此排入翻譯（排入只在 [onActivated]）。
      */
     override fun retryPage(page: ReaderPage) {
         if (isRecycled) return
@@ -271,14 +279,14 @@ internal class TranslatingPageLoader(
             scope.launch { swapToFile(page) }
             return
         }
-        // 未翻 → 重新登記等佇列、確保整章已排入（佇列負責翻，本 loader 不翻）。
+        // 未翻 → 重新登記等佇列（佇列負責翻，本 loader 不翻；排入在 onActivated）。
         synchronized(tracked) { tracked[page.index] = page }
-        enqueueOnce()
     }
 
     /**
      * 取消本 loader 的佇列觀察 + 回收被包 loader、最後標記 recycled。
-     * **不**取消翻譯佇列——整章要繼續在背景翻完（這正是本次改動的重點）；也**不**關共用引擎（佇列自管）。
+     * **不**取消翻譯佇列（整章要繼續在背景翻完）；也**不**關共用引擎（佇列自管）。
+     * 淨效果：即使讀者離開，已啟動的章仍會自動翻譯 + 持久化完成。
      */
     override fun recycle() {
         scope.cancel()
@@ -288,5 +296,8 @@ internal class TranslatingPageLoader(
 
     companion object {
         private val IMAGE_EXT = setOf("jpg", "jpeg", "png", "webp")
+
+        /** swap 換頁時撐住 Queue 的真實時間：給 holder collector 接到 Queue，避免 Queue→Ready 被 StateFlow conflate（換不上譯圖）。 */
+        private const val SWAP_QUEUE_HOLD_MS = 150L
     }
 }

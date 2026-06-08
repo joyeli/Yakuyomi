@@ -422,9 +422,18 @@ class Downloader(
             download.status = Download.State.DOWNLOADED
 
             // Yakuyomi M4：章已下載並進 cache → 排入翻譯佇列（與下載 worker 解耦、非阻塞）。
-            // isReady() 已含啟用開關 + key + 模型；TranslationManager 走獨立 scope 逐章翻、就地覆蓋（§11）。
-            if (translationManager.isReady()) {
-                translationManager.translate(download.manga, listOf(download.chapter))
+            // 此處是「下載完成」的權威時點：tmpDir 已 rename 成正式目錄、cache.addChapter 也跑過 →
+            // findChapterDir 必能解析，TranslationManager 走獨立 scope 逐章翻、就地覆蓋（§11）。
+            //
+            // 兩條 gate（OR）：
+            //  - isReady()＝「下載時翻譯」總開關開 + key + 模型齊（離線整章翻的常規路徑）。
+            //  - isPendingTranslate()＝這章被 reader 即時翻 / 控制鈕標記過（markForTranslate）→
+            //    即使總開關關著也要翻（使用者讀到/手動觸發＝明確意圖）。排入後清掉標記、用 atFront 插隊
+            //    （正在讀的章優先翻），與 TranslatingPageLoader 的插隊語義一致。
+            val pending = translationManager.isPendingTranslate(download.chapter.id)
+            if (translationManager.isReady() || pending) {
+                translationManager.translate(download.manga, listOf(download.chapter), atFront = pending)
+                if (pending) translationManager.clearPending(download.chapter.id)
             }
         } catch (error: Throwable) {
             if (error is CancellationException) throw error

@@ -49,6 +49,9 @@ class TranslationManager(private val context: Context) {
     private val sourceManager: SourceManager = Injekt.get()
     private val translationCache: TranslationCache = Injekt.get()
     private val translationPreferences: TranslationPreferences = Injekt.get()
+
+    /** 常駐（warm）翻譯引擎服務：佇列翻完且**即時翻關著**時釋放它，別讓 ~450MB 閒置（即時翻開著則保 warm）。 */
+    private val engineService: TranslationEngineService = Injekt.get()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val drainMutex = Mutex()
 
@@ -82,6 +85,29 @@ class TranslationManager(private val context: Context) {
 
     private val lock = Any()
     private val entries = mutableListOf<Entry>()
+
+    /**
+     * 「待翻譯」標記集合（章 id）：線上即時翻 / reader 控制鈕觸發下載時先標記，
+     * 由 [eu.kanade.tachiyomi.data.download.Downloader] 在該章下載完成（章目錄 + cache 都就緒）後查此集合、
+     * 決定要不要把它排入翻譯（即使「下載時翻譯」總開關關著也能翻——讀到/手動觸發的章是使用者明確意圖）。
+     *
+     * 為何要這個：[Downloader] 下載完的預設 gate 是 [isReady]（含 translationEnabled 總開關），
+     * 但即時翻 / 控制鈕要繞過該總開關只翻「被標記」的章 ⇒ 多一個 OR 條件。標記在 [lock] 下存取（與 [entries] 同鎖）。
+     */
+    private val pendingTranslate = mutableSetOf<Long>()
+
+    /** 標記某章「下載完成後要翻」（線上即時翻 / reader 控制鈕用）。 */
+    fun markForTranslate(chapterId: Long) {
+        synchronized(lock) { pendingTranslate.add(chapterId) }
+    }
+
+    /** 該章是否被標記為「下載完成後要翻」（[Downloader] 下載完成 hook 查此判斷）。 */
+    fun isPendingTranslate(chapterId: Long): Boolean = synchronized(lock) { chapterId in pendingTranslate }
+
+    /** 清掉某章的「待翻譯」標記（已排入後由 [Downloader] 呼叫，避免殘留）。 */
+    fun clearPending(chapterId: Long) {
+        synchronized(lock) { pendingTranslate.remove(chapterId) }
+    }
 
     private val _queueState = MutableStateFlow<List<TranslationItem>>(emptyList())
     val queueState: StateFlow<List<TranslationItem>> = _queueState.asStateFlow()
@@ -289,6 +315,12 @@ class TranslationManager(private val context: Context) {
                 synchronized(lock) { entry.status = TranslationItem.Status.ERROR }
             }
             publish()
+        }
+        // 佇列翻完（迴圈因「無 QUEUE 項」自然結束＝此時 _isPaused 必為 false；暫停退出走另一分支、不到這）：
+        // 即時翻**關著**時釋放 warm 引擎，別讓 ~450MB 閒置；即時翻**開著**時保 warm（reader 隨時要讀下一章）。
+        // 引擎之後會在下次 translatePage lazy 重建。shutdown 走服務自己的 Mutex（與 drainMutex 不同鎖、不死鎖）。
+        if (!_isPaused.value && !translationPreferences.liveTranslate.get()) {
+            engineService.shutdown()
         }
     }
 

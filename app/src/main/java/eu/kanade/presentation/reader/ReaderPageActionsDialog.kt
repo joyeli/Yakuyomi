@@ -7,11 +7,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.AutoFixHigh
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Photo
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
@@ -38,56 +41,102 @@ fun ReaderPageActionsDialog(
     onSave: () -> Unit,
     // 重繪當頁（換去字法重做去字+排版）；只在已下載章可用，呼叫端傳 null 時不顯示此鈕。
     onReRender: (() -> Unit)? = null,
+    // 翻譯當頁；只在已下載章可用（線上章先不提供），呼叫端傳 null 時不顯示此鈕。
+    onTranslatePage: (() -> Unit)? = null,
+    // 開始翻譯這話（已下載＝排佇列／線上＝觸發下載+標記待翻）。當前章「未在翻譯」時顯示（與停止互斥）。
+    onStartChapterTranslate: (() -> Unit)? = null,
+    // 中止這話翻譯（取消佇列 + 中止進行中）。當前章「正在翻譯」時顯示（與開始互斥）。
+    onStopChapterTranslate: (() -> Unit)? = null,
+    // 當前章是否正在翻譯佇列（QUEUE/TRANSLATING）：true → 顯示「中止」、false → 顯示「開始」（XOR）。
+    isChapterTranslating: Boolean = false,
 ) {
     var showSetCoverDialog by remember { mutableStateOf(false) }
 
     AdaptiveSheet(onDismissRequest = onDismissRequest) {
-        Row(
-            modifier = Modifier.padding(vertical = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small),
-        ) {
-            ActionButton(
-                modifier = Modifier.weight(1f),
-                title = stringResource(MR.strings.set_as_cover),
-                icon = Icons.Outlined.Photo,
-                onClick = { showSetCoverDialog = true },
-            )
-            ActionButton(
-                modifier = Modifier.weight(1f),
-                title = stringResource(MR.strings.action_copy_to_clipboard),
-                icon = Icons.Outlined.ContentCopy,
-                onClick = {
-                    onShare(true)
-                    onDismissRequest()
-                },
-            )
-            ActionButton(
-                modifier = Modifier.weight(1f),
-                title = stringResource(MR.strings.action_share),
-                icon = Icons.Outlined.Share,
-                onClick = {
-                    onShare(false)
-                    onDismissRequest()
-                },
-            )
-            ActionButton(
-                modifier = Modifier.weight(1f),
-                title = stringResource(MR.strings.action_save),
-                icon = Icons.Outlined.Save,
-                onClick = {
-                    onSave()
-                    onDismissRequest()
-                },
-            )
-            if (onReRender != null) {
-                // 重繪：交給 VM 把對話框換成去字法選擇器（共用同一個 dialog state slot）。
-                // 不呼叫 onDismissRequest()——那會把剛開的選擇器一起關掉（兩者都寫 dialog 欄）。
+        // 兩列：第一列＝原有頁動作（封面/複製/分享/儲存/重繪），第二列＝翻譯動作（翻這頁/開始/中止這話）。
+        // 拆兩列避免一列塞 7-8 顆鈕在窄螢幕擠爆；翻譯動作集中一列、語意上也成組。
+        Column(modifier = Modifier.padding(vertical = 16.dp)) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small),
+            ) {
                 ActionButton(
                     modifier = Modifier.weight(1f),
-                    title = "重繪",
-                    icon = Icons.Outlined.AutoFixHigh,
-                    onClick = onReRender,
+                    title = stringResource(MR.strings.set_as_cover),
+                    icon = Icons.Outlined.Photo,
+                    onClick = { showSetCoverDialog = true },
                 )
+                ActionButton(
+                    modifier = Modifier.weight(1f),
+                    title = stringResource(MR.strings.action_copy_to_clipboard),
+                    icon = Icons.Outlined.ContentCopy,
+                    onClick = {
+                        onShare(true)
+                        onDismissRequest()
+                    },
+                )
+                ActionButton(
+                    modifier = Modifier.weight(1f),
+                    title = stringResource(MR.strings.action_share),
+                    icon = Icons.Outlined.Share,
+                    onClick = {
+                        onShare(false)
+                        onDismissRequest()
+                    },
+                )
+                ActionButton(
+                    modifier = Modifier.weight(1f),
+                    title = stringResource(MR.strings.action_save),
+                    icon = Icons.Outlined.Save,
+                    onClick = {
+                        onSave()
+                        onDismissRequest()
+                    },
+                )
+                if (onReRender != null) {
+                    // 重繪：交給 VM 把對話框換成去字法選擇器（共用同一個 dialog state slot）。
+                    // 不呼叫 onDismissRequest()——那會把剛開的選擇器一起關掉（兩者都寫 dialog 欄）。
+                    ActionButton(
+                        modifier = Modifier.weight(1f),
+                        title = "重繪",
+                        icon = Icons.Outlined.AutoFixHigh,
+                        onClick = onReRender,
+                    )
+                }
+            }
+            // 第二列：翻譯控制。每顆鈕的回呼自己關對話框（VM 內 closeDialog），故這裡不再呼叫 onDismissRequest。
+            Row(
+                modifier = Modifier.padding(top = MaterialTheme.padding.small),
+                horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small),
+            ) {
+                if (onTranslatePage != null) {
+                    // 翻譯這頁（已下載章）：單頁進引擎翻、就地覆蓋。線上章不提供（呼叫端傳 null）。
+                    ActionButton(
+                        modifier = Modifier.weight(1f),
+                        title = "翻譯這頁",
+                        icon = Icons.Outlined.Translate,
+                        onClick = onTranslatePage,
+                    )
+                }
+                // 開始 XOR 中止：依當前章是否在翻譯佇列二選一顯示。
+                if (isChapterTranslating) {
+                    if (onStopChapterTranslate != null) {
+                        ActionButton(
+                            modifier = Modifier.weight(1f),
+                            title = "中止這話翻譯",
+                            icon = Icons.Outlined.Close,
+                            onClick = onStopChapterTranslate,
+                        )
+                    }
+                } else {
+                    if (onStartChapterTranslate != null) {
+                        ActionButton(
+                            modifier = Modifier.weight(1f),
+                            title = "開始翻譯這話",
+                            icon = Icons.Filled.PlayArrow,
+                            onClick = onStartChapterTranslate,
+                        )
+                    }
+                }
             }
         }
     }

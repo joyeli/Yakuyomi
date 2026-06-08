@@ -122,7 +122,10 @@ class ChapterLoader(
             source is StubSource -> error(context.stringResource(MR.strings.source_not_installed, source.toString()))
             else -> error(context.stringResource(MR.strings.loader_not_implemented_error))
         }
-        // 即時翻譯：符合條件就把 base loader 包進 [TranslatingPageLoader]（整章排入翻譯佇列、loader 只當顯示層）；否則照常用 base。
+        // 即時翻譯：符合條件（**只含已下載章**）就把 base loader 包進 [TranslatingPageLoader]（整章排入翻譯佇列、
+        // loader 只當顯示層）；否則照常用 base。線上（未下載）章**不**包裝（走原生 [HttpPageLoader]、顯示線上原圖、
+        // 不自動下載/翻譯）；線上的即時翻改由 [eu.kanade.tachiyomi.ui.reader.ReaderViewModel] 對「正在讀的章」
+        // 下載 + 完成後重載進此已下載路徑（reload 後章變已下載 → 此處才包裝）。
         // TranslatingPageLoader 需 manga/source/downloadProvider 解析下載章目錄與逐頁檔（查 manifest + 換頁）、
         // 並需 translationManager 把整章排入受管理佇列（背景翻、清單顯示翻譯中、可暫停/取消/重試）。
         return if (shouldTranslateLive(chapter, isDownloaded)) {
@@ -133,32 +136,50 @@ class ChapterLoader(
     }
 
     /**
-     * 是否該對這章「即時翻譯」（reader 邊讀邊翻）。本里程碑＝**只做已下載章的下載路徑**，全部條件 AND：
+     * 是否該對這章「即時翻譯」（reader 邊讀邊翻）。**只包已下載章**，全部條件 AND：
+     *  - 章**已下載**（[isDownloaded]）。線上（未下載）章一律不包（見下）。
      *  - 即時翻譯開關開（[TranslationPreferences.liveTranslate]）。
-     *  - 章已下載（本里程碑只做下載路徑；未下載＝false → 線上仍走原本 loader、不即時翻）。
      *  - 引擎就緒（[TranslationEngineService.isReady]＝key + 3 模型齊；**不再**綁「下載時翻譯章節」開關）。
      *  - 本書的書庫分類通過「即時翻譯分類」過濾（包含/排除，鏡射下載新章分類；都不設＝全部）。
      *  - 章**尚未**整章翻好（[TranslationManager.isTranslated]）；已翻好的章交給 [DownloadPageLoader] 直接吐已覆蓋的譯圖，
      *    不必再即時翻一次（省 ~450MB 引擎 + 每頁推論）。
      *
-     * TODO(live): 線上（未下載）即時翻譯＝放寬此處 isDownloaded 條件 + 包 [HttpPageLoader]（本里程碑刻意只做下載路徑）。
+     * **線上路徑（未下載）改走「下載 + 重載」**：未下載章**不再**包進 [TranslatingPageLoader]（舊版的同 session
+     * 串流改指不可靠）。線上的即時翻改由 [eu.kanade.tachiyomi.ui.reader.ReaderViewModel] 處理——只對「正在讀的章」
+     * 觸發下載，下載完成後重載該章（章變已下載 → 此處才包進 [TranslatingPageLoader] 走可靠的已下載路徑）。
+     *
+     * **分類過濾邏輯**抽成共用 helper [categoryAllowed]，與 [ReaderViewModel] 的線上判定共用同一份語義。
      */
-    private suspend fun shouldTranslateLive(chapter: ReaderChapter, isDownloaded: Boolean): Boolean {
-        if (!translationPreferences.liveTranslate.get()) return false
+    suspend fun shouldTranslateLive(chapter: ReaderChapter, isDownloaded: Boolean): Boolean {
         if (!isDownloaded) return false
+        if (!translationPreferences.liveTranslate.get()) return false
         if (!translationEngineService.isReady()) return false
-
-        // 分類過濾（包含/排除）：先過便宜的布林檢查，才做 DB 取分類。語義對齊下載「新章分類」：
-        //   包含非空 → 書至少屬其一才翻；命中任一排除 → 不翻；包含與排除都空 → 全部翻。
-        val mangaCats = getCategories.await(manga.id).map { it.id.toString() }.toSet()
-        val include = translationPreferences.liveTranslateCategories.get()
-        val exclude = translationPreferences.liveTranslateCategoriesExclude.get()
-        val allowed = (include.isEmpty() || mangaCats.any { it in include }) && mangaCats.none { it in exclude }
-        if (!allowed) return false
+        if (!categoryAllowed()) return false
 
         // 已整章翻好 → 不即時翻（DownloadPageLoader 直接服務已覆蓋的譯圖）。toDomainChapter null（無 id）時保守不即時翻。
         val domainChapter = chapter.chapter.toDomainChapter() ?: return false
         if (translationManager.isTranslated(manga, domainChapter)) return false
         return true
     }
+
+    /**
+     * 「即時翻譯分類」過濾（包含/排除）共用判定。語義對齊下載「新章分類」：
+     *   包含非空 → 書至少屬其一才翻；命中任一排除 → 不翻；包含與排除都空 → 全部翻。
+     * 抽成 public 方法供 [shouldTranslateLive]（已下載）與
+     * [eu.kanade.tachiyomi.ui.reader.ReaderViewModel] 的線上即時翻 gate 共用同一份語義
+     * （[ReaderViewModel] 持有同一個 [ChapterLoader] 實例，直接呼叫此方法）。
+     */
+    suspend fun categoryAllowed(): Boolean {
+        val mangaCats = getCategories.await(manga.id).map { it.id.toString() }.toSet()
+        val include = translationPreferences.liveTranslateCategories.get()
+        val exclude = translationPreferences.liveTranslateCategoriesExclude.get()
+        return (include.isEmpty() || mangaCats.any { it in include }) && mangaCats.none { it in exclude }
+    }
+
+    /**
+     * 引擎是否就緒（key + 3 模型；**不含**「下載時翻譯章節」總開關）。與 [shouldTranslateLive] 用同一判定，
+     * 供 [eu.kanade.tachiyomi.ui.reader.ReaderViewModel] 線上即時翻 gate 共用——避免線上路徑誤用含 translationEnabled
+     * 的 [TranslationManager.isReady] 而把「只開即時翻、沒開下載時翻」的使用者擋成「未啟動」。
+     */
+    fun engineReady(): Boolean = translationEngineService.isReady()
 }

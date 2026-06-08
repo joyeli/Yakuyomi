@@ -12,6 +12,7 @@ import androidx.compose.ui.util.fastMap
 import eu.kanade.presentation.category.visualName
 import eu.kanade.presentation.more.settings.Preference
 import eu.kanade.presentation.more.settings.widget.TriStateListDialog
+import eu.kanade.tachiyomi.data.translation.TranslationEngineService
 import kotlinx.collections.immutable.persistentMapOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.collections.immutable.toImmutableMap
@@ -36,6 +37,8 @@ object SettingsTranslationScreen : SearchableSettings {
     @Composable
     override fun getPreferences(): List<Preference> {
         val prefs = remember { Injekt.get<TranslationPreferences>() }
+        // 即時翻譯開關 → 控制 warm 引擎生命週期（開＝預暖、關＝釋放 ~450MB）。
+        val engineService = remember { Injekt.get<TranslationEngineService>() }
         // 「閱讀後刪除」綁下載偏好同一個 pref → 與下載設定頁連動（任一邊改都同步）。
         val downloadPrefs = remember { Injekt.get<DownloadPreferences>() }
         val showAdvanced by prefs.showAdvanced.collectAsState()
@@ -114,6 +117,13 @@ object SettingsTranslationScreen : SearchableSettings {
                         preference = prefs.liveTranslate,
                         title = "即時翻譯（邊讀邊翻）",
                         subtitle = "開啟後，讀未翻章節時逐頁用快速 boxfill 即時翻並置換頁面；需 API key + 模型，與「下載時翻譯章節」獨立",
+                        // 即時翻譯＝引擎常駐（warm）的主要使用情境：開啟時預暖引擎（首章瞬間就緒）、關閉時釋放 ~450MB。
+                        // ★ 必須 fire-and-forget（背景 IO）：warmUp 會載 ~450MB、shutdown 可能等鎖（背景正翻某頁）——
+                        //   onValueChanged 跑在 UI，若在此 await 就會卡主執行緒 → ANR/crash（實測：關即時翻當機）。
+                        onValueChanged = { enabled ->
+                            if (enabled) engineService.warmUpAsync() else engineService.shutdownAsync()
+                            true
+                        },
                     ),
                     Preference.PreferenceItem.TextPreference(
                         title = "即時翻譯分類",

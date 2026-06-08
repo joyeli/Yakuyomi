@@ -23,6 +23,8 @@ import eu.kanade.tachiyomi.data.saver.Image
 import eu.kanade.tachiyomi.data.saver.ImageSaver
 import eu.kanade.tachiyomi.data.saver.Location
 import eu.kanade.tachiyomi.data.translation.PageTranslator
+import eu.kanade.tachiyomi.data.translation.TranslationManager
+import eu.kanade.tachiyomi.data.translation.model.TranslationItem
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.ui.reader.loader.ChapterLoader
@@ -45,8 +47,10 @@ import eu.kanade.tachiyomi.util.storage.cacheImageDir
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
@@ -104,6 +108,7 @@ class ReaderViewModel @JvmOverloads constructor(
     private val setMangaViewerFlags: SetMangaViewerFlags = Injekt.get(),
     private val getIncognitoState: GetIncognitoState = Injekt.get(),
     private val libraryPreferences: LibraryPreferences = Injekt.get(),
+    private val translationManager: TranslationManager = Injekt.get(),
 ) : ViewModel() {
 
     private val mutableState = MutableStateFlow(State())
@@ -240,6 +245,12 @@ class ReaderViewModel @JvmOverloads constructor(
     private val incognitoMode: Boolean by lazy { getIncognitoState.await(manga?.source) }
     private val downloadAheadAmount = downloadPreferences.autoDownloadWhileReading.get()
 
+    /**
+     * 已觸發過「線上即時翻（下載 + 重載）」的章 id：每章只觸發一次，避免重複進同一章（換頁回到同章 / 重載後）
+     * 重複下載。在 [onCurrentChapterActivated]（單一 viewModelScope coroutine、序列化）下存取，免額外鎖。
+     */
+    private val onlineTriggeredChapterIds = mutableSetOf<Long>()
+
     init {
         // To save state
         state.map { it.viewerChapters?.currChapter }
@@ -254,6 +265,42 @@ class ReaderViewModel @JvmOverloads constructor(
                 }
                 chapterId = currentChapter.chapter.id!!
             }
+            .launchIn(viewModelScope)
+
+        // 即時翻譯「啟動」：只有**正在讀的當前章**（viewerChapters.currChapter）才觸發翻譯——
+        // 修「讀第 N 話卻把預取的 N±1 話也自動下載/翻譯」的 bug。預取/相鄰章只 loadChapter（建 loader、載頁），
+        // **永不**成為 currChapter，故下面這條永不對它們觸發。每次當前章改變（換章 / 開章）各觸發一次：
+        //  - 當前章是「已下載 + 已包 TranslatingPageLoader」→ [TranslatingPageLoader.onActivated] 把整章插隊排入翻譯佇列。
+        //  - 當前章是「線上（未下載）且符合即時翻條件」→ [triggerOnlineLiveTranslate] 下載該章、完成後重載進已下載路徑。
+        // 兩者都冪等（loader 端 enqueued 旗標 / VM 端 onlineTriggeredChapterIds 去重），重複進同一章不會重觸發。
+        state.map { it.viewerChapters?.currChapter }
+            .distinctUntilChanged()
+            .filterNotNull()
+            .onEach { currentChapter -> onCurrentChapterActivated(currentChapter) }
+            .launchIn(viewModelScope)
+
+        // 即時翻譯進度：把「正在讀的章 id」與翻譯佇列 [TranslationManager.queueState] 併流，
+        // 找出佇列裡 chapter.id 對得上當前章的那一項 → 映成 reader 內角落小指示器的進度（QUEUE/TRANSLATING）。
+        // 兩個來源任一變動都會重算（換章、佇列前進、開始/結束翻譯），找不到（沒在排隊/翻譯）→ null（不顯示）。
+        combine(
+            // 只關心「當前章 id」這一個維度，避免每翻一頁（state 其他欄位變）都重跑佇列比對。
+            state.map { it.currentChapter?.chapter?.id }.distinctUntilChanged(),
+            translationManager.queueState,
+        ) { currentChapterId, queue ->
+            if (currentChapterId == null) return@combine null
+            val item = queue.firstOrNull { it.chapter.id == currentChapterId } ?: return@combine null
+            when (item.status) {
+                // QUEUE＝排隊中（尚未開始、done/total 還沒意義）；TRANSLATING＝翻譯中、帶 done/total 進度。
+                // ERROR 不顯示（reader 內只報「進行中」狀態；失敗在章節清單/佇列頁處理）。
+                TranslationItem.Status.QUEUE ->
+                    LiveTranslateProgress(done = item.done, total = item.total, queued = true)
+                TranslationItem.Status.TRANSLATING ->
+                    LiveTranslateProgress(done = item.done, total = item.total, queued = false)
+                TranslationItem.Status.ERROR -> null
+            }
+        }
+            .distinctUntilChanged()
+            .onEach { progress -> mutableState.update { it.copy(liveTranslateProgress = progress) } }
             .launchIn(viewModelScope)
     }
 
@@ -350,15 +397,23 @@ class ReaderViewModel @JvmOverloads constructor(
         // 章載完當下回報：currChapter 的 pageLoader 是不是 TranslatingPageLoader（＝即時翻真的套上了）。
         if (translationPreferences.liveTranslate.get()) {
             val active = chapter.pageLoader is TranslatingPageLoader
-            eventChannel.trySend(
-                Event.LiveTranslateStatus(
-                    if (active) {
-                        "即時翻譯：已啟動"
-                    } else {
-                        "即時翻譯：未啟動（確認 API key／模型／分類，或此章已翻／未下載）"
-                    },
-                ),
+            // 線上章（未下載且符合 gate）→ 走「下載 + 重載」路徑、即將自動翻；別誤報「未啟動」嚇人。
+            val mangaNow = manga
+            val online = !active && mangaNow != null && !downloadManager.isChapterDownloaded(
+                chapter.chapter.name,
+                chapter.chapter.scanlator,
+                chapter.chapter.url,
+                mangaNow.title,
+                mangaNow.source,
+                skipCache = true,
             )
+            val msg = when {
+                active -> "即時翻譯：已啟動"
+                online && loader.engineReady() && loader.categoryAllowed() ->
+                    "即時翻譯：線上章，下載後自動翻並重載"
+                else -> "即時翻譯：未啟動（確認 API key／模型／分類，或此章已翻）"
+            }
+            eventChannel.trySend(Event.LiveTranslateStatus(msg))
         }
         return newChapters
     }
@@ -384,6 +439,164 @@ class ReaderViewModel @JvmOverloads constructor(
                 }
                 logcat(LogPriority.ERROR, e)
             }
+        }
+    }
+
+    /**
+     * 當「正在讀的當前章」被設為 active（換章 / 開章）時呼叫——即時翻譯的**唯一**觸發點。
+     * **只對 currChapter 觸發**（呼叫端是 init 區塊觀察 `viewerChapters.currChapter` 的 flow）→ 預取/相鄰章
+     * （永不是 currChapter）絕不被觸發，修「讀第 N 話卻自動下載/翻譯 N±1 話」的 bug。
+     *
+     * 兩條路徑（互斥）：
+     *  - 已被包成 [TranslatingPageLoader]（＝已下載 + 符合即時翻條件、見 [ChapterLoader.shouldTranslateLive]）：
+     *    呼叫 [TranslatingPageLoader.onActivated] 把整章插隊排入翻譯佇列（冪等）。
+     *  - 否則為原生 loader（線上未下載 / 不符即時翻的已下載章）：若是**線上**且符合即時翻 gate → 走
+     *    [triggerOnlineLiveTranslate]（下載 + 完成後重載進已下載路徑）。已下載但不符（已翻/分類排除）→ 不做事。
+     */
+    private suspend fun onCurrentChapterActivated(chapter: ReaderChapter) {
+        val pageLoader = chapter.pageLoader
+        if (pageLoader is TranslatingPageLoader) {
+            // 已下載 + 已包裝：整章插隊排入翻譯佇列（冪等；loader 內 enqueued 旗標去重）。
+            pageLoader.onActivated()
+            return
+        }
+        // 原生 loader：只有「線上（未下載）且符合即時翻 gate」才觸發下載 + 重載。
+        maybeTriggerOnlineLiveTranslate(chapter)
+    }
+
+    /**
+     * 線上（未下載）章的即時翻入口：判斷「是否該對這條線上章即時翻」（gate 與 [ChapterLoader.shouldTranslateLive]
+     * 對齊：開關 + 引擎就緒 + 分類 + 尚未翻好 + 確為線上未下載），符合則觸發 [triggerOnlineLiveTranslate]。
+     * 每章只觸發一次（[onlineTriggeredChapterIds]）。
+     */
+    private suspend fun maybeTriggerOnlineLiveTranslate(chapter: ReaderChapter) {
+        val manga = manga ?: return
+        val loader = loader ?: return
+        val chapterId = chapter.chapter.id ?: return
+        if (chapterId in onlineTriggeredChapterIds) return
+
+        // gate：即時翻開關 + 引擎就緒（key+模型，**不含**「下載時翻譯」開關）+ 分類（與已下載路徑 shouldTranslateLive 同一份語義）。
+        // ★ 用 loader.engineReady() 而非 translationManager.isReady()——後者含 translationEnabled，
+        //   「只開即時翻、沒開下載時翻」的使用者會被它擋掉（線上顯示「未啟動」即此 bug）。
+        if (!translationPreferences.liveTranslate.get()) return
+        if (!loader.engineReady()) return
+        if (!loader.categoryAllowed()) return
+
+        // 必須是「線上、尚未下載」才走此路徑（已下載章由 TranslatingPageLoader 路徑處理）。
+        val isDownloaded = downloadManager.isChapterDownloaded(
+            chapter.chapter.name,
+            chapter.chapter.scanlator,
+            chapter.chapter.url,
+            manga.title,
+            manga.source,
+            skipCache = true,
+        )
+        if (isDownloaded) return
+
+        val domainChapter = chapter.chapter.toDomainChapter() ?: return
+        // 已整章翻好（理論上線上章必未翻；保險檢查）→ 不重翻。
+        if (translationManager.isTranslated(manga, domainChapter)) return
+
+        onlineTriggeredChapterIds.add(chapterId)
+        triggerOnlineLiveTranslate(chapter)
+    }
+
+    /**
+     * 線上即時翻的可靠實作＝**下載該章 → 完成後重載進已下載路徑**（取代舊版「同 session 串流改指」的不可靠做法）：
+     *  1. [TranslationManager.markForTranslate]：標記下載完要翻（讓 [eu.kanade.tachiyomi.data.download.Downloader]
+     *     繞過「下載時翻譯」總開關）；同時保證即使使用者中途離開、下載完成後章仍會被翻 + 持久化。
+     *  2. [DownloadManager.downloadChapters]：觸發下載（autoStart）。
+     *  3. **有界輪詢** [DownloadProvider.findChapterDir] 偵測章目錄出現（＝下載完成、rename 後的權威信號，比
+     *     statusFlow 可靠、無漏接）；綁在 viewModelScope，使用者離開 reader（VM cleared）即取消。
+     *  4. 章目錄出現（且為鬆散資料夾）且**該章仍是當前章**（使用者沒換走）→ [reloadCurrentChapterPreservingPage]：
+     *     重載當前章保留閱讀位置。重載後章已下載 → [ChapterLoader.shouldTranslateLive] 把它包成 [TranslatingPageLoader]
+     *     → 隨後 currChapter flow 再次觸發 [onCurrentChapterActivated] → [TranslatingPageLoader.onActivated] 排入翻譯、
+     *     走可靠的已下載換頁路徑。
+     *
+     * CBZ（isFile）即時翻本里程碑不支援 → 停止輪詢、維持線上原圖（下載仍會完成、退出重進可讀已翻 CBZ）。
+     */
+    private fun triggerOnlineLiveTranslate(chapter: ReaderChapter) {
+        val manga = manga ?: return
+        val domainChapter = chapter.chapter.toDomainChapter() ?: return
+        val source = sourceManager.getOrStub(manga.source)
+
+        logcat { "線上即時翻：觸發下載 + 等完成後重載 ${chapter.chapter.url}" }
+        translationManager.markForTranslate(domainChapter.id)
+        downloadManager.downloadChapters(manga, listOf(domainChapter))
+
+        viewModelScope.launchIO {
+            // 有界輪詢章目錄出現（權威信號、無漏接）。VM cleared（使用者離開 reader）→ coroutine 取消、自動停。
+            var waited = 0L
+            while (waited < ONLINE_DOWNLOAD_TIMEOUT_MS) {
+                // 使用者已換到別章 → 放棄重載（下載仍會在背景完成 + 翻、靠 markForTranslate）。
+                if (getCurrentChapter()?.chapter?.id != chapter.chapter.id) {
+                    logcat { "線上即時翻：使用者已離開此章，停止等待重載（下載/翻譯仍在背景進行）" }
+                    return@launchIO
+                }
+                val dir = downloadProvider.findChapterDir(
+                    chapter.chapter.name,
+                    chapter.chapter.scanlator,
+                    chapter.chapter.url,
+                    manga.title,
+                    source,
+                )
+                if (dir != null) {
+                    if (dir.isDirectory) {
+                        // 鬆散資料夾 → 下載完成、重載當前章進已下載路徑（保留閱讀位置）。
+                        reloadCurrentChapterPreservingPage()
+                    } else {
+                        // CBZ：即時翻本里程碑不支援 → 維持線上原圖（下載仍完成、退出重進可讀）。
+                        logcat(LogPriority.WARN) { "線上即時翻：下載為 CBZ、即時翻暫不支援，維持線上原圖" }
+                    }
+                    return@launchIO
+                }
+                delay(ONLINE_DOWNLOAD_POLL_MS)
+                waited += ONLINE_DOWNLOAD_POLL_MS
+            }
+            logcat(LogPriority.WARN) { "線上即時翻：等下載完成逾時，維持線上原圖（下載/翻譯仍可能在背景完成）" }
+        }
+    }
+
+    /**
+     * 重載**當前章**並保留閱讀位置（線上下載完成後轉入已下載路徑用；復用 reader 既有的章節重載樣式）。
+     *
+     * 做法：
+     *  1. 記下當前頁 index（[chapterPageIndex]，由 [updateChapterProgress] 持續更新；退化用 last_page_read）。
+     *  2. **回收並重置** curr/prev/next 三個 [ReaderChapter] 的 loader（recycle + pageLoader=null + state=Wait）
+     *     → 讓 [ChapterLoader.getPageLoader] 重跑：當前章現已下載 → 重新包成 [TranslatingPageLoader]。
+     *  3. 把當前章的 [ReaderChapter.requestedPage] 設成記下的頁 → viewer `setChapters` 會定位回該頁
+     *     （見 PagerViewer.setChaptersInternal 的 `moveToPage(requestedPage)`）。
+     *  4. [loadChapter] 重載當前章（重建 viewerChapters）+ 送 [Event.ReloadViewerChapters] 讓 viewer 重套章節。
+     *
+     * 已在背景（viewModelScope.launchIO）呼叫。失敗只記 log、維持原狀（線上原圖仍可讀，§11 不變式）。
+     */
+    private suspend fun reloadCurrentChapterPreservingPage() {
+        val loader = loader ?: return
+        val chapters = state.value.viewerChapters ?: return
+        val currChapter = chapters.currChapter
+        // 保留閱讀位置：優先用即時追蹤的可見頁 index，退化用 last_page_read（≥0 才有意義）。
+        val targetPage = chapterPageIndex.takeIf { it >= 0 } ?: currChapter.chapter.last_page_read
+
+        try {
+            // 回收 + 重置三章 loader，逼 ChapterLoader 重建（當前章已下載 → 重新包成 TranslatingPageLoader）。
+            listOfNotNull(chapters.currChapter, chapters.prevChapter, chapters.nextChapter).forEach { rc ->
+                rc.pageLoader?.recycle()
+                rc.pageLoader = null
+                rc.state = ReaderChapter.State.Wait
+            }
+            currChapter.requestedPage = targetPage
+
+            loadChapter(loader, currChapter)
+            eventChannel.send(Event.ReloadViewerChapters)
+
+            // 重載後當前章已下載 → 已重新包成 TranslatingPageLoader。**必須在此直接啟動**：
+            // currChapter 仍是同一個 ReaderChapter 物件，init 的 currChapter flow 經 distinctUntilChanged 會視為「未變」
+            // 而不重發 → 不會自動再呼 onCurrentChapterActivated。故在這裡顯式 onActivated() 把整章排入翻譯佇列。
+            (currChapter.pageLoader as? TranslatingPageLoader)?.onActivated()
+            logcat { "線上即時翻：已重載當前章進已下載路徑（保留第 $targetPage 頁）" }
+        } catch (e: Throwable) {
+            if (e is CancellationException) throw e
+            logcat(LogPriority.ERROR, e) { "線上即時翻：重載當前章失敗，維持原狀" }
         }
     }
 
@@ -998,6 +1211,132 @@ class ReaderViewModel @JvmOverloads constructor(
         }
     }
 
+    /**
+     * 「翻譯這頁」（reader 頁動作對話框 → 已下載章）：對 [page] 解析下載章目錄 + 頁檔（與 [reRenderPage] 同源），
+     * 透過 [PageTranslator.translateSinglePage] 翻單頁、就地覆蓋落地，成功後刷新該頁顯示譯圖。
+     *
+     * 與佇列共用引擎鎖 + manifest 鎖（[PageTranslator.translateSinglePage] 內走 [eu.kanade.tachiyomi.data.translation.TranslationEngineService]
+     * 的 Mutex + manifestMutex）→ 不會與背景整章翻併發壞檔。§11：失敗/略過留原圖、只提示。
+     *
+     * 流程同 [reRenderPage]：先把該頁設 [Page.State.Queue]（轉圈圈當「翻譯中」）+ toast，背景翻完不論成敗都
+     * [PageLoader.retryPage] 刷新（成功＝譯圖、失敗＝原圖），再 toast 成敗。線上章不提供此鈕（呼叫端 gate）。
+     */
+    fun translateThisPage() {
+        val page = (state.value.dialog as? Dialog.PageActions)?.page ?: return
+        closeDialog()
+        val manga = manga ?: return
+        val chapter = page.chapter
+        val method = translationPreferences.inpaintMethod.get()
+
+        viewModelScope.launchIO {
+            // 收尾：回 UI thread 刷新該頁（retryPage → Ready → holder 重 decode，把 spinner 換回圖）並回報成敗。
+            suspend fun finish(ok: Boolean) {
+                withUIContext { page.chapter.pageLoader?.retryPage(page) }
+                eventChannel.send(Event.TranslatePageResult(ok))
+            }
+
+            withUIContext { page.status = Page.State.Queue }
+            eventChannel.send(Event.TranslatePageStarted)
+
+            try {
+                val source = sourceManager.getOrStub(manga.source)
+                val chapterDir = downloadProvider.findChapterDir(
+                    chapter.chapter.name,
+                    chapter.chapter.scanlator,
+                    chapter.chapter.url,
+                    manga.title,
+                    source,
+                )
+                if (chapterDir == null) {
+                    finish(false)
+                    return@launchIO
+                }
+                // page.index → 檔名：與下載頁列表相同排序（DownloadManager.buildPageList 的 sortedBy{name}）取第 index 個。
+                val imageExt = setOf("jpg", "jpeg", "png", "webp")
+                val pageFileName = chapterDir.listFiles()
+                    ?.filter { f ->
+                        f.isFile && (f.name?.substringAfterLast('.', "")?.lowercase() ?: "") in imageExt
+                    }
+                    ?.sortedBy { it.name.orEmpty() }
+                    ?.getOrNull(page.index)
+                    ?.name
+                if (pageFileName == null) {
+                    finish(false)
+                    return@launchIO
+                }
+                val ok = pageTranslator.translateSinglePage(chapterDir, pageFileName, method)
+                finish(ok)
+            } catch (e: Throwable) {
+                if (e is CancellationException) throw e
+                logcat(LogPriority.ERROR, e) { "翻譯這頁失敗" }
+                finish(false)
+            }
+        }
+    }
+
+    /**
+     * 「開始翻譯這話」（reader 頁動作對話框，當前章**未**在翻譯佇列時顯示）——手動觸發，與自動（讀到當前章）
+     * 共用同一條可靠路徑：
+     *  - **已下載**：直接把當前章插隊排入翻譯佇列（已包 [TranslatingPageLoader] → [TranslatingPageLoader.onActivated]；
+     *    否則 [TranslationManager.translate] `atFront=true`）。
+     *  - **線上（未下載）**：走與自動相同的 [triggerOnlineLiveTranslate]——下載該章、完成後重載進已下載路徑、再排入翻譯。
+     *    （取代舊版只 markForTranslate + 下載、同 session 不顯示的做法 → 手動線上翻也會在本 session 顯示。）
+     *    手動是明確意圖 → 不過自動的 liveTranslate/分類 gate；但仍登記 [onlineTriggeredChapterIds] 與自動互斥去重。
+     *
+     * 排入後 reader 角落即時翻指示器（[State.liveTranslateProgress]，併流自 [TranslationManager.queueState]）會自動亮起，
+     * 故無需在此另外更新 UI。toast 提示「已開始」。
+     */
+    fun startChapterTranslate() {
+        closeDialog()
+        val manga = manga ?: return
+        val readerChapter = getCurrentChapter() ?: return
+        val domainChapter = readerChapter.chapter.toDomainChapter() ?: return
+
+        viewModelScope.launchIO {
+            try {
+                val isDownloaded = downloadManager.isChapterDownloaded(
+                    readerChapter.chapter.name,
+                    readerChapter.chapter.scanlator,
+                    readerChapter.chapter.url,
+                    manga.title,
+                    manga.source,
+                    skipCache = true,
+                )
+                if (isDownloaded) {
+                    // 已下載：插隊排入翻譯佇列。已包裝 → 走 loader 的 onActivated（與自動同入口、冪等）；否則直接 translate。
+                    val pageLoader = readerChapter.pageLoader
+                    if (pageLoader is TranslatingPageLoader) {
+                        pageLoader.onActivated()
+                    } else {
+                        translationManager.translate(manga, listOf(domainChapter), atFront = true)
+                    }
+                } else {
+                    // 線上：走與自動相同的「下載 + 完成後重載進已下載路徑」流程（本 session 也會顯示）。
+                    // 登記去重集合，避免隨後 currChapter flow 的自動路徑重觸發同一章。
+                    readerChapter.chapter.id?.let { onlineTriggeredChapterIds.add(it) }
+                    triggerOnlineLiveTranslate(readerChapter)
+                }
+                eventChannel.send(Event.ChapterTranslateStarted)
+            } catch (e: Throwable) {
+                if (e is CancellationException) throw e
+                logcat(LogPriority.ERROR, e) { "開始翻譯這話失敗" }
+            }
+        }
+    }
+
+    /**
+     * 「中止這話翻譯」（reader 頁動作對話框，當前章**正在**翻譯佇列時顯示）：
+     * [TranslationManager.cancel] 取消當前章——涵蓋 QUEUE（直接移除）與 TRANSLATING（設合作式中止旗標
+     * [TranslationManager] `stopActive`，正在翻的章在下一頁邊界停下後移除），兩態皆生效。
+     * 取消後角落指示器（併流自 queueState）自動消失。
+     */
+    fun stopChapterTranslate() {
+        closeDialog()
+        val chapterId = getCurrentChapter()?.chapter?.id ?: return
+        translationManager.cancel(listOf(chapterId))
+        viewModelScope.launchIO { eventChannel.send(Event.ChapterTranslateStopped) }
+    }
+
     enum class SetAsCoverResult {
         Success,
         AddToLibraryFirst,
@@ -1063,6 +1402,13 @@ class ReaderViewModel @JvmOverloads constructor(
         val dialog: Dialog? = null,
         val menuVisible: Boolean = false,
         @IntRange(from = -100, to = 100) val brightnessOverlayValue: Int = 0,
+
+        /**
+         * 正在讀的這一章的即時翻譯進度（在 reader 角落顯示小指示器）。
+         * null＝當前章不在翻譯佇列（沒排隊也沒在翻）→ 不顯示。
+         * 由 [translationManager] 的佇列與當前章 id 併流算得（見 init 區塊）。
+         */
+        val liveTranslateProgress: LiveTranslateProgress? = null,
     ) {
         val currentChapter: ReaderChapter?
             get() = viewerChapters?.currChapter
@@ -1070,6 +1416,17 @@ class ReaderViewModel @JvmOverloads constructor(
         val totalPages: Int
             get() = currentChapter?.pages?.size ?: -1
     }
+
+    /**
+     * 當前章在翻譯佇列中的進度快照（給 reader 內角落小指示器）。
+     * [queued]＝true 表示僅排隊中（尚未開始翻、[done]/[total] 還未生效）；false＝翻譯中（[done]/[total] 有效）。
+     */
+    @Immutable
+    data class LiveTranslateProgress(
+        val done: Int,
+        val total: Int,
+        val queued: Boolean,
+    )
 
     sealed interface Dialog {
         data object Loading : Dialog
@@ -1098,7 +1455,27 @@ class ReaderViewModel @JvmOverloads constructor(
         /** 重繪當頁結果（true＝成功覆蓋並刷新／false＝無素材或失敗），給 UI 提示。 */
         data class ReRenderResult(val success: Boolean) : Event
 
+        /** 開始翻譯當頁（IO 約需數秒）：給 UI 提示「翻譯中…」；頁面同時會顯示 per-page 轉圈圈。 */
+        data object TranslatePageStarted : Event
+
+        /** 翻譯當頁結果（true＝成功覆蓋並刷新／false＝略過/失敗），給 UI 提示。 */
+        data class TranslatePageResult(val success: Boolean) : Event
+
+        /** 已把當前章排入翻譯（已下載＝排佇列／線上＝觸發下載 + 標記待翻），給 UI 提示「已開始」。 */
+        data object ChapterTranslateStarted : Event
+
+        /** 已中止當前章翻譯（取消佇列項 / 中止進行中），給 UI 提示「已中止」。 */
+        data object ChapterTranslateStopped : Event
+
         /** TODO(live): 暫時診斷，確認穩定後移除。即時翻譯開著時、章載完回報是否真的套上 TranslatingPageLoader（給 UI toast）。 */
         data class LiveTranslateStatus(val message: String) : Event
+    }
+
+    companion object {
+        /** 線上即時翻：偵測「下載完成（章目錄出現）」的輪詢間隔。權威信號＝目錄存在，1.5s 一次足夠即時又不耗 CPU。 */
+        private const val ONLINE_DOWNLOAD_POLL_MS = 1_500L
+
+        /** 線上即時翻：等下載完成的上限（逾時放棄重載、維持線上原圖；下載/翻譯仍可能在背景完成）。 */
+        private const val ONLINE_DOWNLOAD_TIMEOUT_MS = 5 * 60 * 1_000L
     }
 }

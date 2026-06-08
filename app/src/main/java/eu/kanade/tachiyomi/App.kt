@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.Application
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
+import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -36,6 +37,7 @@ import eu.kanade.tachiyomi.data.coil.MangaCoverKeyer
 import eu.kanade.tachiyomi.data.coil.MangaKeyer
 import eu.kanade.tachiyomi.data.coil.TachiyomiImageDecoder
 import eu.kanade.tachiyomi.data.notification.Notifications
+import eu.kanade.tachiyomi.data.translation.TranslationEngineService
 import eu.kanade.tachiyomi.di.AppModule
 import eu.kanade.tachiyomi.di.PreferenceModule
 import eu.kanade.tachiyomi.network.NetworkHelper
@@ -226,6 +228,28 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
 
     override fun onStop(owner: LifecycleOwner) {
         SecureActivityDelegate.onApplicationStopped()
+    }
+
+    /**
+     * 記憶體壓力時釋放常駐（warm）翻譯引擎（~450MB native）。只在**真壓力**等級釋放
+     * （RUNNING_LOW/RUNNING_CRITICAL/COMPLETE）——**不**在 UI_HIDDEN/BACKGROUND 等「只是退到背景」的等級釋放，
+     * 讓引擎能撐過正常背景化（即時翻關 reader 後仍 warm 給下一章）。引擎之後會在下次翻譯 lazy 重建。
+     *
+     * 用非 suspend 的 [TranslationEngineService.shutdownBlocking]（tryLock；正在翻則略過本次，不阻塞系統回收 callback）。
+     * 服務於 [AppModule] 註冊；這裡 lazy 取，避免 callback 在 Injekt 就緒前被呼叫時崩。
+     *
+     * [Suppress]：API 34 起 `TRIM_MEMORY_RUNNING_*`/`COMPLETE` 標為 deprecated，但這幾個是偵測「前景/整個 process
+     * 記憶體吃緊」唯一可用的訊號（無非 deprecated 替代），且仍正常運作 → 刻意沿用。
+     */
+    @Suppress("DEPRECATION")
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        val realPressure = level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW ||
+            level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL ||
+            level == ComponentCallbacks2.TRIM_MEMORY_COMPLETE
+        if (realPressure) {
+            runCatching { Injekt.get<TranslationEngineService>().shutdownBlocking() }
+        }
     }
 
     override fun getPackageName(): String {
