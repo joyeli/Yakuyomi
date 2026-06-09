@@ -9,6 +9,7 @@
 [English](README.md) ｜ 中文
 
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-0877d2?labelColor=27303D)](LICENSE-YAKUYOMI.md)
+[![Release](https://img.shields.io/github/v/release/joyeli/Yakuyomi?include_prereleases&label=%E4%B8%8B%E8%BC%89&labelColor=27303D)](https://github.com/joyeli/Yakuyomi/releases/latest)
 
 </div>
 
@@ -19,6 +20,10 @@ Yakuyomi 是 [mihon](https://github.com/mihonapp/mihon) 的 fork，邊下載 / �
 <br>
 <sub><b>字壓在畫面上（頭髮、臉、背景）——正是疊字 / box-fill 翻譯的死穴。</b>Yakuyomi 把原文擦掉、重建畫面（3），再把譯文嵌回去（4）。</sub>
 </div>
+
+## 下載
+
+到 [**Releases 頁面**](https://github.com/joyeli/Yakuyomi/releases/latest) 抓最新的**簽章 APK**。多數手機用 `arm64-v8a`，不確定就用 `universal`。不用自己 build，想 build 才[從原始碼建置](#編譯)。
 
 ## 翻譯功能
 
