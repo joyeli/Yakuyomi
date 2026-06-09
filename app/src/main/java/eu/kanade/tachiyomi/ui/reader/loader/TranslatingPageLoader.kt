@@ -104,6 +104,12 @@ internal class TranslatingPageLoader(
      */
     private val tracked = mutableMapOf<Int, ReaderPage>()
 
+    /**
+     * 已在「變成當前頁」時強制補換過譯圖的頁 index（[refreshSelected] 用，去重避免每次滑回都重 decode）。
+     * synchronized([selectedSwapped]) 下存取。
+     */
+    private val selectedSwapped = mutableSetOf<Int>()
+
     /** 與 [delegate] 保持一致：[eu.kanade.tachiyomi.ui.reader.ReaderViewModel.preload] 會依 isLocal 分流。 */
     override var isLocal: Boolean = delegate.isLocal
 
@@ -275,6 +281,28 @@ internal class TranslatingPageLoader(
             // 已翻（含剛重繪覆蓋）→ 原子取出再 [swapToFile] 重 decode 那個檔（與 [DownloadPageLoader.retryPage] 等效）。
             val hit = synchronized(tracked) { tracked.remove(page.index) }
             if (hit != null) swapToFile(page)
+        }
+    }
+
+    /**
+     * 頁變成「當前頁」時呼叫（[eu.kanade.tachiyomi.ui.reader.ReaderViewModel.onPageSelected]）：
+     * 若該頁已翻好（manifest 命中）就強制補一次 [swapToFile]（重 decode 換譯圖），至多一次（[selectedSwapped] 去重）。
+     *
+     * 為何需要：被預載的相鄰頁（典型＝第 2 頁）若在 **off-screen / 預載期間** 翻好，它的 reloadFlow 變更不一定被當下
+     * 那個（off-screen）holder 重 decode（換頁的 reload 在「當前頁」最可靠——baseline 的第 1 頁正是靠這條）。於是它變成
+     * 當前頁時仍卡原圖。這裡在「剛變當前頁」對它補一次 reload()：此刻 holder 在螢幕上、collector 可靠 → 換上譯圖。
+     * 未翻好的頁不動（維持原圖；之後在當前頁翻好時的就地 reload 仍會換）。
+     */
+    fun refreshSelected(page: ReaderPage) {
+        if (isRecycled) return
+        if (synchronized(selectedSwapped) { page.index in selectedSwapped }) return
+        ensureResolved()
+        val dir = chapterDir ?: return
+        val pageFile = pageFiles.getOrNull(page.index) ?: return
+        if (pageTranslator.isPageTranslated(dir, pageFile.name.orEmpty())) {
+            synchronized(tracked) { tracked.remove(page.index) }
+            synchronized(selectedSwapped) { selectedSwapped.add(page.index) }
+            swapToFile(page)
         }
     }
 

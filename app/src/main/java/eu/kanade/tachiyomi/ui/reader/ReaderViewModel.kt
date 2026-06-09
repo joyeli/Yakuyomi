@@ -708,6 +708,9 @@ class ReaderViewModel @JvmOverloads constructor(
             return
         }
 
+        // 即時翻譯：頁剛變成當前頁 → 若已翻好就補換譯圖（修「預載的相鄰頁在 off-screen 翻好、變當前頁卻卡原圖」）。
+        (page.chapter.pageLoader as? TranslatingPageLoader)?.refreshSelected(page)
+
         val selectedChapter = page.chapter
         val pages = selectedChapter.pages ?: return
 
