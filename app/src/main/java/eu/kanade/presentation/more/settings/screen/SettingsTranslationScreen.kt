@@ -49,18 +49,13 @@ import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.collectAsState
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import tachiyomi.core.common.i18n.stringResource as ctxStringResource
 import tachiyomi.core.common.preference.Preference as PreferenceData
 
-// 進階數值用字面繁中標題/說明（與既有 apiKey 標題同風格，免動 strings.xml）；說明含值域 + 極值效果，尾 %s＝現值。
 private typealias Item = Preference.PreferenceItem<out Any, out Any>
 
 /** 「改設定後更新已翻章」對話框種類：UPGRADE＝改去字方法(升級重繪)、LAYOUT＝改排版(各章用原去字法重繪、只套新排版)。 */
 private enum class RenderUpdateKind { UPGRADE, LAYOUT }
-
-/** 隱私揭露文案：揭露翻譯時「什麼會離開裝置」。資訊列 + 一次性同意對話框共用。 */
-private const val PRIVACY_DISCLOSURE =
-    "翻譯會把頁面文字（OCR 後）送到你設定的 LLM provider；圖像 / 偵測 / OCR / 去字全在裝置上、不外傳；" +
-        "API key 加密存在本機。"
 
 object SettingsTranslationScreen : SearchableSettings {
 
@@ -75,48 +70,47 @@ object SettingsTranslationScreen : SearchableSettings {
         val engineService = remember { Injekt.get<TranslationEngineService>() }
         // 「閱讀後刪除」綁下載偏好同一個 pref → 與下載設定頁連動（任一邊改都同步）。
         val downloadPrefs = remember { Injekt.get<DownloadPreferences>() }
-        // 「改去字法後升級重繪」：掃全庫已翻章排入重繪（reRenderAllUpgradable）+ 跑它的 scope。
         val translationManager = remember { Injekt.get<TranslationManager>() }
         val scope = rememberCoroutineScope()
+        val context = LocalContext.current
         val showAdvanced by prefs.showAdvanced.collectAsState()
-        // 是否已看過隱私揭露（控制一次性同意對話框；看過後開關直接生效不再跳）。
         val privacyAck by prefs.privacyAcknowledged.collectAsState()
         val cores = remember { Runtime.getRuntime().availableProcessors() }
+        // 進階參數 subtitle 的「。現值：%s」尾綴（%s 由 EditTextPreference 框架填現值）。
+        val curSuffix = stringResource(MR.strings.pref_translation_adv_current)
 
-        // —— 多 LLM 供應商（m-i-t 全部 + OpenRouter，全 OpenAI 相容）+ 自動撈模型清單（借鏡 nextai）——
-        // provider 變更 → 重組金鑰/base/模型欄（每家一格）。撈清單對話框 modelPicker、抓取中旗標 fetchingModels。
+        // —— 多 LLM 供應商（m-i-t 全部 + OpenRouter）+ 自動撈模型清單 ——
         val providerId by prefs.provider.collectAsState()
         val providerPreset = remember(providerId) { LlmProviders.byId(providerId) }
         val modelVal by prefs.model.collectAsState()
         val providerEntries = remember {
             LlmProviders.ALL.associate { it.id to it.displayName }.toImmutableMap()
         }
-        var modelPicker by remember { mutableStateOf<List<String>?>(null) } // 非 null＝顯示挑選對話框
+        var modelPicker by remember { mutableStateOf<List<String>?>(null) }
         var fetchingModels by remember { mutableStateOf(false) }
 
-        // 模型狀態（BYOM）：只查 3 顆 onnx「是否存在」（不驗 checksum——模型會更新會誤判）。off-main 算一次、重開設定頁重檢。
-        val context = LocalContext.current
-        // 模型自動下載（從 release 抓 + sha256 驗，落 filesDir/models，與 BYOM 並存）。
+        // 模型自動下載 + 狀態（下載完才重算 modelPresence）。
         val modelDownloadManager = remember { Injekt.get<ModelDownloadManager>() }
         val modelDownloadState by modelDownloadManager.state.collectAsState()
-        // 下載完成才重算模型狀態（用 Boolean 當 key，避免每個進度 tick 都重掃）。
         val modelsJustDownloaded = modelDownloadState is ModelDownloadManager.State.Done
         val modelPresence by produceState<List<Pair<String, Boolean>>?>(initialValue = null, modelsJustDownloaded) {
             value = withContext(Dispatchers.IO) { TranslationEngineConfig.modelPresence(context) }
         }
+        val modelStatusMissing = stringResource(MR.strings.pref_translation_model_status_missing)
+        val modelStatusChecking = stringResource(MR.strings.pref_translation_model_status_checking)
         val modelStatusSubtitle = modelPresence?.let { mp ->
             mp.joinToString("・") { (n, ok) -> "$n ${if (ok) "✓" else "✗"}" } +
-                if (mp.all { it.second }) "" else "（缺＝把 3 顆 onnx 放到儲存位置的 models/，或用下方「下載模型」）"
-        } ?: "檢查中…"
+                if (mp.all { it.second }) "" else modelStatusMissing
+        } ?: modelStatusChecking
 
-        // 即時翻譯分類過濾（包含/排除，鏡射下載「新章分類」）：取所有書庫分類 + tri-state 對話框狀態。
+        // 即時翻譯分類過濾。
         val getCategories = remember { Injekt.get<GetCategories>() }
         val allCategories by getCategories.subscribe().collectAsState(initial = emptyList())
         val liveIncluded by prefs.liveTranslateCategories.collectAsState()
         val liveExcluded by prefs.liveTranslateCategoriesExclude.collectAsState()
         var showLiveCategoryDialog by rememberSaveable { mutableStateOf(false) }
 
-        // per-source 排除：列「書庫用到的線上來源」（有收藏、非 local）供多選不自動翻的來源。off-main flow 收集成 id→名稱 map。
+        // per-source 排除：列書庫用到的線上來源。
         val getSourcesWithFavoriteCount = remember { Injekt.get<GetSourcesWithFavoriteCount>() }
         val librarySources by produceState<ImmutableMap<String, String>>(initialValue = persistentMapOf()) {
             getSourcesWithFavoriteCount.subscribe().collect { list ->
@@ -125,8 +119,8 @@ object SettingsTranslationScreen : SearchableSettings {
         }
         if (showLiveCategoryDialog) {
             TriStateListDialog(
-                title = "即時翻譯分類",
-                message = "選了「包含」分類＝只翻這些分類的書；選「排除」＝這些分類的書不翻；都不選＝全部",
+                title = stringResource(MR.strings.pref_translation_live_categories),
+                message = stringResource(MR.strings.pref_translation_live_categories_message),
                 items = allCategories,
                 initialChecked = liveIncluded.mapNotNull { id -> allCategories.find { it.id.toString() == id } },
                 initialInversed = liveExcluded.mapNotNull { id -> allCategories.find { it.id.toString() == id } },
@@ -140,30 +134,25 @@ object SettingsTranslationScreen : SearchableSettings {
             )
         }
 
-        // 一次性隱私同意：使用者首次把「下載時翻譯」或「即時翻譯」打開時跳一次（看過後 privacyAcknowledged=true、不再跳）。
-        // 觸發的開關記在 pendingEnableSwitch：按「確定」＝記 ack + 把該開關真的開起來（含即時翻的預暖副作用）；
-        // 按「取消」/關閉＝什麼都不做（開關維持關，因為 onValueChanged 已回 false 沒讓它翻過去）。
+        // 一次性隱私同意 + 隱私完整宣告 + 改設定更新已翻章 + 抓模型清單，四個對話框。
         var pendingEnableSwitch by remember { mutableStateOf<PreferenceData<Boolean>?>(null) }
-        // 改去字方法時跳「要更新已翻章嗎」確認對話框（見下方 if 區塊）。
         var pendingRenderUpdate by remember { mutableStateOf<RenderUpdateKind?>(null) }
+        var showPrivacyDialog by remember { mutableStateOf(false) }
         if (pendingEnableSwitch != null) {
             val pending = pendingEnableSwitch!!
             AlertDialog(
                 onDismissRequest = { pendingEnableSwitch = null },
-                title = { Text(text = "隱私") },
-                text = { Text(text = PRIVACY_DISCLOSURE) },
+                title = { Text(text = stringResource(MR.strings.pref_translation_privacy)) },
+                text = { Text(text = stringResource(MR.strings.pref_translation_privacy_full)) },
                 confirmButton = {
                     TextButton(
                         onClick = {
                             prefs.privacyAcknowledged.set(true)
-                            pending.set(true) // 同意後才真的開啟觸發的那個開關
-                            // 即時翻開關有預暖副作用（warm 引擎），這裡補上（onValueChanged 當初回 false、沒跑到）。
+                            pending.set(true)
                             if (pending === prefs.liveTranslate) engineService.warmUpAsync()
                             pendingEnableSwitch = null
                         },
-                    ) {
-                        Text(text = stringResource(MR.strings.action_ok))
-                    }
+                    ) { Text(text = stringResource(MR.strings.action_ok)) }
                 },
                 dismissButton = {
                     TextButton(onClick = { pendingEnableSwitch = null }) {
@@ -172,22 +161,29 @@ object SettingsTranslationScreen : SearchableSettings {
                 },
             )
         }
-
-        // 「改設定後更新已翻章」確認：改去字方法→升級重繪(UPGRADE)；改排版→各章用原去字法重繪、只套新排版(LAYOUT)。
-        // 兩者都只動「有保留素材」的鬆散下載章。
+        if (showPrivacyDialog) {
+            AlertDialog(
+                onDismissRequest = { showPrivacyDialog = false },
+                title = { Text(text = stringResource(MR.strings.pref_translation_privacy)) },
+                text = { Text(text = stringResource(MR.strings.pref_translation_privacy_full)) },
+                confirmButton = {
+                    TextButton(onClick = { showPrivacyDialog = false }) {
+                        Text(text = stringResource(MR.strings.action_ok))
+                    }
+                },
+            )
+        }
         pendingRenderUpdate?.let { kind ->
             AlertDialog(
                 onDismissRequest = { pendingRenderUpdate = null },
-                title = { Text(text = "更新已翻章節") },
+                title = { Text(text = stringResource(MR.strings.pref_translation_render_update_title)) },
                 text = {
                     Text(
                         text = when (kind) {
-                            RenderUpdateKind.UPGRADE ->
-                                "去字方法已變更。要用目前設定重繪所有已翻章嗎？" +
-                                    "只會「升級」去字品質、不會降級（保留最好結果）；僅含「有保留素材」的鬆散下載章。"
-                            RenderUpdateKind.LAYOUT ->
-                                "排版設定已變更。要用新排版重繪所有已翻章嗎？" +
-                                    "各章維持原本的去字法、只套用新排版；僅含「有保留素材」的鬆散下載章。"
+                            RenderUpdateKind.UPGRADE -> stringResource(
+                                MR.strings.pref_translation_render_update_upgrade,
+                            )
+                            RenderUpdateKind.LAYOUT -> stringResource(MR.strings.pref_translation_render_update_layout)
                         },
                     )
                 },
@@ -201,13 +197,15 @@ object SettingsTranslationScreen : SearchableSettings {
                                     RenderUpdateKind.LAYOUT -> translationManager.reRenderAllWithStoredMethod()
                                 }
                                 context.toast(
-                                    if (n > 0) "已排入 $n 章重繪" else "沒有可更新的已翻章（或未保留素材）",
+                                    if (n > 0) {
+                                        context.ctxStringResource(MR.strings.pref_translation_render_update_queued, n)
+                                    } else {
+                                        context.ctxStringResource(MR.strings.pref_translation_render_update_none)
+                                    },
                                 )
                             }
                         },
-                    ) {
-                        Text(text = stringResource(MR.strings.action_ok))
-                    }
+                    ) { Text(text = stringResource(MR.strings.action_ok)) }
                 },
                 dismissButton = {
                     TextButton(onClick = { pendingRenderUpdate = null }) {
@@ -216,12 +214,10 @@ object SettingsTranslationScreen : SearchableSettings {
                 },
             )
         }
-
-        // 抓取模型清單對話框：撈到後挑一個 → 寫入 prefs.model。長清單（如 OpenRouter 340）可滾動。
         modelPicker?.let { models ->
             AlertDialog(
                 onDismissRequest = { modelPicker = null },
-                title = { Text(text = "選擇模型（${models.size}）") },
+                title = { Text(text = stringResource(MR.strings.pref_translation_pick_model, models.size)) },
                 text = {
                     LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
                         items(models) { id ->
@@ -247,13 +243,14 @@ object SettingsTranslationScreen : SearchableSettings {
             )
         }
 
-        // 裝置感知緒數選項：自動 + {2,4,6,8 ≤ 核數}（超過核數的隱藏）
-        val threadEntries = remember(cores) {
-            buildMap {
-                put("auto", "自動（$cores 核）")
-                listOf(2, 4, 6, 8).filter { it <= cores }.forEach { put(it.toString(), "$it 緒") }
-            }.toImmutableMap()
-        }
+        // 裝置感知緒數選項：自動 + {2,4,6,8 ≤ 核數}。
+        val threadEntries = buildMap {
+            put("auto", stringResource(MR.strings.pref_translation_thread_auto, cores))
+            listOf(2, 4, 6, 8).filter { it <= cores }.forEach {
+                put(it.toString(), stringResource(MR.strings.pref_translation_thread_count, it))
+            }
+        }.toImmutableMap()
+
         val targetLangs = persistentMapOf(
             TranslationPreferences.DEFAULT_TARGET_LANG to stringResource(MR.strings.pref_translation_lang_trad_chinese),
             "Japanese" to stringResource(MR.strings.pref_translation_lang_japanese),
@@ -283,17 +280,17 @@ object SettingsTranslationScreen : SearchableSettings {
         return listOf(
             Preference.PreferenceItem.SwitchPreference(
                 preference = prefs.showAdvanced,
-                title = "顯示進階選項",
-                subtitle = "展開所有微調參數（一般使用者免動）",
+                title = stringResource(MR.strings.pref_translation_show_advanced),
+                subtitle = stringResource(MR.strings.pref_translation_show_advanced_summary),
             ),
+            // —— 翻譯（開關 + 範圍）——
             Preference.PreferenceGroup(
-                title = "翻譯",
+                title = stringResource(MR.strings.pref_category_translation),
                 preferenceItems = listOfNotNull<Item>(
                     Preference.PreferenceItem.SwitchPreference(
                         preference = prefs.translationEnabled,
-                        title = "下載時翻譯章節",
-                        subtitle = "偵測 / OCR / 去字在裝置上跑；翻譯走雲端 LLM",
-                        // 首次開啟＝先跳一次性隱私同意（回 false 不立即開；同意後對話框才真的開）。看過就直接開。
+                        title = stringResource(MR.strings.pref_translation_on_download),
+                        subtitle = stringResource(MR.strings.pref_translation_on_download_summary),
                         onValueChanged = { enabled ->
                             if (enabled && !privacyAck) {
                                 pendingEnableSwitch = prefs.translationEnabled
@@ -305,14 +302,10 @@ object SettingsTranslationScreen : SearchableSettings {
                     ),
                     Preference.PreferenceItem.SwitchPreference(
                         preference = prefs.liveTranslate,
-                        title = "即時翻譯（邊讀邊翻）",
-                        subtitle = "開啟後，讀未翻章節時逐頁用快速 boxfill 即時翻並置換頁面；需 API key + 模型，與「下載時翻譯章節」獨立",
-                        // 即時翻譯＝引擎常駐（warm）的主要使用情境：開啟時預暖引擎（首章瞬間就緒）、關閉時釋放 ~450MB。
-                        // ★ 必須 fire-and-forget（背景 IO）：warmUp 會載 ~450MB、shutdown 可能等鎖（背景正翻某頁）——
-                        //   onValueChanged 跑在 UI，若在此 await 就會卡主執行緒 → ANR/crash（實測：關即時翻當機）。
+                        title = stringResource(MR.strings.pref_translation_live),
+                        subtitle = stringResource(MR.strings.pref_translation_live_summary),
                         onValueChanged = { enabled ->
                             when {
-                                // 首次開啟＝先跳一次性隱私同意；回 false 暫不開、預暖延到對話框「確定」才做。
                                 enabled && !privacyAck -> {
                                     pendingEnableSwitch = prefs.liveTranslate
                                     false
@@ -329,7 +322,7 @@ object SettingsTranslationScreen : SearchableSettings {
                         },
                     ),
                     Preference.PreferenceItem.TextPreference(
-                        title = "即時翻譯分類",
+                        title = stringResource(MR.strings.pref_translation_live_categories),
                         subtitle = getCategoriesLabel(
                             allCategories = allCategories,
                             included = liveIncluded,
@@ -337,15 +330,12 @@ object SettingsTranslationScreen : SearchableSettings {
                         ),
                         onClick = { showLiveCategoryDialog = true },
                     ),
-                    // per-source 排除：勾選的來源不自動翻譯（下載時 + 即時皆跳過）；手動翻不受限。只列書庫用到的線上來源。
                     Preference.PreferenceItem.MultiSelectListPreference(
                         preference = prefs.translationSourcesExclude,
                         entries = librarySources,
-                        title = "不翻譯的來源",
-                        subtitle = "勾選的來源不自動翻譯（手動翻不受限）：%s",
+                        title = stringResource(MR.strings.pref_translation_excluded_sources),
+                        subtitle = stringResource(MR.strings.pref_translation_excluded_sources_summary),
                     ),
-                    // 閱讀後刪除：綁下載偏好同一 pref（removeAfterReadSlots）→ 與下載設定頁完全連動。
-                    // 即時翻譯讓「讀＝下載＋翻」會累積章節，這裡可就地設定讀完自動清。
                     Preference.PreferenceItem.ListPreference(
                         preference = downloadPrefs.removeAfterReadSlots,
                         entries = persistentMapOf(
@@ -357,42 +347,54 @@ object SettingsTranslationScreen : SearchableSettings {
                             4 to stringResource(MR.strings.fifth_to_last),
                         ),
                         title = stringResource(MR.strings.pref_remove_after_read),
-                        subtitle = "%s（與下載設定連動）",
+                        subtitle = stringResource(MR.strings.pref_translation_remove_after_read_summary),
                     ),
-                    // —— LLM 供應商（m-i-t 全部 + OpenRouter，全 OpenAI 相容；切換只換端點/模型/金鑰）——
+                ).toImmutableList(),
+            ),
+            // —— 供應商（LLM）——
+            Preference.PreferenceGroup(
+                title = stringResource(MR.strings.pref_translation_group_provider),
+                preferenceItems = listOfNotNull<Item>(
                     Preference.PreferenceItem.ListPreference(
                         preference = prefs.provider,
                         entries = providerEntries,
-                        title = "LLM 供應商",
-                        subtitle = "%s · 切換保留各家金鑰",
-                        // 換供應商 → 清模型 id（免沿用上一家的；改用新家預設或重新抓取）。
+                        title = stringResource(MR.strings.pref_translation_provider),
+                        subtitle = stringResource(MR.strings.pref_translation_provider_summary),
                         onValueChanged = { _ ->
                             prefs.model.set("")
                             true
                         },
                     ),
-                    // 自架 / 自訂（sakura/custom）才顯示 base 欄；其餘用內建端點。
                     Preference.PreferenceItem.EditTextPreference(
                         preference = prefs.apiBase,
-                        title = "API base",
-                        subtitle = "自架 / 自訂端點，例 http://192.168.1.5:8080/v1",
+                        title = stringResource(MR.strings.pref_translation_api_base),
+                        subtitle = stringResource(MR.strings.pref_translation_api_base_summary),
                     ).takeIf { providerPreset.baseEditable },
-                    // 金鑰：綁「目前供應商」那一格（§2.1 每家一格、切換不丟、加密落地）。
                     Preference.PreferenceItem.EditTextPreference(
                         preference = prefs.apiKeyFor(providerId),
-                        title = "API key (BYOK)",
-                        subtitle = "${providerPreset.displayName} 金鑰（加密存本機）",
+                        title = stringResource(MR.strings.pref_translation_api_key),
+                        subtitle = stringResource(
+                            MR.strings.pref_translation_api_key_summary,
+                            providerPreset.displayName,
+                        ),
                     ),
-                    // 模型：手填 id，或用下方「抓取模型」撈清單選；空＝用該供應商預設。
                     Preference.PreferenceItem.EditTextPreference(
                         preference = prefs.model,
-                        title = "模型",
-                        subtitle = modelVal.ifBlank { "預設：${providerPreset.defaultModel}" },
+                        title = stringResource(MR.strings.pref_translation_model),
+                        subtitle = modelVal.ifBlank {
+                            stringResource(
+                                MR.strings.pref_translation_model_default_summary,
+                                providerPreset.defaultModel,
+                            )
+                        },
                     ),
-                    // 抓取可用模型（借鏡 nextai listModels：OpenAI /v1/models、Gemini /v1beta/models；撈不到→手填）。
                     Preference.PreferenceItem.TextPreference(
-                        title = "↻ 抓取可用模型",
-                        subtitle = if (fetchingModels) "抓取中…" else "從供應商撈最新清單供選（需先填 key）",
+                        title = stringResource(MR.strings.pref_translation_fetch_models),
+                        subtitle = if (fetchingModels) {
+                            stringResource(MR.strings.pref_translation_fetching)
+                        } else {
+                            stringResource(MR.strings.pref_translation_fetch_models_summary)
+                        },
                         onClick = {
                             if (!fetchingModels) {
                                 scope.launch {
@@ -405,7 +407,9 @@ object SettingsTranslationScreen : SearchableSettings {
                                     )
                                     fetchingModels = false
                                     if (list.isEmpty()) {
-                                        context.toast("撈不到模型清單，請手動輸入 model id")
+                                        context.toast(
+                                            context.ctxStringResource(MR.strings.pref_translation_fetch_models_empty),
+                                        )
                                     } else {
                                         modelPicker = list.map { it.id }
                                     }
@@ -413,43 +417,62 @@ object SettingsTranslationScreen : SearchableSettings {
                             }
                         },
                     ),
-                    // 隱私揭露（資訊列、無動作）：讓使用者翻譯前知道「什麼會離開裝置」。與一次性同意對話框同文案。
-                    Preference.PreferenceItem.TextPreference(
-                        title = "隱私",
-                        subtitle = PRIVACY_DISCLOSURE,
-                    ),
-                    // 模型狀態（BYOM）：顯示 3 顆 onnx 是否齊（只查存在、不驗 checksum）。幫 BYOM 設定 + 診斷「未啟動」。
-                    Preference.PreferenceItem.TextPreference(
-                        title = "模型狀態",
-                        subtitle = modelStatusSubtitle,
-                    ),
-                    // 下載模型：從 release 自動抓 3 顆 + sha256 驗（落 filesDir/models）。與 BYOM 並存、冪等可重按。
-                    Preference.PreferenceItem.TextPreference(
-                        title = "下載模型",
-                        subtitle = when (val s = modelDownloadState) {
-                            is ModelDownloadManager.State.Running -> "${s.label}　${s.percent}%"
-                            ModelDownloadManager.State.Done -> "下載完成"
-                            is ModelDownloadManager.State.Error -> "失敗：${s.message}（點選重試）"
-                            ModelDownloadManager.State.Idle -> "從 release 自動下載 3 顆模型（約 467 MB）+ sha256 驗證"
-                        },
-                        onClick = { modelDownloadManager.download() },
-                    ),
+                ).toImmutableList(),
+            ),
+            // —— 語言 ——
+            Preference.PreferenceGroup(
+                title = stringResource(MR.strings.pref_translation_group_language),
+                preferenceItems = listOfNotNull<Item>(
                     Preference.PreferenceItem.ListPreference(
                         preference = prefs.targetLangName,
                         entries = targetLangs,
-                        title = "目標語言",
+                        title = stringResource(MR.strings.pref_translation_target_lang),
                     ),
                     Preference.PreferenceItem.ListPreference(
                         preference = prefs.sourceLangName,
                         entries = sourceLangs,
-                        title = "來源語言",
+                        title = stringResource(MR.strings.pref_translation_source_lang),
                         subtitle = stringResource(MR.strings.pref_translation_source_lang_subtitle),
                         subtitleProvider = { _, _ -> stringResource(MR.strings.pref_translation_source_lang_subtitle) },
                     ),
                 ).toImmutableList(),
             ),
+            // —— 模型 ——
             Preference.PreferenceGroup(
-                title = "去字",
+                title = stringResource(MR.strings.pref_translation_group_models),
+                preferenceItems = listOfNotNull<Item>(
+                    Preference.PreferenceItem.TextPreference(
+                        title = stringResource(MR.strings.pref_translation_model_status),
+                        subtitle = modelStatusSubtitle,
+                    ),
+                    Preference.PreferenceItem.TextPreference(
+                        title = stringResource(MR.strings.pref_translation_download_models),
+                        subtitle = when (val s = modelDownloadState) {
+                            is ModelDownloadManager.State.Running -> "${s.label}　${s.percent}%"
+                            ModelDownloadManager.State.Done ->
+                                stringResource(MR.strings.pref_translation_download_models_done)
+                            is ModelDownloadManager.State.Error ->
+                                stringResource(MR.strings.pref_translation_download_models_error, s.message)
+                            ModelDownloadManager.State.Idle ->
+                                stringResource(MR.strings.pref_translation_download_models_idle)
+                        },
+                        onClick = { modelDownloadManager.download() },
+                    ),
+                ).toImmutableList(),
+            ),
+            // —— 隱私（點開看完整宣告）——
+            Preference.PreferenceGroup(
+                title = stringResource(MR.strings.pref_translation_privacy),
+                preferenceItems = listOfNotNull<Item>(
+                    Preference.PreferenceItem.TextPreference(
+                        title = stringResource(MR.strings.pref_translation_privacy_summary),
+                        onClick = { showPrivacyDialog = true },
+                    ),
+                ).toImmutableList(),
+            ),
+            // —— 去字 ——
+            Preference.PreferenceGroup(
+                title = stringResource(MR.strings.pref_translation_group_inpaint),
                 preferenceItems = listOfNotNull<Item>(
                     Preference.PreferenceItem.ListPreference(
                         preference = prefs.inpaintMethod,
@@ -459,7 +482,6 @@ object SettingsTranslationScreen : SearchableSettings {
                             "auto_tile" to stringResource(MR.strings.pref_translation_inpaint_auto_tile),
                         ),
                         title = stringResource(MR.strings.pref_translation_inpaint_method),
-                        // 改去字法 → 若有在用翻譯（下載時/即時任一開），跳對話框問是否升級重繪既有已翻章。
                         onValueChanged = { _ ->
                             if (prefs.translationEnabled.get() || prefs.liveTranslate.get()) {
                                 pendingRenderUpdate = RenderUpdateKind.UPGRADE
@@ -467,28 +489,34 @@ object SettingsTranslationScreen : SearchableSettings {
                             true
                         },
                     ),
-                    advFloat(
+                    adv(
                         showAdvanced,
                         prefs.autoStdThreshold,
-                        "auto 泡泡判定門檻 std",
-                        "背景 std<此值=平塗、否則 lama；0–30，越低越多走 lama(精/慢)、越高壓畫面字塗成色塊",
+                        stringResource(MR.strings.pref_translation_auto_std),
+                        stringResource(MR.strings.pref_translation_auto_std_desc) + curSuffix,
                     ),
-                    advFloat(
+                    adv(
                         showAdvanced,
                         prefs.autoWhiteThreshold,
-                        "auto 白底門檻",
-                        "背景亮度≥此值才算對話框；0–255，越低暗背景誤平塗、越高灰白泡也走 lama",
+                        stringResource(MR.strings.pref_translation_auto_white),
+                        stringResource(MR.strings.pref_translation_auto_white_desc) + curSuffix,
                     ),
-                    advInt(showAdvanced, prefs.bboxPad, "去字外擴 (px)", "去字範圍外擴、涵蓋貼邊假名；0–64，太小漏邊假名、太大挖到鄰近畫面"),
+                    adv(
+                        showAdvanced,
+                        prefs.bboxPad,
+                        stringResource(MR.strings.pref_translation_bbox_pad),
+                        stringResource(MR.strings.pref_translation_bbox_pad_desc) + curSuffix,
+                    ),
                     Preference.PreferenceItem.SwitchPreference(
                         preference = prefs.keepMaterials,
-                        title = "保留重繪素材",
-                        subtitle = "翻完每頁另存原圖 + 遮罩 + 文字區，日後可換去字方法重繪（免重跑 OCR/翻譯）；約多一倍儲存",
+                        title = stringResource(MR.strings.pref_translation_keep_materials),
+                        subtitle = stringResource(MR.strings.pref_translation_keep_materials_summary),
                     ),
                 ).toImmutableList(),
             ),
+            // —— 排版 ——
             Preference.PreferenceGroup(
-                title = "排版",
+                title = stringResource(MR.strings.pref_translation_group_typeset),
                 preferenceItems = listOfNotNull<Item>(
                     Preference.PreferenceItem.ListPreference(
                         preference = prefs.orientation,
@@ -498,7 +526,6 @@ object SettingsTranslationScreen : SearchableSettings {
                             "horizontal" to stringResource(MR.strings.pref_translation_orientation_horizontal),
                         ),
                         title = stringResource(MR.strings.pref_translation_orientation),
-                        // 改排版 → 跳對話框問是否用新排版重繪已翻章（各章維持原去字法）。
                         onValueChanged = { _ ->
                             if (prefs.translationEnabled.get() || prefs.liveTranslate.get()) {
                                 pendingRenderUpdate = RenderUpdateKind.LAYOUT
@@ -509,10 +536,10 @@ object SettingsTranslationScreen : SearchableSettings {
                     Preference.PreferenceItem.ListPreference(
                         preference = prefs.colorMode,
                         entries = persistentMapOf(
-                            "auto" to "自動（依背景亮度黑/白字）",
-                            "mono" to "一律黑字白邊",
+                            "auto" to stringResource(MR.strings.pref_translation_color_auto),
+                            "mono" to stringResource(MR.strings.pref_translation_color_mono),
                         ),
-                        title = "文字顏色",
+                        title = stringResource(MR.strings.pref_translation_color_mode),
                         onValueChanged = { _ ->
                             if (prefs.translationEnabled.get() || prefs.liveTranslate.get()) {
                                 pendingRenderUpdate = RenderUpdateKind.LAYOUT
@@ -522,8 +549,8 @@ object SettingsTranslationScreen : SearchableSettings {
                     ),
                     Preference.PreferenceItem.SwitchPreference(
                         preference = prefs.fontBorder,
-                        title = "文字描邊",
-                        subtitle = "雜背景上的字加描邊更好讀",
+                        title = stringResource(MR.strings.pref_translation_font_border),
+                        subtitle = stringResource(MR.strings.pref_translation_font_border_summary),
                         onValueChanged = { _ ->
                             if (prefs.translationEnabled.get() || prefs.liveTranslate.get()) {
                                 pendingRenderUpdate = RenderUpdateKind.LAYOUT
@@ -531,73 +558,89 @@ object SettingsTranslationScreen : SearchableSettings {
                             true
                         },
                     ),
-                    advInt(showAdvanced, prefs.fontSizeMax, "字級上限 (px)", "20–120，太小大泡撐不滿、太大短句爆大"),
-                    advInt(showAdvanced, prefs.fontSizeMin, "字級下限 (px)", "6–40，再小寧可溢出也不縮"),
-                    advFloat(showAdvanced, prefs.artStrokeRatio, "壓畫面描邊寬比例", "字級×此；0–0.5，太小難讀、太大白邊吃字"),
-                    advInt(showAdvanced, prefs.colTrim, "直排每欄少放字數", "0–10，越大字越小欄越多"),
-                    advInt(showAdvanced, prefs.rowTrim, "橫排每行少放字數", "0–10，colTrim 的橫排版"),
-                    advFloat(showAdvanced, prefs.fontScale, "字級整體縮放", "0.3–1.5，<1 更 fit 格子留邊距"),
+                    adv(
+                        showAdvanced,
+                        prefs.fontSizeMax,
+                        stringResource(MR.strings.pref_translation_font_size_max),
+                        stringResource(MR.strings.pref_translation_font_size_max_desc) + curSuffix,
+                    ),
+                    adv(
+                        showAdvanced,
+                        prefs.fontSizeMin,
+                        stringResource(MR.strings.pref_translation_font_size_min),
+                        stringResource(MR.strings.pref_translation_font_size_min_desc) + curSuffix,
+                    ),
+                    adv(
+                        showAdvanced,
+                        prefs.artStrokeRatio,
+                        stringResource(MR.strings.pref_translation_art_stroke),
+                        stringResource(MR.strings.pref_translation_art_stroke_desc) + curSuffix,
+                    ),
+                    adv(
+                        showAdvanced,
+                        prefs.colTrim,
+                        stringResource(MR.strings.pref_translation_col_trim),
+                        stringResource(MR.strings.pref_translation_col_trim_desc) + curSuffix,
+                    ),
+                    adv(
+                        showAdvanced,
+                        prefs.rowTrim,
+                        stringResource(MR.strings.pref_translation_row_trim),
+                        stringResource(MR.strings.pref_translation_row_trim_desc) + curSuffix,
+                    ),
+                    adv(
+                        showAdvanced,
+                        prefs.fontScale,
+                        stringResource(MR.strings.pref_translation_font_scale),
+                        stringResource(MR.strings.pref_translation_font_scale_desc) + curSuffix,
+                    ),
                 ).toImmutableList(),
             ),
+            // —— 效能 ——
             Preference.PreferenceGroup(
-                title = "效能（裝置相依）",
+                title = stringResource(MR.strings.pref_translation_group_performance),
                 preferenceItems = listOfNotNull<Item>(
                     Preference.PreferenceItem.ListPreference(
                         preference = prefs.ocrConcurrency,
                         entries = threadEntries,
-                        title = "OCR 並發度",
-                        subtitle = "同時跑幾行 OCR（自動=核數）；越高越快到核數為止。%s",
+                        title = stringResource(MR.strings.pref_translation_ocr_concurrency),
+                        subtitle = stringResource(MR.strings.pref_translation_ocr_concurrency_summary),
                     ),
                     Preference.PreferenceItem.ListPreference(
                         preference = prefs.intraThreads,
                         entries = threadEntries,
-                        title = "推論執行緒（偵測/去字）",
-                        subtitle = "一次推論用幾緒（自動=大核數）；含小核反拖累。%s",
+                        title = stringResource(MR.strings.pref_translation_intra_threads),
+                        subtitle = stringResource(MR.strings.pref_translation_intra_threads_summary),
                     ),
                 ).toImmutableList(),
             ),
+            // —— 辨識（進階）——
             Preference.PreferenceGroup(
-                title = "辨識（偵測 / OCR）",
+                title = stringResource(MR.strings.pref_translation_group_recognition),
                 enabled = showAdvanced,
                 preferenceItems = listOfNotNull<Item>(
-                    advFloat(showAdvanced, prefs.segThreshold, "去字遮罩門檻 seg", "0–1，越低抓越多筆畫(救漢字旁假名殘留)、越高漏細筆畫"),
-                    advFloat(showAdvanced, prefs.minProb, "OCR 信心門檻", "0–1，低於此丟該行；太低收雜訊亂碼、太高漏字"),
+                    adv(
+                        showAdvanced,
+                        prefs.segThreshold,
+                        stringResource(MR.strings.pref_translation_seg_threshold),
+                        stringResource(MR.strings.pref_translation_seg_threshold_desc) + curSuffix,
+                    ),
+                    adv(
+                        showAdvanced,
+                        prefs.minProb,
+                        stringResource(MR.strings.pref_translation_min_prob),
+                        stringResource(MR.strings.pref_translation_min_prob_desc) + curSuffix,
+                    ),
                 ).toImmutableList(),
             ),
         ).filter { it !is Preference.PreferenceGroup || it.preferenceItems.isNotEmpty() }
     }
 
-    /** 進階浮點輸入：showAdvanced 關時回 null（不顯示）。subtitle 帶說明 + 現值(%s)。 */
-    private fun advFloat(
-        show: Boolean,
-        pref: tachiyomi.core.common.preference.Preference<String>,
-        title: String,
-        desc: String,
-    ): Item? =
+    /** 進階數值輸入：showAdvanced 關時回 null（不顯示）。subtitle 已含說明 + 「。現值：%s」尾綴。 */
+    private fun adv(show: Boolean, pref: PreferenceData<String>, title: String, subtitle: String): Item? =
         if (!show) {
             null
         } else {
-            Preference.PreferenceItem.EditTextPreference(
-                preference = pref,
-                title = title,
-                subtitle = "$desc。現值：%s",
-            )
-        }
-
-    /** 進階整數輸入：同 [advFloat]。 */
-    private fun advInt(
-        show: Boolean,
-        pref: tachiyomi.core.common.preference.Preference<String>,
-        title: String,
-        desc: String,
-    ): Item? =
-        if (!show) {
-            null
-        } else {
-            Preference.PreferenceItem.EditTextPreference(
-                preference = pref,
-                title = title,
-                subtitle = "$desc。現值：%s",
-            )
+            Preference.PreferenceItem.EditTextPreference(preference = pref, title = title, subtitle = subtitle)
         }
 }

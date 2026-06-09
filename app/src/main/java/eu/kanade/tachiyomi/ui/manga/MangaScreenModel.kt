@@ -791,7 +791,7 @@ class MangaScreenModel(
             .map { it.chapter }
         if (chapters.isEmpty()) {
             screenModelScope.launch {
-                snackbarHostState.showSnackbar(message = "沒有可重繪的已翻章節")
+                snackbarHostState.showSnackbar(message = context.stringResource(MR.strings.rerender_none))
             }
             return
         }
@@ -799,7 +799,9 @@ class MangaScreenModel(
         val method = translationPreferences.inpaintMethod.get()
         translationManager.reRender(state.manga, chapters, method)
         screenModelScope.launch {
-            snackbarHostState.showSnackbar(message = "已排入重繪：${chapters.size} 章")
+            snackbarHostState.showSnackbar(
+                message = context.stringResource(MR.strings.pref_translation_render_update_queued, chapters.size),
+            )
         }
     }
 

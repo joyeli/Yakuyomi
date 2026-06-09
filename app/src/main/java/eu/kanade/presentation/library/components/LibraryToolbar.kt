@@ -128,7 +128,7 @@ private fun LibraryRegularToolbar(
                     IconButton(onClick = { showEngineMenu = true }) {
                         Icon(
                             imageVector = if (engineLoading) Icons.Outlined.Sync else Icons.Outlined.Translate,
-                            contentDescription = "翻譯引擎",
+                            contentDescription = stringResource(MR.strings.engine_preload_desc),
                             tint = when {
                                 engineWarm -> MaterialTheme.colorScheme.active
                                 engineLoading -> LocalContentColor.current
@@ -141,10 +141,10 @@ private fun LibraryRegularToolbar(
                         DropdownMenuItem(
                             text = {
                                 Text(
-                                    "翻譯引擎：" + when {
-                                        engineLoading -> "載入中…"
-                                        engineWarm -> "已預載"
-                                        else -> "未預載"
+                                    when {
+                                        engineLoading -> stringResource(MR.strings.engine_status_loading)
+                                        engineWarm -> stringResource(MR.strings.engine_status_warm)
+                                        else -> stringResource(MR.strings.engine_status_cold)
                                     },
                                 )
                             },
@@ -154,14 +154,14 @@ private fun LibraryRegularToolbar(
                         when {
                             engineLoading -> Unit // 載入中：不給動作
                             engineWarm -> DropdownMenuItem(
-                                text = { Text("卸下預載（釋放 ~450MB）") },
+                                text = { Text(stringResource(MR.strings.engine_unload)) },
                                 onClick = {
                                     engineService.shutdownAsync()
                                     showEngineMenu = false
                                 },
                             )
                             else -> DropdownMenuItem(
-                                text = { Text("預載引擎") },
+                                text = { Text(stringResource(MR.strings.engine_preload_action)) },
                                 onClick = {
                                     engineService.warmUpAsync()
                                     showEngineMenu = false

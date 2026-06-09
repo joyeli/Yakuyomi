@@ -69,4 +69,7 @@
     <plurals name="notification_update_error">
         <item quantity="other">%1$d 更新失敗</item>
     </plurals>
+    <plurals name="translation_queue_summary">
+        <item quantity="other">%1$s 待翻</item>
+    </plurals>
 </resources>

@@ -16,8 +16,10 @@ import li.joye.yakuyomi.engine.PageResult
 import li.joye.yakuyomi.engine.TranslationEngine
 import li.joye.yakuyomi.engine.Yakuyomi
 import logcat.LogPriority
+import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.translation.service.TranslationPreferences
+import tachiyomi.i18n.MR
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
@@ -100,12 +102,12 @@ class TranslationEngineService(private val context: Context) {
      */
     suspend fun translatePage(src: Bitmap, methodRaw: String): PageResult = mutex.withLock {
         val engine = ensureEngine(methodRaw)
-            ?: return@withLock PageResult.Failed("引擎不可用（缺模型/缺 key 或建構失敗）")
+            ?: return@withLock PageResult.Failed(context.stringResource(MR.strings.engine_unavailable))
         try {
             engine.translatePage(src)
         } catch (e: Throwable) {
             logcat(LogPriority.ERROR, e) { "warm 引擎翻譯單頁失敗" }
-            PageResult.Failed(e.message ?: "翻譯例外")
+            PageResult.Failed(e.message ?: context.stringResource(MR.strings.translate_exception))
         }
     }
 

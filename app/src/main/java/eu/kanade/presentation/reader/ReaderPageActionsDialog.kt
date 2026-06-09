@@ -97,7 +97,7 @@ fun ReaderPageActionsDialog(
                     // 不呼叫 onDismissRequest()——那會把剛開的選擇器一起關掉（兩者都寫 dialog 欄）。
                     ActionButton(
                         modifier = Modifier.weight(1f),
-                        title = "重繪",
+                        title = stringResource(MR.strings.action_rerender),
                         icon = Icons.Outlined.AutoFixHigh,
                         onClick = onReRender,
                     )
@@ -112,7 +112,7 @@ fun ReaderPageActionsDialog(
                     // 翻譯這頁（已下載章）：單頁進引擎翻、就地覆蓋。線上章不提供（呼叫端傳 null）。
                     ActionButton(
                         modifier = Modifier.weight(1f),
-                        title = "翻譯這頁",
+                        title = stringResource(MR.strings.reader_translate_this_page),
                         icon = Icons.Outlined.Translate,
                         onClick = onTranslatePage,
                     )
@@ -122,7 +122,7 @@ fun ReaderPageActionsDialog(
                     if (onStopChapterTranslate != null) {
                         ActionButton(
                             modifier = Modifier.weight(1f),
-                            title = "中止這話翻譯",
+                            title = stringResource(MR.strings.reader_stop_chapter_translate),
                             icon = Icons.Outlined.Close,
                             onClick = onStopChapterTranslate,
                         )
@@ -131,7 +131,7 @@ fun ReaderPageActionsDialog(
                     if (onStartChapterTranslate != null) {
                         ActionButton(
                             modifier = Modifier.weight(1f),
-                            title = "開始翻譯這話",
+                            title = stringResource(MR.strings.reader_translate_this_chapter),
                             icon = Icons.Filled.PlayArrow,
                             onClick = onStartChapterTranslate,
                         )
@@ -186,14 +186,14 @@ fun ReRenderMethodDialog(
 ) {
     // 顯示名 → 去字法字串（與設定頁/引擎 when 映射一致）；「原圖」＝用素材還原未翻原圖（不去字、不載 lama）。
     val options = listOf(
-        "BoxFill" to "boxfill",
-        "Auto-整頁" to "auto_whole",
-        "Auto-逐格" to "auto_tile",
-        "原圖（還原未翻）" to "original",
+        stringResource(MR.strings.rerender_boxfill) to "boxfill",
+        stringResource(MR.strings.rerender_auto_whole) to "auto_whole",
+        stringResource(MR.strings.rerender_auto_tile) to "auto_tile",
+        stringResource(MR.strings.rerender_original) to "original",
     )
     AlertDialog(
         onDismissRequest = onDismissRequest,
-        title = { Text(text = "重繪去字方法") },
+        title = { Text(text = stringResource(MR.strings.rerender_method_title)) },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 options.forEach { (label, method) ->

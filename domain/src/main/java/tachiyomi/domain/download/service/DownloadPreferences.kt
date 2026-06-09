@@ -9,7 +9,7 @@ class DownloadPreferences(
 
     val downloadOnlyOverWifi: Preference<Boolean> = preferenceStore.getBoolean(
         "pref_download_only_over_wifi_key",
-        true,
+        false,
     )
 
     // Yakuyomi：永遠用鬆散資料夾（翻譯重繪素材 .yakuyomi/ 要直接落地、CBZ 取不到）→ 預設關、設定頁開關已移除。

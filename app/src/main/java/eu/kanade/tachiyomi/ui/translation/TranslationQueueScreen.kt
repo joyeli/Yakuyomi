@@ -232,9 +232,9 @@ private fun MethodChip(
             label = { Text(text = label, style = MaterialTheme.typography.labelSmall) },
         )
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            METHOD_OPTIONS.forEach { (raw, friendly) ->
+            METHOD_IDS.forEach { raw ->
                 DropdownMenuItem(
-                    text = { Text(friendly) },
+                    text = { Text(methodLabel(raw)) },
                     onClick = {
                         expanded = false
                         if (raw != method) onSetMethod(raw)
@@ -246,18 +246,15 @@ private fun MethodChip(
 }
 
 /** 去字方法原始字串 → 友善標籤（對齊 MangaScreen/ReaderPageActionsDialog 的 3 階梯命名）。 */
+@Composable
 private fun methodLabel(raw: String): String = when (raw) {
-    "boxfill" -> "BoxFill"
-    "auto_tile" -> "Auto-逐格"
-    else -> "Auto-整頁" // auto_whole（預設）；舊存的 lama_* 等也落這
+    "boxfill" -> stringResource(MR.strings.rerender_boxfill)
+    "auto_tile" -> stringResource(MR.strings.rerender_auto_tile)
+    else -> stringResource(MR.strings.rerender_auto_whole) // auto_whole（預設）；舊存的 lama_* 等也落這
 }
 
-/** 可選的去字方法（原始字串 to 友善標籤），順序＝3 階梯 BoxFill / Auto-整頁 / Auto-逐格。 */
-private val METHOD_OPTIONS = listOf(
-    "boxfill" to "BoxFill",
-    "auto_whole" to "Auto-整頁",
-    "auto_tile" to "Auto-逐格",
-)
+/** 可選的去字方法原始字串，順序＝3 階梯 BoxFill / Auto-整頁 / Auto-逐格（顯示名走 [methodLabel]）。 */
+private val METHOD_IDS = listOf("boxfill", "auto_whole", "auto_tile")
 
 @Composable
 private fun statusLine(item: TranslationItem): String {

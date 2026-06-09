@@ -138,7 +138,7 @@ fun MangaToolbar(
                     if (onClickReRenderAll != null) {
                         add(
                             AppBar.OverflowAction(
-                                title = "重繪全本（目前去字設定）",
+                                title = stringResource(MR.strings.rerender_all_book),
                                 onClick = onClickReRenderAll,
                             ),
                         )

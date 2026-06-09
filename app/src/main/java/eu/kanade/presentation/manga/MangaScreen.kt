@@ -801,14 +801,14 @@ private fun ReRenderMethodDialog(
 ) {
     // 顯示名 → 去字法字串（與設定頁/引擎 when 映射一致）；「原圖」＝用素材還原未翻原圖（不去字、不載 lama）。
     val options = listOf(
-        "BoxFill" to "boxfill",
-        "Auto-整頁" to "auto_whole",
-        "Auto-逐格" to "auto_tile",
-        "原圖（還原未翻）" to "original",
+        stringResource(MR.strings.rerender_boxfill) to "boxfill",
+        stringResource(MR.strings.rerender_auto_whole) to "auto_whole",
+        stringResource(MR.strings.rerender_auto_tile) to "auto_tile",
+        stringResource(MR.strings.rerender_original) to "original",
     )
     AlertDialog(
         onDismissRequest = onDismissRequest,
-        title = { Text(text = "重繪去字方法") },
+        title = { Text(text = stringResource(MR.strings.rerender_method_title)) },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 options.forEach { (label, method) ->

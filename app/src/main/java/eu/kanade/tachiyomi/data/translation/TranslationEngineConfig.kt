@@ -12,8 +12,10 @@ import li.joye.yakuyomi.engine.OcrConfig
 import li.joye.yakuyomi.engine.RenderConfig
 import li.joye.yakuyomi.engine.TextOrientation
 import li.joye.yakuyomi.engine.TranslatorConfig
+import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.domain.storage.service.StoragePreferences
 import tachiyomi.domain.translation.service.TranslationPreferences
+import tachiyomi.i18n.MR
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.io.File
@@ -98,9 +100,9 @@ object TranslationEngineConfig {
     fun modelPresence(context: Context): List<Pair<String, Boolean>> {
         val saf = modelsDir(context)
         return listOf(
-            "偵測" to rolePresent(context, saf, "detect", "comictext"),
-            "OCR" to rolePresent(context, saf, "ocr"),
-            "去字" to rolePresent(context, saf, "lama"),
+            context.stringResource(MR.strings.model_role_detect) to rolePresent(context, saf, "detect", "comictext"),
+            context.stringResource(MR.strings.model_role_ocr) to rolePresent(context, saf, "ocr"),
+            context.stringResource(MR.strings.model_role_inpaint) to rolePresent(context, saf, "lama"),
         )
     }
 

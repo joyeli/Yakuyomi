@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import li.joye.yakuyomi.engine.ModelDownloader
 import li.joye.yakuyomi.engine.ModelProgress
+import tachiyomi.core.common.i18n.stringResource
+import tachiyomi.i18n.MR
 
 /**
  * 模型自動下載的 reader 端管理者（BYOM 手動放檔的「自動版」）。
@@ -42,7 +44,7 @@ class ModelDownloadManager(private val context: Context) {
     /** 觸發下載（已在下載中則忽略）。 */
     fun download() {
         if (_state.value is State.Running) return
-        update(State.Running("準備中…", 0))
+        update(State.Running(context.stringResource(MR.strings.model_dl_preparing), 0))
         scope.launch {
             try {
                 val models = ModelDownloader.fetchManifest()
@@ -53,20 +55,38 @@ class ModelDownloadManager(private val context: Context) {
                     when (p) {
                         is ModelProgress.Downloading -> {
                             val pct = ((completed + p.bytes) * 100 / total).toInt().coerceIn(0, 100)
-                            update(State.Running("下載 ${p.name}", pct))
+                            update(State.Running(context.stringResource(MR.strings.model_dl_downloading, p.name), pct))
                         }
                         is ModelProgress.Verifying ->
-                            update(State.Running("驗證 ${p.name}…", (completed * 100 / total).toInt().coerceIn(0, 100)))
+                            update(
+                                State.Running(
+                                    context.stringResource(MR.strings.model_dl_verifying, p.name),
+                                    (
+                                        completed *
+                                            100 /
+                                            total
+                                        ).toInt().coerceIn(0, 100),
+                                ),
+                            )
                         is ModelProgress.Done -> {
                             completed += models.firstOrNull { it.role == p.role }?.size ?: 0
-                            update(State.Running("已完成 ${p.name}", (completed * 100 / total).toInt().coerceIn(0, 100)))
+                            update(
+                                State.Running(
+                                    context.stringResource(MR.strings.model_dl_done_one, p.name),
+                                    (
+                                        completed *
+                                            100 /
+                                            total
+                                        ).toInt().coerceIn(0, 100),
+                                ),
+                            )
                         }
                         is ModelProgress.Failed -> Unit // 例外會由下面 catch 統一處理
                     }
                 }
                 update(State.Done)
             } catch (t: Throwable) {
-                update(State.Error(t.message ?: "下載失敗"))
+                update(State.Error(t.message ?: context.stringResource(MR.strings.model_dl_failed)))
             }
         }
     }
@@ -74,9 +94,21 @@ class ModelDownloadManager(private val context: Context) {
     private fun update(s: State) {
         _state.value = s
         when (s) {
-            is State.Running -> notify("下載模型 ${s.percent}%", s.label, ongoing = true, percent = s.percent)
-            State.Done -> notify("模型下載完成", "3 顆模型已就緒", ongoing = false)
-            is State.Error -> notify("模型下載失敗", s.message, ongoing = false)
+            is State.Running ->
+                notify(
+                    context.stringResource(MR.strings.model_dl_notif_title, s.percent),
+                    s.label,
+                    ongoing = true,
+                    percent = s.percent,
+                )
+            State.Done ->
+                notify(
+                    context.stringResource(MR.strings.model_dl_notif_done),
+                    context.stringResource(MR.strings.model_dl_notif_done_text),
+                    ongoing = false,
+                )
+            is State.Error ->
+                notify(context.stringResource(MR.strings.model_dl_notif_failed), s.message, ongoing = false)
             State.Idle -> Unit
         }
     }

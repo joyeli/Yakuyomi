@@ -9,6 +9,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import eu.kanade.presentation.theme.TachiyomiPreviewTheme
+import tachiyomi.i18n.MR
+import tachiyomi.presentation.core.i18n.stringResource
 
 /**
  * Reader 內的「當前章正在翻譯」小指示器（非侵入式角落藥丸）。
@@ -31,11 +33,11 @@ fun ReaderLiveTranslateIndicator(
 ) {
     val text = when {
         // 引擎正在載入（~450MB ONNX）→ 優先顯示，讓使用者知道延遲是在掛載模型（非卡死）。
-        loading -> "引擎載入中…"
+        loading -> stringResource(MR.strings.reader_engine_loading)
         // 翻譯中且已知頁數 → 帶進度；total 還沒回報（剛開始）時退化成不帶數字、避免顯示「0/0」。
-        translating && total > 0 -> "翻譯中 $done/$total"
-        translating -> "翻譯中"
-        else -> "翻譯排隊中"
+        translating && total > 0 -> stringResource(MR.strings.reader_translating_progress, done, total)
+        translating -> stringResource(MR.strings.reader_translating)
+        else -> stringResource(MR.strings.reader_translating_queued)
     }
 
     Surface(

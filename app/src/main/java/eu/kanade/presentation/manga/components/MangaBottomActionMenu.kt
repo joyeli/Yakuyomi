@@ -171,7 +171,7 @@ fun MangaBottomActionMenu(
                 if (onReRenderClicked != null) {
                     // 重繪：換去字法重做去字+排版（復用素材、不重跑 OCR/翻譯）。內建 CHT 字串（同其餘翻譯功能不走 MR）
                     Button(
-                        title = "重繪",
+                        title = stringResource(MR.strings.action_rerender),
                         icon = Icons.Outlined.AutoFixHigh,
                         toConfirm = confirm[8],
                         onLongClick = { onLongClickItem(8) },

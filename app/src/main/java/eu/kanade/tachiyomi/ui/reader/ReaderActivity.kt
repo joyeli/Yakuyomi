@@ -249,25 +249,35 @@ class ReaderActivity : BaseActivity() {
                     }
                     ReaderViewModel.Event.ReRenderStarted -> {
                         // 開始重繪提示：頁面同時顯示 per-page 轉圈圈（「重繪中」指示）；IO 約 2–8s。
-                        toast("重繪中…")
+                        toast(stringResource(MR.strings.reader_rerendering))
                     }
                     is ReaderViewModel.Event.ReRenderResult -> {
                         // 重繪結果提示：成功＝頁已重繪（holder 已自動刷新）；失敗＝無素材或出錯（原圖保留不動）。
-                        toast(if (event.success) "已重繪此頁" else "重繪失敗（無素材或出錯）")
+                        val res = if (event.success) {
+                            MR.strings.reader_rerender_done
+                        } else {
+                            MR.strings.reader_rerender_failed
+                        }
+                        toast(stringResource(res))
                     }
                     ReaderViewModel.Event.TranslatePageStarted -> {
                         // 開始翻譯當頁提示：頁面同時顯示 per-page 轉圈圈；IO 約數秒。
-                        toast("翻譯這頁中…")
+                        toast(stringResource(MR.strings.reader_translating_page))
                     }
                     is ReaderViewModel.Event.TranslatePageResult -> {
                         // 翻譯當頁結果：成功＝頁已覆蓋（holder 已自動刷新）；失敗/略過＝原圖保留不動（§11）。
-                        toast(if (event.success) "已翻譯此頁" else "翻譯失敗（略過或出錯）")
+                        val res = if (event.success) {
+                            MR.strings.reader_translate_page_done
+                        } else {
+                            MR.strings.reader_translate_page_failed
+                        }
+                        toast(stringResource(res))
                     }
                     ReaderViewModel.Event.ChapterTranslateStarted -> {
-                        toast("已開始翻譯這話")
+                        toast(stringResource(MR.strings.reader_translate_chapter_started))
                     }
                     ReaderViewModel.Event.ChapterTranslateStopped -> {
-                        toast("已中止這話翻譯")
+                        toast(stringResource(MR.strings.reader_translate_chapter_stopped))
                     }
                 }
             }
