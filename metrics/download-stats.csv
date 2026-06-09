@@ -1,1 +1,4 @@
 timestamp,repo,tag,asset,download_count
+"2026-06-09T03:59Z","joyeli/yakuyomi-engine","models-v1","comictextdetector.pt.onnx",3
+"2026-06-09T03:59Z","joyeli/yakuyomi-engine","models-v1","lama-manga.onnx",2
+"2026-06-09T03:59Z","joyeli/yakuyomi-engine","models-v1","ocr_48px_ctc.onnx",2
