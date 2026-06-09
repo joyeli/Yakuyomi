@@ -27,6 +27,13 @@ val yakuyomiApiKeys = Properties().apply {
     if (f.exists()) f.inputStream().use { load(it) }
 }
 
+// Release 簽章：從 gitignored keystore.properties 讀（金鑰檔與密碼不進 repo）。
+// 缺檔時 release 退回 debug 簽章 → CI / 沒金鑰的人仍能建（只是出 debug-signed APK）。
+val yakuyomiKeystore = Properties().apply {
+    val f = rootProject.file("keystore.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+
 android {
     namespace = "eu.kanade.tachiyomi"
 
@@ -46,6 +53,17 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        if (rootProject.file("keystore.properties").exists()) {
+            create("release") {
+                storeFile = file(yakuyomiKeystore.getProperty("storeFile"))
+                storePassword = yakuyomiKeystore.getProperty("storePassword")
+                keyAlias = yakuyomiKeystore.getProperty("keyAlias")
+                keyPassword = yakuyomiKeystore.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         val debug by getting {
             applicationIdSuffix = ".dev"
@@ -55,6 +73,9 @@ android {
         val release by getting {
             isMinifyEnabled = Config.enableCodeShrink
             isShrinkResources = Config.enableCodeShrink
+
+            // 有 keystore.properties → 用 release 簽章；否則退回 debug（不擋 CI/他人建置）。
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
 
             proguardFiles("proguard-android-optimize.txt", "proguard-rules.pro")
 

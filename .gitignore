@@ -15,3 +15,7 @@ local.properties
 # macOS specific files
 .DS_Store
 api-keys.properties
+# Release signing (keep secret — never commit)
+keystore.properties
+*.jks
+*.keystore
