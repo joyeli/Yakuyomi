@@ -1,0 +1,69 @@
+name: Download stats
+
+# 每週快照兩個 repo 的 GitHub Release 資產下載數，append 進 metrics/download-stats.csv。
+# download_count 是累計值（永久可得），這個 Action 只是把「時間軸」存下來 → 之後能算每週下載速度。
+# 手動跑：Actions 分頁 → Download stats → Run workflow（或 gh workflow run download-stats.yml）。
+on:
+  schedule:
+    - cron: '0 3 * * 1' # 每週一 03:00 UTC
+  workflow_dispatch: {}
+
+# 需要寫入權限才能 commit 快照進 repo。
+permissions:
+  contents: write
+
+# 同時間只跑一個，避免兩次排程撞在一起 push 衝突。
+concurrency:
+  group: download-stats
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    name: Snapshot download counts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 撈 release 資產下載數（兩個 repo 都公開 → GITHUB_TOKEN 讀得到），append 成一行一資產的 CSV。
+      - name: Snapshot
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          ts=$(date -u +%Y-%m-%dT%H:%MZ)
+          csv=metrics/download-stats.csv
+          mkdir -p metrics
+          [ -f "$csv" ] || echo 'timestamp,repo,tag,asset,download_count' > "$csv"
+          for repo in joyeli/Yakuyomi joyeli/yakuyomi-engine; do
+            gh api "repos/$repo/releases" --paginate 2>/dev/null \
+              | jq -r --arg ts "$ts" --arg repo "$repo" \
+                '.[]? | .tag_name as $t | (.assets // [])[] | [$ts,$repo,$t,.name,.download_count] | @csv' \
+              >> "$csv" || true
+          done
+
+      # 把當下總數寫進 run summary，手動跑一眼就看得到、不用翻 CSV。
+      - name: Summary
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Release download counts"
+            echo ""
+            echo "| repo | total downloads |"
+            echo "|---|---|"
+            for repo in joyeli/Yakuyomi joyeli/yakuyomi-engine; do
+              total=$(gh api "repos/$repo/releases" --paginate 2>/dev/null \
+                | jq '[.[]?.assets[]?.download_count] | add // 0')
+              echo "| $repo | $total |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # 有新資料就 commit（帶 [skip ci] 不觸發 CI）。每次都多一行時間戳 → 一般都會有 diff。
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add metrics/download-stats.csv
+          git diff --staged --quiet || git commit -m "metrics: weekly download-count snapshot [skip ci]"
+          git push
