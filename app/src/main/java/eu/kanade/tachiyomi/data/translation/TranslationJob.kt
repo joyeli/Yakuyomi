@@ -51,6 +51,9 @@ class TranslationJob(context: Context, workerParams: WorkerParameters) : Corouti
     }
 
     override suspend fun doWork(): Result {
+        // 行程被殺 / 重開機後 WorkManager 會重跑本 worker：先把持久佇列讀回來（[TranslationManager.ensureRestored]
+        // idempotent、有排隊章時自行 ensureDrain），再判斷有沒有活要做——否則新行程裡佇列是空的、會誤判沒事做。
+        translationManager.ensureRestored()
         if (!hasActiveWork(translationManager.queueState.value, translationManager.isPaused.value)) {
             return Result.success()
         }

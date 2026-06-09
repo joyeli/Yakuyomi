@@ -38,6 +38,7 @@ import eu.kanade.tachiyomi.data.coil.MangaKeyer
 import eu.kanade.tachiyomi.data.coil.TachiyomiImageDecoder
 import eu.kanade.tachiyomi.data.notification.Notifications
 import eu.kanade.tachiyomi.data.translation.TranslationEngineService
+import eu.kanade.tachiyomi.data.translation.TranslationManager
 import eu.kanade.tachiyomi.di.AppModule
 import eu.kanade.tachiyomi.di.PreferenceModule
 import eu.kanade.tachiyomi.network.NetworkHelper
@@ -170,6 +171,10 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                 translationEngineService.warmUpAsync()
             }
         }
+
+        // 翻譯佇列持久化：app 啟動時還原上次沒翻完的章（行程被殺 / 重開機後自動續傳，對照下載 DownloadStore.restore）。
+        // fire-and-forget（不卡啟動）；還原後若有排隊章會自己 ensureDrain + 重啟前景服務（未暫停的話）。
+        runCatching { Injekt.get<TranslationManager>().restoreAsync() }
 
         if (!LogcatLogger.isInstalled) {
             val minLogPriority = when {

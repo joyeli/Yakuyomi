@@ -45,8 +45,9 @@ import java.io.File
  *
  * 失敗矩陣（§11）：單章失敗 → 標 ERROR 留佇列可重試、原檔不動；翻成功 → 離開佇列。
  *
- * ⚠️ 背景可靠性：目前跑在自有 in-process [scope]，app 被系統回收會中斷。
- *    TODO：搬到 WorkManager 前景服務（對照 `DownloadJob`）才能在背景穩定跑完。
+ * 背景可靠性：翻譯跑在自有 in-process [scope]，由 [TranslationJob] 前景服務保活（app 退背景時不被回收）。
+ * 行程仍可能被系統 / 激進 OEM 殺掉而中斷——但佇列會持久化（[translationStore]），下次啟動或 worker 重啟時
+ * [ensureRestored] 重建佇列自動續傳（已翻頁由 manifest 跳過、不重翻），對齊下載 `DownloadStore` 的續傳行為。
  */
 class TranslationManager(private val context: Context) {
 
@@ -55,6 +56,9 @@ class TranslationManager(private val context: Context) {
     private val sourceManager: SourceManager = Injekt.get()
     private val translationCache: TranslationCache = Injekt.get()
     private val translationPreferences: TranslationPreferences = Injekt.get()
+
+    /** 佇列持久化：行程被殺 / 重開機後 [restore] 續傳（對照下載 [eu.kanade.tachiyomi.data.download.DownloadStore]）。 */
+    private val translationStore = TranslationStore(context)
 
     // 「改去字法後升級重繪」掃全庫用：列收藏書 + 各書章節（只在 reRenderAllUpgradable 用）。
     private val getFavorites: GetFavorites = Injekt.get()
@@ -68,6 +72,11 @@ class TranslationManager(private val context: Context) {
     /** 合作式中止旗標：true → 正在翻的章在下一頁邊界停下（暫停/取消/清空用）。在 [lock] 下寫、@Volatile 供逐頁迴圈無鎖讀。 */
     @Volatile
     private var stopActive = false
+
+    /** 佇列是否已從磁碟還原過（至多一次）。還原完成前不回寫，避免覆蓋掉尚未讀出的持久佇列。 */
+    @Volatile
+    private var restored = false
+    private val restoreMutex = Mutex()
 
     /**
      * 內部可變佇列項；對外只發 [TranslationItem] 不可變快照。所有欄位存取都在 [lock] 下。
@@ -157,6 +166,81 @@ class TranslationManager(private val context: Context) {
     }
 
     /**
+     * 把目前佇列＋暫停狀態寫回磁碟（[translationStore]）。只在**結構性變動**（排入 / 移除 / 狀態 / 方法 / 暫停）後呼叫，
+     * **不**放進 [publish]（那會被逐頁進度更新打爆 I/O）。還原完成前（[restored]=false）跳過，避免覆蓋掉持久佇列。
+     */
+    private fun persist() {
+        if (!restored) return
+        val snapshot = synchronized(lock) {
+            entries.map {
+                TranslationStore.Saved(
+                    mangaId = it.manga.id,
+                    chapterId = it.chapter.id,
+                    method = it.method,
+                    reRenderMethod = it.reRenderMethod,
+                    errored = it.status == TranslationItem.Status.ERROR,
+                )
+            }
+        }
+        translationStore.save(snapshot, _isPaused.value)
+    }
+
+    /** Fire-and-forget 還原（給 [eu.kanade.tachiyomi.App] 啟動時呼叫；非 suspend、不卡啟動）。 */
+    fun restoreAsync() {
+        scope.launch { ensureRestored() }
+    }
+
+    /**
+     * 從磁碟還原佇列（至多一次、idempotent）。兩條觸發：app 啟動（[restoreAsync]）與 [TranslationJob.doWork]（await）——
+     * 後者讓「行程被殺後 WorkManager 重啟 worker」也能在檢查佇列前先把持久佇列讀回來。
+     *
+     * 還原後若有排隊章且未暫停 → [ensureDrain] 開跑 ＋ [TranslationJob.start] 重啟前景服務（自動續傳）。
+     * 被打斷的 TRANSLATING 章存成 QUEUE、一律重跑，已翻頁由 manifest 跳過。
+     */
+    suspend fun ensureRestored() {
+        if (!restored) {
+            restoreMutex.withLock {
+                if (!restored) {
+                    val recovered = translationStore.restore()
+                    if (recovered.isNotEmpty()) {
+                        synchronized(lock) {
+                            val present = entries.mapTo(HashSet()) { it.chapter.id }
+                            recovered.forEach { r ->
+                                if (r.chapter.id !in present) {
+                                    entries.add(
+                                        Entry(
+                                            r.manga,
+                                            r.chapter,
+                                            status = if (r.errored) {
+                                                TranslationItem.Status.ERROR
+                                            } else {
+                                                TranslationItem.Status.QUEUE
+                                            },
+                                            reRenderMethod = r.reRenderMethod,
+                                            method = r.method,
+                                        ),
+                                    )
+                                }
+                            }
+                        }
+                        _isPaused.value = translationStore.restorePaused()
+                        publish()
+                    }
+                    restored = true
+                    persist() // 回寫合併後佇列（含還原前 race 進來的新項）
+                }
+            }
+        }
+        val hasQueued = synchronized(lock) {
+            entries.any { it.status == TranslationItem.Status.QUEUE }
+        }
+        if (hasQueued && !_isPaused.value) {
+            ensureDrain()
+            TranslationJob.start(context)
+        }
+    }
+
+    /**
      * 排入翻譯（已下載章）。已在佇列裡的章 id 不重排。
      *
      * 每個新項擷取**當下**的去字方法（[TranslationPreferences.inpaintMethod]）存進 [Entry.method]——
@@ -200,6 +284,7 @@ class TranslationManager(private val context: Context) {
         _isPaused.value = false // 明確要求翻譯 → 解除暫停、直接開跑（對照下載：排入即啟動）
         ensureDrain()
         TranslationJob.start(context)
+        persist()
     }
 
     /**
@@ -220,6 +305,7 @@ class TranslationManager(private val context: Context) {
         _isPaused.value = false // 明確要求重繪 → 解除暫停、直接開跑
         ensureDrain()
         TranslationJob.start(context)
+        persist()
     }
 
     /**
@@ -301,6 +387,7 @@ class TranslationManager(private val context: Context) {
             }
         }
         publish()
+        persist()
     }
 
     /** 取消指定章（含正在翻的那章：中止後移除）。 */
@@ -314,6 +401,7 @@ class TranslationManager(private val context: Context) {
         }
         publish()
         ensureDrain()
+        persist()
     }
 
     /** 重試失敗的章（重新排隊）。 */
@@ -330,6 +418,7 @@ class TranslationManager(private val context: Context) {
         _isPaused.value = false // 重試 → 解除暫停、直接開跑
         ensureDrain()
         TranslationJob.start(context)
+        persist()
     }
 
     /** 清空佇列（含正在翻的那章：中止後移除）。 */
@@ -339,17 +428,20 @@ class TranslationManager(private val context: Context) {
             entries.clear()
         }
         publish()
+        persist()
     }
 
     fun pause() {
         _isPaused.value = true
         synchronized(lock) { stopActive = true } // 中止正在翻的章（逐頁迴圈下一頁停），暫停才即時生效
+        persist()
     }
 
     fun resume() {
         _isPaused.value = false
         ensureDrain()
         TranslationJob.start(context)
+        persist()
     }
 
     /** 確保有一條 drain 在跑（drainMutex 保證單一消費者；重複呼叫會排隊後再掃一遍）。 */
@@ -377,6 +469,7 @@ class TranslationManager(private val context: Context) {
                 logcat(LogPriority.ERROR, e) { "翻譯章失敗 ${entry.chapter.name}（原檔保留）" }
                 synchronized(lock) { entry.status = TranslationItem.Status.ERROR } // 失敗 → 留佇列可重試
                 publish()
+                persist()
                 continue
             }
             if (stopActive) {
@@ -385,6 +478,7 @@ class TranslationManager(private val context: Context) {
                     if (entries.contains(entry)) entry.status = TranslationItem.Status.QUEUE
                 }
                 publish()
+                persist()
                 if (_isPaused.value) break else continue
             }
             if (translated) {
@@ -396,6 +490,7 @@ class TranslationManager(private val context: Context) {
                 synchronized(lock) { entry.status = TranslationItem.Status.ERROR }
             }
             publish()
+            persist()
         }
         // 佇列翻完（迴圈因「無 QUEUE 項」自然結束＝此時 _isPaused 必為 false；暫停退出走另一分支、不到這）：
         // 即時翻**關著**時釋放 warm 引擎，別讓 ~450MB 閒置；即時翻**開著**時保 warm（reader 隨時要讀下一章）。
