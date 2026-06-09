@@ -10,6 +10,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -23,6 +24,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastMap
+import cafe.adriel.voyager.navigator.LocalNavigator
+import cafe.adriel.voyager.navigator.currentOrThrow
 import eu.kanade.domain.source.interactor.GetSourcesWithFavoriteCount
 import eu.kanade.presentation.category.visualName
 import eu.kanade.presentation.more.settings.Preference
@@ -31,6 +34,7 @@ import eu.kanade.tachiyomi.data.translation.ModelDownloadManager
 import eu.kanade.tachiyomi.data.translation.TranslationEngineConfig
 import eu.kanade.tachiyomi.data.translation.TranslationEngineService
 import eu.kanade.tachiyomi.data.translation.TranslationManager
+import eu.kanade.tachiyomi.ui.translation.TranslationQuickstartScreen
 import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.collections.immutable.ImmutableMap
 import kotlinx.collections.immutable.persistentMapOf
@@ -64,8 +68,23 @@ object SettingsTranslationScreen : SearchableSettings {
     override fun getTitleRes() = MR.strings.pref_category_translation
 
     @Composable
+    override fun Content() {
+        val navigator = LocalNavigator.currentOrThrow
+        val prefs = remember { Injekt.get<TranslationPreferences>() }
+        // 首次開啟翻譯設定 → 自動帶出快速上手導覽一次（之後可從頂端「快速上手」列重開）。
+        LaunchedEffect(Unit) {
+            if (!prefs.quickstartShown.get()) {
+                prefs.quickstartShown.set(true)
+                navigator.push(TranslationQuickstartScreen())
+            }
+        }
+        super<SearchableSettings>.Content()
+    }
+
+    @Composable
     override fun getPreferences(): List<Preference> {
         val prefs = remember { Injekt.get<TranslationPreferences>() }
+        val navigator = LocalNavigator.currentOrThrow
         // 即時翻譯開關 → 控制 warm 引擎生命週期（開＝預暖、關＝釋放 ~450MB）。
         val engineService = remember { Injekt.get<TranslationEngineService>() }
         // 「閱讀後刪除」綁下載偏好同一個 pref → 與下載設定頁連動（任一邊改都同步）。
@@ -278,6 +297,11 @@ object SettingsTranslationScreen : SearchableSettings {
         )
 
         return listOf(
+            Preference.PreferenceItem.TextPreference(
+                title = stringResource(MR.strings.pref_translation_quickstart),
+                subtitle = stringResource(MR.strings.pref_translation_quickstart_summary),
+                onClick = { navigator.push(TranslationQuickstartScreen()) },
+            ),
             Preference.PreferenceItem.SwitchPreference(
                 preference = prefs.showAdvanced,
                 title = stringResource(MR.strings.pref_translation_show_advanced),

@@ -217,6 +217,21 @@
     <string name="pref_category_downloads">Downloads</string>
     <string name="pref_category_translation">Translation</string>
     <string name="pref_translation_summary">AI translation: on-device detection/OCR/text-removal + cloud LLM</string>
+    <!-- Translation onboarding / quickstart -->
+    <string name="onboarding_translation_heading">Translate manga as you read</string>
+    <string name="onboarding_translation_description">Yakuyomi can detect, OCR, erase and re-typeset speech bubbles for you. Everything except the translation itself runs on this device — your images never leave it. Only the recognised text is sent to the cloud LLM you choose (your own API key — this can cost money).\n\nTranslation is off by default. Set it up now, or any time under Settings → Translation.</string>
+    <string name="onboarding_translation_action">Open translation setup</string>
+    <string name="pref_translation_quickstart">Quickstart guide</string>
+    <string name="pref_translation_quickstart_summary">How to set up and use translation</string>
+    <string name="quickstart_what_title">On-device, bring-your-own-key</string>
+    <string name="quickstart_what_body">Detection, OCR and text removal all run on your phone. Only the OCR\'d text goes to the LLM provider you pick — using your own API key and endpoint. Your images, and the detection / OCR / erase steps, never leave the device. There is no analytics or telemetry.\n\nCloud translation may cost money, billed by your provider. Tapping Got it at the end means you understand this.</string>
+    <string name="quickstart_setup_title">Three things to get ready</string>
+    <string name="quickstart_setup_body">1. Pick a provider and paste your API key.\nSettings → Translation → Provider. Default is DeepSeek; OpenAI, Gemini, Groq, Qwen, OpenRouter and self-hosted (Sakura / custom) also work. Paste the key from your provider\'s dashboard — it is encrypted on this device. For a self-hosted or custom provider, also fill in the API base.\n\n2. Get the 3 models (detector, OCR, text-removal).\nSettings → Translation → Models → Download models (about 467 MB, verified). Or bring your own: drop the three .onnx files into the models folder in your storage location. The Model status row shows a check or cross for each.\n\n3. Pick your languages.\nDefault is Japanese → Traditional Chinese (Taiwan). Change the target or source any time.</string>
+    <string name="quickstart_workflows_title">Two ways to translate</string>
+    <string name="quickstart_workflows_body">Translate on download — turn on Translate chapters on download. Every chapter you download is then translated automatically in the background, and the page images are replaced in place. Best when you download ahead and read later.\n\nLive (read-as-you-go) — turn on Live translation, a separate switch. When you open an unread chapter it is translated in the background and pages swap in as they become ready (a Translating X/Y pill shows at the top-left). Opening an undownloaded chapter downloads it first, then translates. Use Live translation categories to limit it to, or exclude, certain library categories.\n\nThe two switches are independent: use either, both, or neither.</string>
+    <string name="quickstart_manual_title">By hand, and keeping it tidy</string>
+    <string name="quickstart_manual_body">Manual translate — on a manga\'s chapter list, downloaded chapters show a translate button. The icon spins while running, turns the accent colour when done, and red on error. Long-press to multi-select, then tap Translate in the bottom bar.\n\nTranslation queue — More → Translation queue lists everything in progress with its status. Pause or resume, cancel, or retry failed chapters there.\n\nRe-render — already translated a chapter but want cleaner text removal? Change the method in Settings (you will be asked to update existing chapters), or long-press a page → Re-render. No re-OCR or re-translation needed.</string>
+    <string name="quickstart_action_done">Got it</string>
     <string name="pref_translation_orientation">Text direction</string>
     <string name="pref_translation_orientation_auto">Auto (follow source)</string>
     <string name="pref_translation_orientation_vertical">Vertical (vertical-first)</string>

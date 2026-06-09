@@ -988,6 +988,21 @@
     <string name="pref_translation_min_prob_desc">0–1，低於此丟該行；太低收雜訊亂碼、太高漏字</string>
     <string name="pref_category_translation">翻譯</string>
     <string name="pref_translation_summary">AI 翻譯：偵測 / OCR / 去字在裝置上，翻譯走雲端 LLM</string>
+    <!-- 翻譯 onboarding / 快速上手 -->
+    <string name="onboarding_translation_heading">邊讀邊翻譯漫畫</string>
+    <string name="onboarding_translation_description">Yakuyomi 能幫你偵測對話框、做 OCR、去字並重新排版。除了「翻譯」本身以外，全部都在這台裝置上跑——你的圖片不會外傳。只有辨識出來的文字會送到你選的雲端 LLM（用你自己的 API key——這可能產生費用）。\n\n此功能預設關閉。現在就設定，或隨時到「設定 → 翻譯」設定。</string>
+    <string name="onboarding_translation_action">開啟翻譯設定</string>
+    <string name="pref_translation_quickstart">快速上手導覽</string>
+    <string name="pref_translation_quickstart_summary">如何設定與使用翻譯</string>
+    <string name="quickstart_what_title">在裝置上跑、自帶金鑰</string>
+    <string name="quickstart_what_body">偵測、OCR、去字全在你的手機上完成。只有 OCR 後的文字會送到你選的 LLM 服務商——用你自己的 API key 與端點。你的圖片，以及偵測／OCR／去字這幾步，都不會離開裝置。本 app 不加任何分析／遙測。\n\n雲端翻譯可能產生費用，由你的服務商計費。按下最後的「了解」即表示你了解這點。</string>
+    <string name="quickstart_setup_title">準備好三件事</string>
+    <string name="quickstart_setup_body">1. 選一個服務商並貼上 API key。\n設定 → 翻譯 → 供應商。預設是 DeepSeek；OpenAI、Gemini、Groq、Qwen、OpenRouter 與自架（Sakura／自訂）也都可用。把服務商後台的金鑰貼進來——它會在這台裝置上加密。若是自架／自訂服務商，還要填「API base」。\n\n2. 取得 3 顆模型（偵測、OCR、去字）。\n設定 → 翻譯 → 模型 → 下載翻譯模型（約 467 MB，會驗證）。或自備模型：把三個 .onnx 檔放到你儲存位置裡的 models 資料夾。「翻譯模型狀態」列會顯示每顆的 ✓／✗。\n\n3. 選語言。\n預設是日文 → 繁體中文（台灣）。目標／來源語言隨時可改。</string>
+    <string name="quickstart_workflows_title">兩種翻譯方式</string>
+    <string name="quickstart_workflows_body">下載時翻譯——打開「下載時翻譯章節」。之後每一話下載完，就會在背景自動翻譯，頁面圖片就地置換。適合先下載、晚點再讀。\n\n即時翻譯（邊讀邊翻）——打開「即時翻譯」這個獨立開關。當你開啟未翻的章節時，它會在背景翻譯，頁面翻好就換上（左上角會有「翻譯中 X/Y」的小標）。開啟未下載的章節會先下載再翻。用「即時翻譯分類」把它限定在（或排除）某些書庫分類。\n\n這兩個開關彼此獨立：可只用一個、兩個都用、或都不用。</string>
+    <string name="quickstart_manual_title">手動翻譯與管理</string>
+    <string name="quickstart_manual_body">手動翻譯——在某本漫畫的章節清單，已下載的章節會顯示翻譯鈕。翻譯時圖示轉圈，完成變成主色，出錯變紅色。長按可多選，再按底部的「翻譯」。\n\n翻譯佇列——更多 →「翻譯佇列」列出所有進行中的項目與狀態。可在那裡暫停／繼續、取消，或重試失敗的章節。\n\n重繪——已經翻好某章、但想要更乾淨的去字？在設定改去字方法（會問你要不要更新既有章節），或長按頁面 →「重繪」。不需重新 OCR 或重新翻譯。</string>
+    <string name="quickstart_action_done">了解</string>
     <string name="label_translation_queue">翻譯佇列</string>
     <string name="pref_translation_orientation">排版方向</string>
     <string name="pref_translation_orientation_auto">自動（原文方向）</string>

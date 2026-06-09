@@ -44,6 +44,10 @@ class OnboardingScreen : Screen() {
                 SearchableSettings.highlightKey = restoreSettingKey
                 navigator.push(SettingsScreen(SettingsScreen.Destination.DataAndStorage))
             },
+            onOpenTranslation = {
+                finishOnboarding()
+                navigator.push(SettingsScreen(SettingsScreen.Destination.Translation))
+            },
         )
     }
 }

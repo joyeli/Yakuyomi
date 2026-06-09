@@ -97,6 +97,9 @@ class TranslationPreferences(
     /** 是否已看過翻譯隱私揭露（一次性同意對話框只跳一次）。 */
     val privacyAcknowledged = preferenceStore.getBoolean("translation_privacy_ack", false)
 
+    /** 是否已看過翻譯快速上手導覽（首次開啟翻譯設定時自動跳一次；之後可從設定列重開）。 */
+    val quickstartShown = preferenceStore.getBoolean("translation_quickstart_shown", false)
+
     /** 目標語言（LLM 直接照這個翻）；預設台灣繁中，對齊引擎 TranslatorConfig.toLangName。 */
     val targetLangName = preferenceStore.getString("translation_target_lang", DEFAULT_TARGET_LANG)
 
@@ -128,17 +131,17 @@ class TranslationPreferences(
     val showAdvanced = preferenceStore.getBoolean("translation_show_advanced", false)
 
     // —— 進階數值（存字串、消費端 PageTranslator parse + clamp 到值域）——
-    val segThreshold = preferenceStore.getString("translation_seg_threshold", "0.12")       // 0.0–1.0
-    val minProb = preferenceStore.getString("translation_min_prob", "0.5")                  // 0.0–1.0
-    val autoStdThreshold = preferenceStore.getString("translation_auto_std", "6")           // 0–30
-    val autoWhiteThreshold = preferenceStore.getString("translation_auto_white", "190")     // 0–255
-    val bboxPad = preferenceStore.getString("translation_bbox_pad", "16")                   // 0–64
-    val artStrokeRatio = preferenceStore.getString("translation_art_stroke", "0.16")        // 0.0–0.5
-    val fontSizeMax = preferenceStore.getString("translation_font_size_max", "60")          // 20–120
-    val fontSizeMin = preferenceStore.getString("translation_font_size_min", "9")           // 6–40
-    val colTrim = preferenceStore.getString("translation_col_trim", "3")                    // 0–10
-    val rowTrim = preferenceStore.getString("translation_row_trim", "3")                    // 0–10
-    val fontScale = preferenceStore.getString("translation_font_scale", "0.85")             // 0.3–1.5
+    val segThreshold = preferenceStore.getString("translation_seg_threshold", "0.12") // 0.0–1.0
+    val minProb = preferenceStore.getString("translation_min_prob", "0.5") // 0.0–1.0
+    val autoStdThreshold = preferenceStore.getString("translation_auto_std", "6") // 0–30
+    val autoWhiteThreshold = preferenceStore.getString("translation_auto_white", "190") // 0–255
+    val bboxPad = preferenceStore.getString("translation_bbox_pad", "16") // 0–64
+    val artStrokeRatio = preferenceStore.getString("translation_art_stroke", "0.16") // 0.0–0.5
+    val fontSizeMax = preferenceStore.getString("translation_font_size_max", "60") // 20–120
+    val fontSizeMin = preferenceStore.getString("translation_font_size_min", "9") // 6–40
+    val colTrim = preferenceStore.getString("translation_col_trim", "3") // 0–10
+    val rowTrim = preferenceStore.getString("translation_row_trim", "3") // 0–10
+    val fontScale = preferenceStore.getString("translation_font_scale", "0.85") // 0.3–1.5
 
     companion object {
         // ⚠️ 與引擎 TranslatorConfig.toLangName / fromLangName 預設「逐字一致」（引擎＝真理來源）。
@@ -150,8 +153,8 @@ class TranslationPreferences(
         const val DEFAULT_ORIENTATION = "auto"
         const val DEFAULT_INPAINT_METHOD = "auto_whole" // 平衡：泡泡平塗(乾淨無黃暈)+整頁lama(~7s)；逐格(質佳但~64s)留選項
         const val DEFAULT_OCR_CONCURRENCY = "auto" // auto=硬體核數（多數手機8核）；真機 8.9s→4.8s 快46%
-        const val DEFAULT_INTRA_THREADS = "auto"   // auto=硬體大核數估算；真機 6 緒最快（big.LITTLE）
-        const val DEFAULT_COLOR_MODE = "auto"      // auto=依背景亮度判黑/白字
+        const val DEFAULT_INTRA_THREADS = "auto" // auto=硬體大核數估算；真機 6 緒最快（big.LITTLE）
+        const val DEFAULT_COLOR_MODE = "auto" // auto=依背景亮度判黑/白字
     }
 }
 
