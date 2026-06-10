@@ -122,6 +122,9 @@ object SettingsTranslationScreen : SearchableSettings {
                 if (mp.all { it.second }) "" else modelStatusMissing
         } ?: modelStatusChecking
 
+        // 全域翻譯總開關：關閉時下載翻 / 即時翻變灰停用（自動翻譯一律不做）。
+        val masterEnabled by prefs.translationMasterEnabled.collectAsState()
+
         // 即時翻譯分類過濾。
         val getCategories = remember { Injekt.get<GetCategories>() }
         val allCategories by getCategories.subscribe().collectAsState(initial = emptyList())
@@ -312,9 +315,15 @@ object SettingsTranslationScreen : SearchableSettings {
                 title = stringResource(MR.strings.pref_category_translation),
                 preferenceItems = listOfNotNull<Item>(
                     Preference.PreferenceItem.SwitchPreference(
+                        preference = prefs.translationMasterEnabled,
+                        title = stringResource(MR.strings.pref_translation_master),
+                        subtitle = stringResource(MR.strings.pref_translation_master_summary),
+                    ),
+                    Preference.PreferenceItem.SwitchPreference(
                         preference = prefs.translationEnabled,
                         title = stringResource(MR.strings.pref_translation_on_download),
                         subtitle = stringResource(MR.strings.pref_translation_on_download_summary),
+                        enabled = masterEnabled,
                         onValueChanged = { enabled ->
                             if (enabled && !privacyAck) {
                                 pendingEnableSwitch = prefs.translationEnabled
@@ -328,6 +337,7 @@ object SettingsTranslationScreen : SearchableSettings {
                         preference = prefs.liveTranslate,
                         title = stringResource(MR.strings.pref_translation_live),
                         subtitle = stringResource(MR.strings.pref_translation_live_summary),
+                        enabled = masterEnabled,
                         onValueChanged = { enabled ->
                             when {
                                 enabled && !privacyAck -> {
@@ -352,6 +362,7 @@ object SettingsTranslationScreen : SearchableSettings {
                             included = liveIncluded,
                             excluded = liveExcluded,
                         ),
+                        enabled = masterEnabled,
                         onClick = { showLiveCategoryDialog = true },
                     ),
                     Preference.PreferenceItem.MultiSelectListPreference(
@@ -359,6 +370,7 @@ object SettingsTranslationScreen : SearchableSettings {
                         entries = librarySources,
                         title = stringResource(MR.strings.pref_translation_excluded_sources),
                         subtitle = stringResource(MR.strings.pref_translation_excluded_sources_summary),
+                        enabled = masterEnabled,
                     ),
                     Preference.PreferenceItem.ListPreference(
                         preference = downloadPrefs.removeAfterReadSlots,

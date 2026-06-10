@@ -90,6 +90,12 @@ class LibraryPreferences(
         TriState.DISABLED,
     )
 
+    // Yakuyomi：依「已翻譯」狀態篩選（雙向 TriState，對齊 filterDownloaded）。
+    val filterTranslated: Preference<TriState> = preferenceStore.getEnum(
+        "pref_filter_library_translated",
+        TriState.DISABLED,
+    )
+
     val filterIntervalCustom: Preference<TriState> = preferenceStore.getEnum(
         "pref_filter_library_interval_custom",
         TriState.DISABLED,

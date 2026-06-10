@@ -20,6 +20,12 @@ class TranslationPreferences(
     /** 給 [apiKeyFor] 為非預設 provider 建金鑰偏好用（與 [apiKey] 同一把 keystore cipher）。 */
     private val cipher: StringCrypto = crypto ?: IdentityCrypto
 
+    /**
+     * 全域翻譯總開關（預設開）。關閉＝**自動翻譯一律不做**：下載時翻譯（[translationEnabled]）與即時翻譯
+     * （[liveTranslate]）都被 gate 掉、引擎不預暖；設定頁其餘翻譯選項變灰。手動翻譯不受此限。
+     */
+    val translationMasterEnabled = preferenceStore.getBoolean("translation_master_enabled", true)
+
     /** 下載完成後自動翻譯該章（連同 isReady 的模型/key 檢查）。 */
     val translationEnabled = preferenceStore.getBoolean("translation_enabled", false)
 

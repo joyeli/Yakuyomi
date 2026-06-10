@@ -14,7 +14,9 @@ androidx-coreSplashScreen = "1.2.0"
 androidx-glance = "1.1.1"
 androidx-interpolator = "1.0.0"
 androidx-lifecycle = "2.10.0"
-androidx-paging = "3.5.0"
+# Yakuyomi：釘回 3.4.2（＝最新 mihon stable release v0.19.9 用的版本）。mihon main 經 Renovate bump 到 3.5.0
+# （#3301）但未發進任何 release；3.5.0 疑似造成 Browse 重複搜尋/深捲後書庫卡死，降回穩定版排除此變因。
+androidx-paging = "3.4.2"
 androidx-preference = "1.2.1"
 androidx-profileInstaller = "1.4.1"
 androidx-recyclerView = "1.4.0"

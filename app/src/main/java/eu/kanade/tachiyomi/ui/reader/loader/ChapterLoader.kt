@@ -152,6 +152,7 @@ class ChapterLoader(
      */
     suspend fun shouldTranslateLive(chapter: ReaderChapter, isDownloaded: Boolean): Boolean {
         if (!isDownloaded) return false
+        if (!translationPreferences.translationMasterEnabled.get()) return false
         if (!translationPreferences.liveTranslate.get()) return false
         if (!translationEngineService.isReady()) return false
         if (!autoTranslateAllowed()) return false

@@ -170,6 +170,7 @@ class LibraryScreenModel(
                 prefs.filterBookmarked,
                 prefs.filterCompleted,
                 prefs.filterIntervalCustom,
+                prefs.filterTranslated,
                 *trackFilters.values.toTypedArray(),
             )
                 .any { it != TriState.DISABLED }
@@ -196,6 +197,7 @@ class LibraryScreenModel(
         val filterBookmarked = preferences.filterBookmarked
         val filterCompleted = preferences.filterCompleted
         val filterIntervalCustom = preferences.filterIntervalCustom
+        val filterTranslated = preferences.filterTranslated
 
         val isNotLoggedInAnyTrack = trackingFilter.isEmpty()
 
@@ -227,6 +229,10 @@ class LibraryScreenModel(
             applyFilter(filterCompleted) { it.libraryManga.manga.status.toInt() == SManga.COMPLETED }
         }
 
+        val filterFnTranslated: (LibraryItem) -> Boolean = {
+            applyFilter(filterTranslated) { translationCache.getTranslatedCount(it.libraryManga.manga) > 0 }
+        }
+
         val filterFnIntervalCustom: (LibraryItem) -> Boolean = {
             if (skipOutsideReleasePeriod) {
                 applyFilter(filterIntervalCustom) { it.libraryManga.manga.fetchInterval < 0 }
@@ -253,6 +259,7 @@ class LibraryScreenModel(
                 filterFnBookmarked(it) &&
                 filterFnCompleted(it) &&
                 filterFnIntervalCustom(it) &&
+                filterFnTranslated(it) &&
                 filterFnTracking(it)
         }
     }
@@ -368,10 +375,12 @@ class LibraryScreenModel(
             libraryPreferences.filterCompleted.changes(),
             libraryPreferences.filterIntervalCustom.changes(),
             libraryPreferences.translationBadge.changes(),
+            libraryPreferences.filterTranslated.changes(),
         ) {
             ItemPreferences(
                 downloadBadge = it[0] as Boolean,
                 translationBadge = it[12] as Boolean,
+                filterTranslated = it[13] as TriState,
                 unreadBadge = it[1] as Boolean,
                 localBadge = it[2] as Boolean,
                 languageBadge = it[3] as Boolean,
@@ -757,6 +766,7 @@ class LibraryScreenModel(
         val filterBookmarked: TriState,
         val filterCompleted: TriState,
         val filterIntervalCustom: TriState,
+        val filterTranslated: TriState,
     )
 
     @Immutable

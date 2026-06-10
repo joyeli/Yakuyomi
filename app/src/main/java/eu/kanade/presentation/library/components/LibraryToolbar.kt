@@ -115,62 +115,7 @@ private fun LibraryRegularToolbar(
         onChangeSearchQuery = onSearchQueryChange,
         actions = {
             val filterTint = if (hasFilters) MaterialTheme.colorScheme.active else LocalContentColor.current
-            // 翻譯引擎預載狀態圖示 + 下拉選單（只在即時翻譯開啟時顯示）：一開 app 在書庫就看得到「有/無預載」
-            // （已預載＝主色 Translate、未預載＝灰、載入中＝Sync）。點圖示跳選單：已預載→「卸下預載」釋放 ~450MB；未預載→「預載引擎」。
-            val engineService = remember { Injekt.get<TranslationEngineService>() }
-            val translationPrefs = remember { Injekt.get<TranslationPreferences>() }
-            val liveTranslate by translationPrefs.liveTranslate.collectAsState()
-            val engineLoading by engineService.loading.collectAsState()
-            val engineWarm by engineService.warm.collectAsState()
-            if (liveTranslate) {
-                var showEngineMenu by remember { mutableStateOf(false) }
-                Box {
-                    IconButton(onClick = { showEngineMenu = true }) {
-                        Icon(
-                            imageVector = if (engineLoading) Icons.Outlined.Sync else Icons.Outlined.Translate,
-                            contentDescription = stringResource(MR.strings.engine_preload_desc),
-                            tint = when {
-                                engineWarm -> MaterialTheme.colorScheme.active
-                                engineLoading -> LocalContentColor.current
-                                else -> LocalContentColor.current.copy(alpha = 0.4f)
-                            },
-                        )
-                    }
-                    DropdownMenu(expanded = showEngineMenu, onDismissRequest = { showEngineMenu = false }) {
-                        // 狀態列（不可點、僅顯示目前狀態）。
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    when {
-                                        engineLoading -> stringResource(MR.strings.engine_status_loading)
-                                        engineWarm -> stringResource(MR.strings.engine_status_warm)
-                                        else -> stringResource(MR.strings.engine_status_cold)
-                                    },
-                                )
-                            },
-                            onClick = {},
-                            enabled = false,
-                        )
-                        when {
-                            engineLoading -> Unit // 載入中：不給動作
-                            engineWarm -> DropdownMenuItem(
-                                text = { Text(stringResource(MR.strings.engine_unload)) },
-                                onClick = {
-                                    engineService.shutdownAsync()
-                                    showEngineMenu = false
-                                },
-                            )
-                            else -> DropdownMenuItem(
-                                text = { Text(stringResource(MR.strings.engine_preload_action)) },
-                                onClick = {
-                                    engineService.warmUpAsync()
-                                    showEngineMenu = false
-                                },
-                            )
-                        }
-                    }
-                }
-            }
+            // Yakuyomi：翻譯引擎狀態（預載/卸下）已移到導覽列「翻譯」分頁（點分頁頂面板或長按分頁），不再放書庫工具列。
             AppBarActions(
                 persistentListOf(
                     AppBar.Action(

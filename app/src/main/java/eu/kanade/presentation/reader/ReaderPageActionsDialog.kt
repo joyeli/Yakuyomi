@@ -53,8 +53,8 @@ fun ReaderPageActionsDialog(
     var showSetCoverDialog by remember { mutableStateOf(false) }
 
     AdaptiveSheet(onDismissRequest = onDismissRequest) {
-        // 兩列：第一列＝原有頁動作（封面/複製/分享/儲存/重繪），第二列＝翻譯動作（翻這頁/開始/中止這話）。
-        // 拆兩列避免一列塞 7-8 顆鈕在窄螢幕擠爆；翻譯動作集中一列、語意上也成組。
+        // 兩列：第一列＝原有頁動作（封面/複製/分享/儲存，固定 4 顆），第二列＝翻譯相關（翻這頁/開始或中止這話/換去字法）。
+        // 「換去字法」（原「重繪」）放第二列＝與翻譯成組、語意更清楚；上 4 下 3 也較平衡。
         Column(modifier = Modifier.padding(vertical = 16.dp)) {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small),
@@ -92,16 +92,6 @@ fun ReaderPageActionsDialog(
                         onDismissRequest()
                     },
                 )
-                if (onReRender != null) {
-                    // 重繪：交給 VM 把對話框換成去字法選擇器（共用同一個 dialog state slot）。
-                    // 不呼叫 onDismissRequest()——那會把剛開的選擇器一起關掉（兩者都寫 dialog 欄）。
-                    ActionButton(
-                        modifier = Modifier.weight(1f),
-                        title = stringResource(MR.strings.action_rerender),
-                        icon = Icons.Outlined.AutoFixHigh,
-                        onClick = onReRender,
-                    )
-                }
             }
             // 第二列：翻譯控制。每顆鈕的回呼自己關對話框（VM 內 closeDialog），故這裡不再呼叫 onDismissRequest。
             Row(
@@ -136,6 +126,16 @@ fun ReaderPageActionsDialog(
                             onClick = onStartChapterTranslate,
                         )
                     }
+                }
+                if (onReRender != null) {
+                    // 換去字法（原「重繪」）：把對話框換成去字法選擇器（共用同一個 dialog state slot）。
+                    // 不呼叫 onDismissRequest()——那會把剛開的選擇器一起關掉（兩者都寫 dialog 欄）。
+                    ActionButton(
+                        modifier = Modifier.weight(1f),
+                        title = stringResource(MR.strings.reader_change_removal),
+                        icon = Icons.Outlined.AutoFixHigh,
+                        onClick = onReRender,
+                    )
                 }
             }
         }

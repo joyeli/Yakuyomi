@@ -28,6 +28,7 @@
     <string name="translation_status_queued">Queued</string>
     <string name="translation_status_translating">Translating</string>
     <string name="translation_status_error">Failed</string>
+    <string name="action_filter_translated">Translated</string>
     <string name="label_library">Library</string>
     <string name="label_recent_updates">Updates</string>
     <string name="label_upcoming">Upcoming</string>
@@ -1115,6 +1116,8 @@
     <string name="pref_translation_group_recognition">Recognition (detection / OCR)</string>
     <string name="pref_translation_show_advanced">Show advanced options</string>
     <string name="pref_translation_show_advanced_summary">Expand all fine-tuning parameters (most users can skip)</string>
+    <string name="pref_translation_master">Enable translation</string>
+    <string name="pref_translation_master_summary">Master switch. When off, nothing is translated automatically (on download or while reading)</string>
     <string name="pref_translation_on_download">Translate chapters on download</string>
     <string name="pref_translation_on_download_summary">Detection / OCR / text removal run on-device; translation uses a cloud LLM</string>
     <string name="pref_translation_live">Live translation (as you read)</string>
@@ -1220,6 +1223,7 @@
     <string name="reader_translate_this_page">Translate this page</string>
     <string name="reader_translate_this_chapter">Translate this chapter</string>
     <string name="reader_stop_chapter_translate">Stop translating this chapter</string>
+    <string name="reader_change_removal">Text removal</string>
     <string name="reader_rerendering">Re-rendering…</string>
     <string name="reader_rerender_done">Page re-rendered</string>
     <string name="reader_rerender_failed">Re-render failed (no materials or error)</string>

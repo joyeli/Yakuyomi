@@ -911,6 +911,8 @@
     <string name="pref_translation_group_recognition">辨識（偵測 / OCR）</string>
     <string name="pref_translation_show_advanced">顯示進階選項</string>
     <string name="pref_translation_show_advanced_summary">展開所有微調參數（一般使用者免動）</string>
+    <string name="pref_translation_master">啟用翻譯</string>
+    <string name="pref_translation_master_summary">總開關。關閉時一律不自動翻譯（下載時與閱讀時皆不翻）</string>
     <string name="pref_translation_on_download">下載時翻譯章節</string>
     <string name="pref_translation_on_download_summary">偵測 / OCR / 去字在裝置上跑；翻譯走雲端 LLM</string>
     <string name="pref_translation_live">即時翻譯（邊讀邊翻）</string>
@@ -1004,6 +1006,7 @@
     <string name="quickstart_manual_body">手動翻譯——在某本漫畫的章節清單，已下載的章節會顯示翻譯鈕。翻譯時圖示轉圈，完成變成主色，出錯變紅色。長按可多選，再按底部的「翻譯」。\n\n翻譯佇列——更多 →「翻譯佇列」列出所有進行中的項目與狀態。可在那裡暫停／繼續、取消，或重試失敗的章節。\n\n重繪——已經翻好某章、但想要更乾淨的去字？在設定改去字方法（會問你要不要更新既有章節），或長按頁面 →「重繪」。不需重新 OCR 或重新翻譯。</string>
     <string name="quickstart_action_done">了解</string>
     <string name="label_translation_queue">翻譯佇列</string>
+    <string name="action_filter_translated">已翻譯</string>
     <string name="pref_translation_orientation">排版方向</string>
     <string name="pref_translation_orientation_auto">自動（原文方向）</string>
     <string name="pref_translation_orientation_vertical">垂直（垂直優先）</string>
@@ -1041,6 +1044,7 @@
     <string name="reader_translate_this_page">翻譯這頁</string>
     <string name="reader_translate_this_chapter">開始翻譯這話</string>
     <string name="reader_stop_chapter_translate">中止這話翻譯</string>
+    <string name="reader_change_removal">換去字法</string>
     <string name="reader_rerendering">重繪中…</string>
     <string name="reader_rerender_done">已重繪此頁</string>
     <string name="reader_rerender_failed">重繪失敗（無素材或出錯）</string>

@@ -404,6 +404,21 @@ class TranslationManager(private val context: Context) {
         persist()
     }
 
+    /**
+     * 佇列拖曳重排（#1）：把章 [fromChapterId] 移到目標索引 [toIndex]。drain 取「第一個 QUEUE」，
+     * 故重排後優先順序立即生效。正在翻的那章不中止（只改它在清單的位置）。順序回寫 [persist]（跨重啟保留）。
+     */
+    fun reorderQueue(fromChapterId: Long, toIndex: Int) {
+        synchronized(lock) {
+            val fromIndex = entries.indexOfFirst { it.chapter.id == fromChapterId }
+            if (fromIndex < 0) return
+            val item = entries.removeAt(fromIndex)
+            entries.add(toIndex.coerceIn(0, entries.size), item)
+        }
+        publish()
+        persist()
+    }
+
     /** 重試失敗的章（重新排隊）。 */
     fun retry(chapterIds: List<Long>) {
         val ids = chapterIds.toHashSet()

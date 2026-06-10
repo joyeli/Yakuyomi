@@ -466,6 +466,7 @@ class ReaderViewModel @JvmOverloads constructor(
     private suspend fun prefetchNextChapters(current: ReaderChapter) {
         val manga = manga ?: return
         val loader = loader ?: return
+        if (!translationPreferences.translationMasterEnabled.get()) return
         if (!translationPreferences.liveTranslate.get()) return
         if (!loader.engineReady()) return
         if (!loader.autoTranslateAllowed()) return
@@ -504,6 +505,7 @@ class ReaderViewModel @JvmOverloads constructor(
         // gate：即時翻開關 + 引擎就緒（key+模型，**不含**「下載時翻譯」開關）+ 分類（與已下載路徑 shouldTranslateLive 同一份語義）。
         // ★ 用 loader.engineReady() 而非 translationManager.isReady()——後者含 translationEnabled，
         //   「只開即時翻、沒開下載時翻」的使用者會被它擋掉（線上顯示「未啟動」即此 bug）。
+        if (!translationPreferences.translationMasterEnabled.get()) return
         if (!translationPreferences.liveTranslate.get()) return
         if (!loader.engineReady()) return
         if (!loader.autoTranslateAllowed()) return
@@ -858,15 +860,25 @@ class ReaderViewModel @JvmOverloads constructor(
      * Saves the chapter last read history if incognito mode isn't on.
      */
     suspend fun updateHistory() {
-        getCurrentChapter()?.let { readerChapter ->
-            if (incognitoMode) return@let
+        val readerChapter = getCurrentChapter()
+        if (readerChapter == null) {
+            // Yakuyomi 診斷（#9 已讀翻譯章不進歷史）：currentChapter 為 null → 不寫歷史。
+            logcat { "Yakuyomi/history: skip — currentChapter is null" }
+            return
+        }
+        if (incognitoMode) {
+            logcat { "Yakuyomi/history: skip — incognito" }
+            return
+        }
 
-            val chapterId = readerChapter.chapter.id!!
-            val endTime = Date()
-            val sessionReadDuration = chapterReadStartTime?.let { endTime.time - it } ?: 0
+        val chapterId = readerChapter.chapter.id!!
+        val endTime = Date()
+        val sessionReadDuration = chapterReadStartTime?.let { endTime.time - it } ?: 0
 
-            upsertHistory.await(HistoryUpdate(chapterId, endTime, sessionReadDuration))
-            chapterReadStartTime = null
+        upsertHistory.await(HistoryUpdate(chapterId, endTime, sessionReadDuration))
+        chapterReadStartTime = null
+        logcat {
+            "Yakuyomi/history: wrote chapterId=$chapterId name=${readerChapter.chapter.name} dur=$sessionReadDuration"
         }
     }
 

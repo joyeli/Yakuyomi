@@ -167,7 +167,11 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         // 釋放仍由原機制管（即時翻關 / onTrimMemory / 佇列空且即時翻關）。
         runCatching {
             val translationEngineService = Injekt.get<TranslationEngineService>()
-            if (Injekt.get<TranslationPreferences>().liveTranslate.get() && translationEngineService.isReady()) {
+            val translationPrefs = Injekt.get<TranslationPreferences>()
+            if (translationPrefs.translationMasterEnabled.get() &&
+                translationPrefs.liveTranslate.get() &&
+                translationEngineService.isReady()
+            ) {
                 translationEngineService.warmUpAsync()
             }
         }

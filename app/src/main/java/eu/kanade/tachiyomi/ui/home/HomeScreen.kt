@@ -36,12 +36,14 @@ import cafe.adriel.voyager.navigator.tab.TabNavigator
 import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.presentation.util.Screen
 import eu.kanade.presentation.util.isTabletUi
+import eu.kanade.tachiyomi.data.translation.TranslationManager
 import eu.kanade.tachiyomi.ui.browse.BrowseTab
 import eu.kanade.tachiyomi.ui.download.DownloadQueueScreen
 import eu.kanade.tachiyomi.ui.history.HistoryTab
 import eu.kanade.tachiyomi.ui.library.LibraryTab
 import eu.kanade.tachiyomi.ui.manga.MangaScreen
 import eu.kanade.tachiyomi.ui.more.MoreTab
+import eu.kanade.tachiyomi.ui.translation.TranslationTab
 import eu.kanade.tachiyomi.ui.updates.UpdatesTab
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.collectLatest
@@ -71,9 +73,10 @@ object HomeScreen : Screen() {
     @Suppress("ConstPropertyName")
     private const val TabNavigatorKey = "HomeTabs"
 
+    // Yakuyomi：以「翻譯」分頁取代「更新」分頁的位置（「更新」改由「更多」進入，見 MoreScreen）。
     private val TABS = listOf(
         LibraryTab,
-        UpdatesTab,
+        TranslationTab,
         HistoryTab,
         BrowseTab,
         MoreTab,
@@ -238,6 +241,15 @@ object HomeScreen : Screen() {
         BadgedBox(
             badge = {
                 when {
+                    tab is TranslationTab -> {
+                        val count by produceState(initialValue = 0) {
+                            Injekt.get<TranslationManager>().queueState
+                                .collectLatest { value = it.size }
+                        }
+                        if (count > 0) {
+                            Badge { Text(text = count.toString()) }
+                        }
+                    }
                     tab is UpdatesTab -> {
                         val count by produceState(initialValue = 0) {
                             val pref = Injekt.get<LibraryPreferences>()
