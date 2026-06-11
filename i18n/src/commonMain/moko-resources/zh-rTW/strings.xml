@@ -1006,6 +1006,7 @@
     <string name="quickstart_manual_body">手動翻譯——在某本漫畫的章節清單，已下載的章節會顯示翻譯鈕。翻譯時圖示轉圈，完成變成主色，出錯變紅色。長按可多選，再按底部的「翻譯」。\n\n翻譯佇列——更多 →「翻譯佇列」列出所有進行中的項目與狀態。可在那裡暫停／繼續、取消，或重試失敗的章節。\n\n重繪——已經翻好某章、但想要更乾淨的去字？在設定改去字方法（會問你要不要更新既有章節），或長按頁面 →「重繪」。不需重新 OCR 或重新翻譯。</string>
     <string name="quickstart_action_done">了解</string>
     <string name="label_translation_queue">翻譯佇列</string>
+    <string name="label_translation">翻譯</string>
     <string name="action_filter_translated">已翻譯</string>
     <string name="pref_translation_orientation">排版方向</string>
     <string name="pref_translation_orientation_auto">自動（原文方向）</string>

@@ -91,7 +91,8 @@ data object TranslationTab : Tab {
         @Composable
         get() = TabOptions(
             index = 1u,
-            title = stringResource(MR.strings.label_translation_queue),
+            // 導覽列標籤用短版「翻譯」（與書櫃/記錄/探索/其他等長）；頁面標題仍是「翻譯佇列」。
+            title = stringResource(MR.strings.label_translation),
             icon = rememberVectorPainter(Icons.Outlined.Translate),
         )
 
