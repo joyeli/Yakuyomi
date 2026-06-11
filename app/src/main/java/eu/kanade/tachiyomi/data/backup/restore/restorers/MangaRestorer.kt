@@ -241,7 +241,7 @@ class MangaRestorer(
      * @return id of [Manga], null if not found
      */
     private suspend fun insertManga(manga: Manga): Long {
-        return database.mangasQueries.insertReturningId(
+        return database.mangasQueries.insert(
             source = manga.source,
             url = manga.url,
             artist = manga.artist,
