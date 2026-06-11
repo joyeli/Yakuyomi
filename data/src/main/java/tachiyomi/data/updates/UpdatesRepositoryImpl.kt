@@ -1,16 +1,14 @@
 package tachiyomi.data.updates
 
-import app.cash.sqldelight.async.coroutines.awaitAsList
 import kotlinx.coroutines.flow.Flow
 import tachiyomi.core.common.util.lang.toLong
-import tachiyomi.data.Database
-import tachiyomi.data.subscribeToList
+import tachiyomi.data.DatabaseHandler
 import tachiyomi.domain.manga.model.MangaCover
 import tachiyomi.domain.updates.model.UpdatesWithRelations
 import tachiyomi.domain.updates.repository.UpdatesRepository
 
 class UpdatesRepositoryImpl(
-    private val database: Database,
+    private val databaseHandler: DatabaseHandler,
 ) : UpdatesRepository {
 
     override suspend fun awaitWithRead(
@@ -18,14 +16,14 @@ class UpdatesRepositoryImpl(
         after: Long,
         limit: Long,
     ): List<UpdatesWithRelations> {
-        return database.updatesViewQueries
-            .getUpdatesByReadStatus(
+        return databaseHandler.awaitList {
+            updatesViewQueries.getUpdatesByReadStatus(
                 read = read,
                 after = after,
                 limit = limit,
                 mapper = ::mapUpdatesWithRelations,
             )
-            .awaitAsList()
+        }
     }
 
     override fun subscribeAll(
@@ -36,17 +34,18 @@ class UpdatesRepositoryImpl(
         bookmarked: Boolean?,
         hideExcludedScanlators: Boolean,
     ): Flow<List<UpdatesWithRelations>> {
-        return database.updatesViewQueries
-            .getRecentUpdatesWithFilters(
+        return databaseHandler.subscribeToList {
+            updatesViewQueries.getRecentUpdatesWithFilters(
                 after = after,
                 limit = limit,
+                // invert because unread in Kotlin -> read column in SQL
                 read = unread?.let { !it },
                 started = started?.toLong(),
                 bookmarked = bookmarked,
                 hideExcludedScanlators = hideExcludedScanlators.toLong(),
                 mapper = ::mapUpdatesWithRelations,
             )
-            .subscribeToList()
+        }
     }
 
     override fun subscribeWithRead(
@@ -54,17 +53,16 @@ class UpdatesRepositoryImpl(
         after: Long,
         limit: Long,
     ): Flow<List<UpdatesWithRelations>> {
-        return database.updatesViewQueries
-            .getUpdatesByReadStatus(
+        return databaseHandler.subscribeToList {
+            updatesViewQueries.getUpdatesByReadStatus(
                 read = read,
                 after = after,
                 limit = limit,
                 mapper = ::mapUpdatesWithRelations,
             )
-            .subscribeToList()
+        }
     }
 
-    @Suppress("UNUSED_PARAMETER")
     private fun mapUpdatesWithRelations(
         mangaId: Long,
         mangaTitle: String,

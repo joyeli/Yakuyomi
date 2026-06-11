@@ -1,49 +1,41 @@
 package tachiyomi.data.history
 
-import app.cash.sqldelight.async.coroutines.awaitAsList
-import app.cash.sqldelight.async.coroutines.awaitAsOne
-import app.cash.sqldelight.async.coroutines.awaitAsOneOrNull
 import kotlinx.coroutines.flow.Flow
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
-import tachiyomi.data.Database
-import tachiyomi.data.subscribeToList
+import tachiyomi.data.DatabaseHandler
 import tachiyomi.domain.history.model.History
 import tachiyomi.domain.history.model.HistoryUpdate
 import tachiyomi.domain.history.model.HistoryWithRelations
 import tachiyomi.domain.history.repository.HistoryRepository
 
 class HistoryRepositoryImpl(
-    private val database: Database,
+    private val handler: DatabaseHandler,
 ) : HistoryRepository {
 
     override fun getHistory(query: String): Flow<List<HistoryWithRelations>> {
-        return database.historyViewQueries
-            .history(query, HistoryMapper::mapHistoryWithRelations)
-            .subscribeToList()
+        return handler.subscribeToList {
+            historyViewQueries.history(query, HistoryMapper::mapHistoryWithRelations)
+        }
     }
 
     override suspend fun getLastHistory(): HistoryWithRelations? {
-        return database.historyViewQueries
-            .getLatestHistory(HistoryMapper::mapHistoryWithRelations)
-            .awaitAsOneOrNull()
+        return handler.awaitOneOrNull {
+            historyViewQueries.getLatestHistory(HistoryMapper::mapHistoryWithRelations)
+        }
     }
 
     override suspend fun getTotalReadDuration(): Long {
-        return database.historyQueries
-            .getReadDuration()
-            .awaitAsOne()
+        return handler.awaitOne { historyQueries.getReadDuration() }
     }
 
     override suspend fun getHistoryByMangaId(mangaId: Long): List<History> {
-        return database.historyQueries
-            .getHistoryByMangaId(mangaId, HistoryMapper::mapHistory)
-            .awaitAsList()
+        return handler.awaitList { historyQueries.getHistoryByMangaId(mangaId, HistoryMapper::mapHistory) }
     }
 
     override suspend fun resetHistory(historyId: Long) {
         try {
-            database.historyQueries.resetHistoryById(historyId)
+            handler.await { historyQueries.resetHistoryById(historyId) }
         } catch (e: Exception) {
             logcat(LogPriority.ERROR, throwable = e)
         }
@@ -51,7 +43,7 @@ class HistoryRepositoryImpl(
 
     override suspend fun resetHistoryByMangaId(mangaId: Long) {
         try {
-            database.historyQueries.resetHistoryByMangaId(mangaId)
+            handler.await { historyQueries.resetHistoryByMangaId(mangaId) }
         } catch (e: Exception) {
             logcat(LogPriority.ERROR, throwable = e)
         }
@@ -59,7 +51,7 @@ class HistoryRepositoryImpl(
 
     override suspend fun deleteAllHistory(): Boolean {
         return try {
-            database.historyQueries.removeAllHistory()
+            handler.await { historyQueries.removeAllHistory() }
             true
         } catch (e: Exception) {
             logcat(LogPriority.ERROR, throwable = e)
@@ -69,11 +61,13 @@ class HistoryRepositoryImpl(
 
     override suspend fun upsertHistory(historyUpdate: HistoryUpdate) {
         try {
-            database.historyQueries.upsert(
-                historyUpdate.chapterId,
-                historyUpdate.readAt,
-                historyUpdate.sessionReadDuration,
-            )
+            handler.await {
+                historyQueries.upsert(
+                    historyUpdate.chapterId,
+                    historyUpdate.readAt,
+                    historyUpdate.sessionReadDuration,
+                )
+            }
         } catch (e: Exception) {
             logcat(LogPriority.ERROR, throwable = e)
         }

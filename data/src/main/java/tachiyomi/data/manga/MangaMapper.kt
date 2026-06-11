@@ -6,7 +6,6 @@ import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.manga.model.MangaWithChapterCount
 
 object MangaMapper {
-    @Suppress("UNUSED_PARAMETER")
     fun mapManga(
         id: Long,
         source: Long,
@@ -31,6 +30,7 @@ object MangaMapper {
         lastModifiedAt: Long,
         favoriteModifiedAt: Long?,
         version: Long,
+        @Suppress("UNUSED_PARAMETER")
         isSyncing: Long,
         notes: String,
     ): Manga = Manga(

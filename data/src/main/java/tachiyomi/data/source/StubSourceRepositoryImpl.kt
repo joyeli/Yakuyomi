@@ -1,30 +1,24 @@
 package tachiyomi.data.source
 
-import app.cash.sqldelight.async.coroutines.awaitAsOneOrNull
 import kotlinx.coroutines.flow.Flow
-import tachiyomi.data.Database
-import tachiyomi.data.subscribeToList
+import tachiyomi.data.DatabaseHandler
 import tachiyomi.domain.source.model.StubSource
 import tachiyomi.domain.source.repository.StubSourceRepository
 
 class StubSourceRepositoryImpl(
-    private val database: Database,
+    private val handler: DatabaseHandler,
 ) : StubSourceRepository {
 
     override fun subscribeAll(): Flow<List<StubSource>> {
-        return database.sourcesQueries
-            .findAll(::mapStubSource)
-            .subscribeToList()
+        return handler.subscribeToList { sourcesQueries.findAll(::mapStubSource) }
     }
 
     override suspend fun getStubSource(id: Long): StubSource? {
-        return database.sourcesQueries
-            .findOne(id, ::mapStubSource)
-            .awaitAsOneOrNull()
+        return handler.awaitOneOrNull { sourcesQueries.findOne(id, ::mapStubSource) }
     }
 
     override suspend fun upsertStubSource(id: Long, lang: String, name: String) {
-        database.sourcesQueries.upsert(id, lang, name)
+        handler.await { sourcesQueries.upsert(id, lang, name) }
     }
 
     private fun mapStubSource(

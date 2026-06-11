@@ -234,8 +234,6 @@ dependencies {
 
     implementation(libs.bundles.kotlinx.coroutines)
 
-    implementation(libs.sqldelight.async)
-
     // AndroidX libraries
     implementation(libs.androidx.annotation)
     implementation(libs.androidx.appCompat)
