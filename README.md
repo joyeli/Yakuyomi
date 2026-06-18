@@ -21,18 +21,30 @@ Yakuyomi is a fork of [mihon](https://github.com/mihonapp/mihon) that translates
 <sub><b>Text over art — hair, faces, backgrounds — is where box-fill / overlay translators fall apart.</b> Yakuyomi erases the original and reconstructs the artwork (3), then typesets the translation back in (4).</sub>
 </div>
 
+## What makes Yakuyomi different
+
+Everything below is on top of stock mihon — at a glance, what you get here that other forks don't:
+
+**Translation**
+- **Real inpainting, not overlays** — other translation forks paint a box over the text or stamp new text on top. Yakuyomi *erases* the original and **reconstructs the artwork** (LaMa) before typesetting the translation back into the bubble.
+- **On-device pipeline** — detection, OCR, and text removal run locally (ONNX Runtime); only the LLM translation call leaves your device. No image ever leaves the phone.
+- **Two workflows** — translate-on-download (whole chapters in the background) and live translation while you read. A page is overwritten only when its translation succeeds; nothing is ever replaced with something worse.
+- **Your provider, your key** — any OpenAI-compatible LLM (DeepSeek by default; OpenAI, Gemini, Groq, Qwen, OpenRouter, self-hosted Sakura, custom), per-provider encrypted keys, live model list ([providers doc](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/PROVIDERS.md)).
+- **Your models** — the three ONNX models download in one tap with sha256 verification, or you supply them manually ([models doc](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/MODELS.md)).
+- **Quality knobs** — three text-removal modes (flat-fill / whole-image LaMa / per-region LaMa), vertical/horizontal typesetting, ~20 tunable parameters. No telemetry.
+
+**Browse & catch-up** *(new in 0.3.0)*
+- **Global browse filter** — filter any source's results by *in your library* / *started reading*, applied instantly to the loaded list without re-fetching.
+- **Per-source anchor** — mark a title as your "last processed point"; a one-tap action keeps loading and auto-scrolls the Latest feed until it reaches the anchor, so you never lose your place.
+- **Offline snapshot** — save a source's currently-loaded list and browse it later with **zero network** (lighter on the source, ban-safe).
+- **Page-load throttle** — a configurable minimum interval between page loads to keep sources from rate-limiting you.
+- **Auto-refresh on open** — optionally refresh a manga's chapters every time you open it.
+
+Everything else is mihon — library, sources/extensions, downloads, trackers, backups, the reader.
+
 ## Download
 
 Grab the latest **signed APK** from the [**Releases page**](https://github.com/joyeli/Yakuyomi/releases/latest). Take the `arm64-v8a` build for most phones, or `universal` if unsure. No build step needed — you only need to [build from source](#building) if you want to.
-
-## Translation features
-
-- **Translate on download** — a chapter is translated right after it downloads. A page is overwritten only when its translation succeeds; nothing is ever replaced with something worse.
-- **Live translation** — open an untranslated chapter and it translates page by page as you read, swapping each page in when it's ready.
-- **Bring your own provider & key** — DeepSeek by default; any OpenAI-compatible provider works (OpenAI, Gemini, Groq, Qwen, OpenRouter, self-hosted Sakura, custom). Keys are per-provider and encrypted; the model list is fetched live. See the engine's [providers doc](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/PROVIDERS.md).
-- **Auto-download or bring your own models** — the three ONNX models download in one tap with sha256 verification, or you supply them manually. See the [models doc](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/MODELS.md).
-- **Quality knobs** — three text-removal modes (flat-fill / whole-image LaMa / per-region LaMa), vertical or horizontal typesetting, ~20 tunable parameters.
-- Everything else is mihon — library, sources/extensions, downloads, trackers, backups, the reader.
 
 ## How translation works
 
