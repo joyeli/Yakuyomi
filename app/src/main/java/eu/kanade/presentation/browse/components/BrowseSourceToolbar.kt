@@ -2,7 +2,10 @@ package eu.kanade.presentation.browse.components
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ViewList
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.ViewModule
+import androidx.compose.material.icons.outlined.Flag
+import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
@@ -37,6 +40,12 @@ fun BrowseSourceToolbar(
     onSettingsClick: () -> Unit,
     onSearch: (String) -> Unit,
     scrollBehavior: TopAppBarScrollBehavior? = null,
+    // Yakuyomi：錨點工具列按鈕（單一直接動作，依狀態切換：標記錨點 / 自動載入 / 停止）。三者擇一非空。
+    onMarkFirstAsAnchor: (() -> Unit)? = null,
+    onAutoLoadToAnchor: (() -> Unit)? = null,
+    onStopAutoLoad: (() -> Unit)? = null,
+    // Yakuyomi：清除快照（overflow，僅有快照時非空）。
+    onClearSnapshot: (() -> Unit)? = null,
 ) {
     // Avoid capturing unstable source in actions lambda
     val title = source?.name
@@ -56,6 +65,30 @@ fun BrowseSourceToolbar(
             AppBarActions(
                 actions = persistentListOf<AppBar.AppBarAction>().builder()
                     .apply {
+                        // Yakuyomi：錨點按鈕（直接放外面，依狀態切換圖示/動作）。
+                        when {
+                            onStopAutoLoad != null -> add(
+                                AppBar.Action(
+                                    title = stringResource(MR.strings.action_stop_auto_load),
+                                    icon = Icons.Filled.Stop,
+                                    onClick = onStopAutoLoad,
+                                ),
+                            )
+                            onAutoLoadToAnchor != null -> add(
+                                AppBar.Action(
+                                    title = stringResource(MR.strings.action_auto_load_to_anchor),
+                                    icon = Icons.Outlined.PlayArrow,
+                                    onClick = onAutoLoadToAnchor,
+                                ),
+                            )
+                            onMarkFirstAsAnchor != null -> add(
+                                AppBar.Action(
+                                    title = stringResource(MR.strings.action_set_anchor),
+                                    icon = Icons.Outlined.Flag,
+                                    onClick = onMarkFirstAsAnchor,
+                                ),
+                            )
+                        }
                         add(
                             AppBar.Action(
                                 title = stringResource(MR.strings.action_display_mode),
@@ -87,6 +120,14 @@ fun BrowseSourceToolbar(
                                 AppBar.OverflowAction(
                                     title = stringResource(MR.strings.action_settings),
                                     onClick = onSettingsClick,
+                                ),
+                            )
+                        }
+                        if (onClearSnapshot != null) {
+                            add(
+                                AppBar.OverflowAction(
+                                    title = stringResource(MR.strings.action_clear_snapshot),
+                                    onClick = onClearSnapshot,
                                 ),
                             )
                         }

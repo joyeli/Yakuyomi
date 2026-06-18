@@ -30,6 +30,24 @@
     <string name="translation_status_translating">Translating</string>
     <string name="translation_status_error">Failed</string>
     <string name="action_filter_translated">Translated</string>
+    <string name="action_global_filter">Filter (all sources)</string>
+    <string name="action_open_entry">Open</string>
+    <string name="action_set_anchor">Set anchor</string>
+    <string name="action_clear_anchor">Clear anchor</string>
+    <string name="anchor_set_confirm">Mark this entry as the browse anchor for %1$s? You\'ll see it flagged while browsing this source\'s Latest list.</string>
+    <string name="anchor_badge">Anchor</string>
+    <string name="action_auto_load_to_anchor">Auto-load to anchor</string>
+    <string name="action_stop_auto_load">Stop loading</string>
+    <string name="action_save_snapshot">Save snapshot</string>
+    <string name="action_clear_snapshot">Clear snapshot</string>
+    <string name="snapshot_overwrite_confirm">A snapshot already exists for this source. Overwrite it?</string>
+    <string name="snapshot_clear_confirm">Clear the saved snapshot for this source?</string>
+    <string name="snapshot_saved">Snapshot saved (%1$d entries)</string>
+    <string name="listing_snapshot">Snapshot</string>
+    <string name="save_snapshot_after_load_confirm">Loaded %1$d entries. Save them as a snapshot so you can review offline next time?</string>
+    <string name="action_browse_filter_favorite">In your library</string>
+    <string name="action_browse_filter_read">Started reading</string>
+    <string name="action_source_filters">Source filters</string>
     <string name="label_library">Library</string>
     <string name="label_recent_updates">Updates</string>
     <string name="label_upcoming">Upcoming</string>
@@ -366,6 +384,8 @@
     <string name="pref_mark_duplicate_read_chapter_read_new">After fetching new chapter</string>
 
     <string name="pref_hide_missing_chapter_indicators">Hide missing chapter indicators</string>
+    <string name="pref_auto_refresh_manga_on_open">Refresh chapters when opening an entry</string>
+    <string name="pref_auto_refresh_manga_on_open_summary">Always fetch the latest chapters from the source when you open a manga, not just the first time</string>
     <string name="pref_disallow_non_ascii_filenames">Disallow non-ASCII filenames</string>
     <string name="pref_disallow_non_ascii_filenames_details">Ensures compatibility with certain storage media that don't support Unicode. When this is enabled, you'll need to manually rename source and manga folders by replacing non-ASCII characters with their lowercase UTF-8 hexadecimal representations. Chapter files don't need to be renamed.</string>
 
@@ -586,6 +606,8 @@
 
       <!-- Browse section -->
     <string name="pref_hide_in_library_items">Hide entries already in library</string>
+    <string name="pref_browse_load_interval">Minimum page-load interval</string>
+    <string name="pref_browse_load_interval_summary">Throttle browsing pagination to avoid hammering the source (helps when filters hide most results)</string>
 
       <!-- Data and storage section -->
     <string name="pref_storage_location">Storage location</string>

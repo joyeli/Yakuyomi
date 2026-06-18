@@ -3,6 +3,9 @@ package eu.kanade.tachiyomi.ui.browse.source
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.TravelExplore
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -16,6 +19,7 @@ import eu.kanade.presentation.browse.SourcesScreen
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.TabContent
 import eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceScreen
+import eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceScreenModel
 import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.flow.collectLatest
@@ -44,6 +48,11 @@ fun Screen.sourcesTab(): TabContent {
             ),
         ),
         content = { contentPadding, snackbarHostState ->
+            // Yakuyomi：回到此頁時刷新「哪些來源有快照」（可能剛在某來源頁存了快照）。
+            LaunchedEffect(Unit) {
+                screenModel.refreshSnapshots()
+            }
+
             SourcesScreen(
                 state = state,
                 contentPadding = contentPadding,
@@ -52,7 +61,32 @@ fun Screen.sourcesTab(): TabContent {
                 },
                 onClickPin = screenModel::togglePin,
                 onLongClickItem = screenModel::showSourceDialog,
+                snapshotSourceIds = state.snapshotSourceIds,
+                onClickSnapshot = { source ->
+                    navigator.push(
+                        BrowseSourceScreen(source.id, BrowseSourceScreenModel.Listing.Snapshot.query),
+                    )
+                },
+                onLongClickSnapshot = screenModel::showSnapshotClearDialog,
             )
+
+            state.snapshotClearTarget?.let { target ->
+                AlertDialog(
+                    onDismissRequest = screenModel::dismissSnapshotClearDialog,
+                    title = { Text(text = stringResource(MR.strings.action_clear_snapshot)) },
+                    text = { Text(text = stringResource(MR.strings.snapshot_clear_confirm)) },
+                    confirmButton = {
+                        TextButton(onClick = { screenModel.clearSnapshot(target) }) {
+                            Text(text = stringResource(MR.strings.action_ok))
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = screenModel::dismissSnapshotClearDialog) {
+                            Text(text = stringResource(MR.strings.action_cancel))
+                        }
+                    },
+                )
+            }
 
             state.dialog?.let { dialog ->
                 val source = dialog.source

@@ -222,8 +222,10 @@ class MangaScreenModel(
                 setMangaDefaultChapterFlags.await(manga)
             }
 
-            val needRefreshInfo = !manga.initialized
-            val needRefreshChapter = chapters.isEmpty()
+            // Yakuyomi：開啟漫畫時自動刷新章節（設定開啟）→ 每次進詳情頁都向來源抓最新（非只首次/空清單）。
+            val autoRefreshOnOpen = libraryPreferences.autoRefreshMangaOnOpen.get()
+            val needRefreshInfo = !manga.initialized || autoRefreshOnOpen
+            val needRefreshChapter = chapters.isEmpty() || autoRefreshOnOpen
 
             // Show what we have earlier
             mutableState.update {
@@ -392,6 +394,20 @@ class MangaScreenModel(
         updateSuccessState {
             it.copy(dialog = Dialog.SetFetchInterval(manga))
         }
+    }
+
+    // Yakuyomi：探索錨點（詳情頁入口）。
+    private val sourcePreferences: eu.kanade.domain.source.service.SourcePreferences = Injekt.get()
+
+    fun showSetAnchorDialog() {
+        successState ?: return
+        updateSuccessState { it.copy(dialog = Dialog.SetAnchorConfirm) }
+    }
+
+    /** 把這本設成它所屬 source 的探索錨點。 */
+    fun setBrowseAnchor() {
+        val state = successState ?: return
+        sourcePreferences.browseAnchor(state.manga.source).set(state.manga.url)
     }
 
     fun setFetchInterval(manga: Manga, interval: Int) {
@@ -1180,6 +1196,7 @@ class MangaScreenModel(
         data class DuplicateManga(val manga: Manga, val duplicates: List<MangaWithChapterCount>) : Dialog
         data class Migrate(val target: Manga, val current: Manga) : Dialog
         data class SetFetchInterval(val manga: Manga) : Dialog
+        data object SetAnchorConfirm : Dialog
         data object SettingsSheet : Dialog
         data object TrackSheet : Dialog
         data object FullCover : Dialog

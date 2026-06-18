@@ -5,12 +5,13 @@ import eu.kanade.tachiyomi.util.system.LocaleHelper
 import mihon.domain.migration.models.MigrationFlag
 import tachiyomi.core.common.preference.Preference
 import tachiyomi.core.common.preference.PreferenceStore
+import tachiyomi.core.common.preference.TriState
 import tachiyomi.core.common.preference.getEnum
 import tachiyomi.core.common.preference.getLongArray
 import tachiyomi.domain.library.model.LibraryDisplayMode
 
 class SourcePreferences(
-    preferenceStore: PreferenceStore,
+    private val preferenceStore: PreferenceStore,
 ) {
 
     val sourceDisplayMode: Preference<LibraryDisplayMode> = preferenceStore.getObjectFromString(
@@ -49,6 +50,22 @@ class SourcePreferences(
     )
 
     val hideInLibraryItems: Preference<Boolean> = preferenceStore.getBoolean("browse_hide_in_library_items", false)
+
+    // Yakuyomi：探索全域篩選（跨所有來源、與各 source 自帶 extension filter 獨立）。客戶端後置篩選。
+    val browseFilterFavorite: Preference<TriState> = preferenceStore.getEnum(
+        "browse_filter_favorite",
+        TriState.DISABLED,
+    )
+    val browseFilterRead: Preference<TriState> = preferenceStore.getEnum("browse_filter_read", TriState.DISABLED)
+
+    // 探索翻頁最小間隔（秒）。擋住客戶端篩選稀疏時的連翻爆衝、防 ban。與 data 層 SourcePagingSource.PREF_LOAD_INTERVAL 同 key。
+    val browseLoadInterval: Preference<Int> = preferenceStore.getInt("browse_load_interval", 1)
+
+    // 探索「錨點」：每 source 一個（值＝該本 mangaUrl，空＝未設）。標記「上次處理到這」，瀏覽清單上以旗標徽章標出。
+    fun browseAnchor(sourceId: Long): Preference<String> = preferenceStore.getString("browse_anchor_$sourceId", "")
+
+    // 探索「快照」：每 source 一份離線清單（JSON：時間戳 + 書本 url 順序）。空＝無快照。詳見 BrowseSnapshotStore 用法。
+    fun browseSnapshot(sourceId: Long): Preference<String> = preferenceStore.getString("browse_snapshot_$sourceId", "")
 
     val extensionRepos: Preference<Set<String>> = preferenceStore.getStringSet("extension_repos", emptySet())
 

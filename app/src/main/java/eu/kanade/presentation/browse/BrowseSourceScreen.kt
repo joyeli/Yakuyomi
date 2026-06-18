@@ -2,7 +2,11 @@ package eu.kanade.presentation.browse
 
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Public
@@ -49,6 +53,13 @@ fun BrowseSourceContent(
     onLocalSourceHelpClick: () -> Unit,
     onMangaClick: (Manga) -> Unit,
     onMangaLongClick: (Manga) -> Unit,
+    // Yakuyomi：探索錨點 url（只 Latest 清單帶值；該本顯示旗標徽章）。
+    anchorUrl: String? = null,
+    // Yakuyomi：外部提供的捲動狀態（自動載入到錨點時用以驅動載入＋捲動）。
+    gridState: LazyGridState = rememberLazyGridState(),
+    listState: LazyListState = rememberLazyListState(),
+    // Yakuyomi：隱藏載入動畫（快照是靜態清單，不該有底部轉圈）。
+    hideLoadingFooter: Boolean = false,
 ) {
     val context = LocalContext.current
 
@@ -125,6 +136,9 @@ fun BrowseSourceContent(
                 contentPadding = contentPadding,
                 onMangaClick = onMangaClick,
                 onMangaLongClick = onMangaLongClick,
+                anchorUrl = anchorUrl,
+                state = gridState,
+                hideLoadingFooter = hideLoadingFooter,
             )
         }
         LibraryDisplayMode.List -> {
@@ -133,6 +147,9 @@ fun BrowseSourceContent(
                 contentPadding = contentPadding,
                 onMangaClick = onMangaClick,
                 onMangaLongClick = onMangaLongClick,
+                anchorUrl = anchorUrl,
+                state = listState,
+                hideLoadingFooter = hideLoadingFooter,
             )
         }
         LibraryDisplayMode.CompactGrid, LibraryDisplayMode.CoverOnlyGrid -> {
@@ -142,6 +159,9 @@ fun BrowseSourceContent(
                 contentPadding = contentPadding,
                 onMangaClick = onMangaClick,
                 onMangaLongClick = onMangaLongClick,
+                anchorUrl = anchorUrl,
+                state = gridState,
+                hideLoadingFooter = hideLoadingFooter,
             )
         }
     }

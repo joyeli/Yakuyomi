@@ -1,6 +1,7 @@
 package eu.kanade.presentation.library.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -79,6 +80,7 @@ fun MangaCompactGridItem(
     coverAlpha: Float = 1f,
     coverBadgeStart: @Composable (RowScope.() -> Unit)? = null,
     coverBadgeEnd: @Composable (RowScope.() -> Unit)? = null,
+    isAnchor: Boolean = false,
 ) {
     GridItemSelectable(
         isSelected = isSelected,
@@ -90,6 +92,7 @@ fun MangaCompactGridItem(
                 MangaCover.Book(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .anchorBorder(isAnchor)
                         .alpha(if (isSelected) GRID_SELECTED_COVER_ALPHA else coverAlpha),
                     data = coverData,
                 )
@@ -185,6 +188,7 @@ fun MangaComfortableGridItem(
     coverBadgeStart: (@Composable RowScope.() -> Unit)? = null,
     coverBadgeEnd: (@Composable RowScope.() -> Unit)? = null,
     onClickContinueReading: (() -> Unit)? = null,
+    isAnchor: Boolean = false,
 ) {
     GridItemSelectable(
         isSelected = isSelected,
@@ -197,6 +201,7 @@ fun MangaComfortableGridItem(
                     MangaCover.Book(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .anchorBorder(isAnchor)
                             .alpha(if (isSelected) GRID_SELECTED_COVER_ALPHA else coverAlpha),
                         data = coverData,
                     )
@@ -326,6 +331,21 @@ private fun Modifier.selectedOutline(
 ) = drawBehind { if (isSelected) drawRect(color = color) }
 
 /**
+ * Yakuyomi：探索錨點高亮——封面外圍粗紅框。配合旗標徽章一起凸顯「上次處理到這」。
+ */
+@Composable
+private fun Modifier.anchorBorder(isAnchor: Boolean): Modifier =
+    if (isAnchor) {
+        border(
+            width = 6.dp,
+            color = MaterialTheme.colorScheme.error,
+            shape = MaterialTheme.shapes.extraSmall,
+        )
+    } else {
+        this
+    }
+
+/**
  * Layout of list item.
  */
 @Composable
@@ -338,6 +358,7 @@ fun MangaListItem(
     isSelected: Boolean = false,
     coverAlpha: Float = 1f,
     onClickContinueReading: (() -> Unit)? = null,
+    isAnchor: Boolean = false,
 ) {
     Row(
         modifier = Modifier
@@ -353,6 +374,7 @@ fun MangaListItem(
         MangaCover.Square(
             modifier = Modifier
                 .fillMaxHeight()
+                .anchorBorder(isAnchor)
                 .alpha(coverAlpha),
             data = coverData,
         )

@@ -6,6 +6,7 @@ import cafe.adriel.voyager.core.model.screenModelScope
 import eu.kanade.domain.source.interactor.GetEnabledSources
 import eu.kanade.domain.source.interactor.ToggleSource
 import eu.kanade.domain.source.interactor.ToggleSourcePin
+import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.presentation.browse.SourceUiModel
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
@@ -28,6 +29,7 @@ class SourcesScreenModel(
     private val getEnabledSources: GetEnabledSources = Injekt.get(),
     private val toggleSource: ToggleSource = Injekt.get(),
     private val toggleSourcePin: ToggleSourcePin = Injekt.get(),
+    private val sourcePreferences: SourcePreferences = Injekt.get(),
 ) : StateScreenModel<SourcesScreenModel.State>(State()) {
 
     private val _events = Channel<Event>(Int.MAX_VALUE)
@@ -78,6 +80,40 @@ class SourcesScreenModel(
                         )
                     }
                     .toImmutableList(),
+                snapshotSourceIds = sources.filter { hasSnapshot(it.id) }.map { it.id }.toSet(),
+            )
+        }
+    }
+
+    private fun hasSnapshot(sourceId: Long): Boolean =
+        sourcePreferences.browseSnapshot(sourceId).get().isNotEmpty()
+
+    /** Yakuyomi：重新計算「哪些來源有快照」（從各來源 browse 頁存了快照後回到此頁時刷新）。 */
+    fun refreshSnapshots() {
+        mutableState.update { state ->
+            val ids = state.items
+                .filterIsInstance<SourceUiModel.Item>()
+                .map { it.source.id }
+                .filter { hasSnapshot(it) }
+                .toSet()
+            state.copy(snapshotSourceIds = ids)
+        }
+    }
+
+    fun showSnapshotClearDialog(source: Source) {
+        mutableState.update { it.copy(snapshotClearTarget = source) }
+    }
+
+    fun dismissSnapshotClearDialog() {
+        mutableState.update { it.copy(snapshotClearTarget = null) }
+    }
+
+    fun clearSnapshot(source: Source) {
+        sourcePreferences.browseSnapshot(source.id).set("")
+        mutableState.update {
+            it.copy(
+                snapshotSourceIds = it.snapshotSourceIds - source.id,
+                snapshotClearTarget = null,
             )
         }
     }
@@ -109,6 +145,10 @@ class SourcesScreenModel(
         val dialog: Dialog? = null,
         val isLoading: Boolean = true,
         val items: ImmutableList<SourceUiModel> = persistentListOf(),
+        // Yakuyomi：有快照的來源 id 集合（決定來源列是否顯示「快照」按鈕）。
+        val snapshotSourceIds: Set<Long> = emptySet(),
+        // Yakuyomi：長按快照按鈕後待確認清除的來源。
+        val snapshotClearTarget: Source? = null,
     ) {
         val isEmpty = items.isEmpty()
     }

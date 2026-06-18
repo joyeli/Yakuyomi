@@ -56,6 +56,9 @@ class LibraryPreferences(
 
     val autoUpdateMetadata: Preference<Boolean> = preferenceStore.getBoolean("auto_update_metadata", false)
 
+    // Yakuyomi：開啟漫畫詳情頁時自動向來源刷新章節清單（預設關＝mihon 原行為，只首次/空清單才抓）。
+    val autoRefreshMangaOnOpen: Preference<Boolean> = preferenceStore.getBoolean("auto_refresh_manga_on_open", false)
+
     val showContinueReadingButton: Preference<Boolean> = preferenceStore.getBoolean(
         "display_continue_reading_button",
         false,

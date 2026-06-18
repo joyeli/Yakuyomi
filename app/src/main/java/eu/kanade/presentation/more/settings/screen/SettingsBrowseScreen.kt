@@ -14,6 +14,7 @@ import eu.kanade.presentation.more.settings.Preference
 import eu.kanade.presentation.more.settings.screen.browse.ExtensionReposScreen
 import eu.kanade.tachiyomi.util.system.AuthenticatorUtil.authenticate
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.persistentMapOf
 import mihon.domain.extensionrepo.interactor.GetExtensionRepoCount
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.i18n.MR
@@ -45,6 +46,18 @@ object SettingsBrowseScreen : SearchableSettings {
                     Preference.PreferenceItem.SwitchPreference(
                         preference = sourcePreferences.hideInLibraryItems,
                         title = stringResource(MR.strings.pref_hide_in_library_items),
+                    ),
+                    Preference.PreferenceItem.ListPreference(
+                        preference = sourcePreferences.browseLoadInterval,
+                        entries = persistentMapOf(
+                            0 to stringResource(MR.strings.off),
+                            1 to "1 s",
+                            2 to "2 s",
+                            3 to "3 s",
+                            5 to "5 s",
+                        ),
+                        title = stringResource(MR.strings.pref_browse_load_interval),
+                        subtitle = stringResource(MR.strings.pref_browse_load_interval_summary),
                     ),
                     Preference.PreferenceItem.TextPreference(
                         title = stringResource(MR.strings.label_extension_repos),

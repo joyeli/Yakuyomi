@@ -8,6 +8,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.dp
 import androidx.paging.Pager
 import androidx.paging.PagingConfig
+import androidx.paging.PagingData
 import androidx.paging.cachedIn
 import androidx.paging.filter
 import androidx.paging.map
@@ -25,20 +26,32 @@ import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.util.removeCovers
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.toImmutableList
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import tachiyomi.core.common.preference.CheckboxState
+import tachiyomi.core.common.preference.TriState
 import tachiyomi.core.common.preference.mapAsCheckboxState
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.domain.category.interactor.GetCategories
 import tachiyomi.domain.category.interactor.SetMangaCategories
 import tachiyomi.domain.category.model.Category
+import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
 import tachiyomi.domain.chapter.interactor.SetMangaDefaultChapterFlags
 import tachiyomi.domain.library.service.LibraryPreferences
 import tachiyomi.domain.manga.interactor.GetDuplicateLibraryManga
@@ -66,6 +79,7 @@ class BrowseSourceScreenModel(
     private val setMangaCategories: SetMangaCategories = Injekt.get(),
     private val setMangaDefaultChapterFlags: SetMangaDefaultChapterFlags = Injekt.get(),
     private val getManga: GetManga = Injekt.get(),
+    private val getChaptersByMangaId: GetChaptersByMangaId = Injekt.get(),
     private val updateManga: UpdateManga = Injekt.get(),
     private val addTracks: AddTracks = Injekt.get(),
     private val getIncognitoState: GetIncognitoState = Injekt.get(),
@@ -103,22 +117,108 @@ class BrowseSourceScreenModel(
      * Flow of Pager flow tied to [State.listing]
      */
     private val hideInLibraryItems = sourcePreferences.hideInLibraryItems.get()
+
+    // Yakuyomi：探索全域篩選（收藏/開卷三態，跨所有來源、與 source 自帶 extension filter 獨立）。
+    val browseFilterFavorite = sourcePreferences.browseFilterFavorite
+    val browseFilterRead = sourcePreferences.browseFilterRead
+
+    // Yakuyomi：探索「錨點」（每 source 一本，值＝mangaUrl）。標「上次處理到這」，瀏覽清單以旗標徽章標出。
+    val browseAnchor = sourcePreferences.browseAnchor(sourceId)
+
+    // 錨點是否已在「已載入」範圍出現（在過濾前的串流偵測 → 篩選把它濾掉也算數）。自動載入到錨點用此停止。
+    private val _anchorReached = MutableStateFlow(false)
+    val anchorReached: StateFlow<Boolean> = _anchorReached.asStateFlow()
+
     val mangaPagerFlowFlow = state.map { it.listing }
         .distinctUntilChanged()
         .map { listing ->
-            Pager(PagingConfig(pageSize = 25)) {
-                getRemoteManga(sourceId, listing.query ?: "", listing.filters)
-            }.flow.map { pagingData ->
-                pagingData.map { manga ->
-                    getManga.subscribe(manga.url, manga.source)
-                        .map { it ?: manga }
-                        .stateIn(ioCoroutineScope)
+            _anchorReached.value = false // 換 listing → 重置錨點偵測
+            val cached = if (listing is Listing.Snapshot) {
+                // 快照：離線從 DB 讀存好的 urls 做成靜態 PagingData，零連線（避開 listing 分頁 request＝ban 大頭）。
+                flow { emit(PagingData.from(buildSnapshotItems())) }
+                    .cachedIn(ioCoroutineScope)
+            } else {
+                // Pager 只跟著 listing（熱門/最新/搜尋）建立並 cachedIn → 只有切換 listing 才重抓來源。
+                Pager(PagingConfig(pageSize = 25)) {
+                    getRemoteManga(sourceId, listing.query ?: "", listing.filters)
+                }.flow.map { pagingData ->
+                    pagingData.map { manga ->
+                        // 過濾前偵測錨點：來源回傳到這本（不管之後顯不顯示）→ 標記已抵達錨點。
+                        if (browseAnchor.get().let { it.isNotEmpty() && it == manga.url }) {
+                            _anchorReached.value = true
+                        }
+                        getManga.subscribe(manga.url, manga.source)
+                            .map { it ?: manga }
+                            .stateIn(ioCoroutineScope)
+                    }
                 }
-                    .filter { !hideInLibraryItems || !it.value.favorite }
+                    .cachedIn(ioCoroutineScope)
             }
-                .cachedIn(ioCoroutineScope)
+            // 全域篩選套在 cachedIn 之後 → 改篩選只對「已載入的清單」就地重新過濾，不重抓來源、不回第 1 頁。
+            combine(
+                cached,
+                browseFilterFavorite.changes(),
+                browseFilterRead.changes(),
+                ::Triple,
+            ).map { (pagingData, favFilter, readFilter) ->
+                pagingData.filter { stateFlow ->
+                    val m = stateFlow.value
+                    if (hideInLibraryItems && m.favorite) return@filter false
+                    // 收藏（三態）
+                    if (favFilter == TriState.ENABLED_IS && !m.favorite) return@filter false
+                    if (favFilter == TriState.ENABLED_NOT && m.favorite) return@filter false
+                    // 開卷＝該本任一章已讀（只在篩選啟用時查 DB）。讀過 ≠ 收藏，獨立維度。
+                    if (readFilter != TriState.DISABLED) {
+                        val started = m.id > 0L && getChaptersByMangaId.await(m.id).any { it.read }
+                        if (readFilter == TriState.ENABLED_IS && !started) return@filter false
+                        if (readFilter == TriState.ENABLED_NOT && started) return@filter false
+                    }
+                    true
+                }
+            }
         }
         .stateIn(ioCoroutineScope, SharingStarted.Lazily, emptyFlow())
+
+    /** 全域篩選三態循環（忽略→只顯示→只不顯示→忽略），對齊書庫的 toggleFilter。 */
+    fun toggleGlobalFavoriteFilter() = browseFilterFavorite.set(browseFilterFavorite.get().next())
+    fun toggleGlobalReadFilter() = browseFilterRead.set(browseFilterRead.get().next())
+
+    /** 設此 source 的錨點為這本（取代舊的）。 */
+    fun setAnchor(manga: Manga) = browseAnchor.set(manga.url)
+
+    /** 清除此 source 的錨點。 */
+    fun clearAnchor() = browseAnchor.set("")
+
+    /** 切換：已是錨點→清除，否則設為錨點。 */
+    fun toggleAnchor(manga: Manga) {
+        if (browseAnchor.get() == manga.url) clearAnchor() else setAnchor(manga)
+    }
+
+    // ── 快照（離線清單，每 source 一份）──────────────────────────
+    val browseSnapshot = sourcePreferences.browseSnapshot(sourceId)
+    private val snapshotJson = Json { ignoreUnknownKeys = true }
+
+    fun readSnapshot(): BrowseSnapshot? = browseSnapshot.get()
+        .takeIf { it.isNotEmpty() }
+        ?.let { runCatching { snapshotJson.decodeFromString<BrowseSnapshot>(it) }.getOrNull() }
+
+    fun hasSnapshot(): Boolean = browseSnapshot.get().isNotEmpty()
+
+    /** 把目前已載入清單的 urls 存成快照（覆蓋同 source 舊的）。 */
+    fun saveSnapshot(urls: List<String>) {
+        browseSnapshot.set(snapshotJson.encodeToString(BrowseSnapshot(System.currentTimeMillis(), urls)))
+    }
+
+    fun clearSnapshot() = browseSnapshot.set("")
+
+    /** 從快照 urls 讀 DB（跳過已被「清除資料庫」清掉的），做成可顯示清單。 */
+    private suspend fun buildSnapshotItems(): List<StateFlow<Manga>> {
+        val snap = readSnapshot() ?: return emptyList()
+        return snap.urls.mapNotNull { url ->
+            val current = getManga.subscribe(url, sourceId).first() ?: return@mapNotNull null
+            getManga.subscribe(url, sourceId).map { it ?: current }.stateIn(ioCoroutineScope)
+        }
+    }
 
     fun getColumnsPreference(orientation: Int): GridCells {
         val isLandscape = orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -317,16 +417,23 @@ class BrowseSourceScreenModel(
     sealed class Listing(open val query: String?, open val filters: FilterList) {
         data object Popular : Listing(query = GetRemoteManga.QUERY_POPULAR, filters = FilterList())
         data object Latest : Listing(query = GetRemoteManga.QUERY_LATEST, filters = FilterList())
+
+        // Yakuyomi：離線快照清單（不連線，從 DB 讀存好的 urls）。帶 sentinel query 以便從來源列表直接導航進來。
+        data object Snapshot : Listing(query = SNAPSHOT_QUERY, filters = FilterList())
         data class Search(
             override val query: String?,
             override val filters: FilterList,
         ) : Listing(query = query, filters = filters)
 
         companion object {
+            // Yakuyomi：快照清單的 sentinel query（不會與真實搜尋字串相撞）。
+            const val SNAPSHOT_QUERY = "__yakuyomi_snapshot__"
+
             fun valueOf(query: String?): Listing {
                 return when (query) {
                     GetRemoteManga.QUERY_POPULAR -> Popular
                     GetRemoteManga.QUERY_LATEST -> Latest
+                    SNAPSHOT_QUERY -> Snapshot
                     else -> Search(query = query, filters = FilterList()) // filters are filled in later
                 }
             }
@@ -335,6 +442,9 @@ class BrowseSourceScreenModel(
 
     sealed interface Dialog {
         data object Filter : Dialog
+
+        // Yakuyomi：長按漫畫 → 動作選單（加入/移除書庫 + 設/清錨點）。
+        data class MangaActions(val manga: Manga) : Dialog
         data class RemoveManga(val manga: Manga) : Dialog
         data class AddDuplicateManga(val manga: Manga, val duplicates: List<MangaWithChapterCount>) : Dialog
         data class ChangeMangaCategory(
@@ -354,3 +464,7 @@ class BrowseSourceScreenModel(
         val isUserQuery get() = listing is Listing.Search && !listing.query.isNullOrEmpty()
     }
 }
+
+/** Yakuyomi：探索快照（離線清單）序列化模型。每 source 一份，存進 SourcePreferences.browseSnapshot。 */
+@Serializable
+data class BrowseSnapshot(val timestamp: Long, val urls: List<String>)

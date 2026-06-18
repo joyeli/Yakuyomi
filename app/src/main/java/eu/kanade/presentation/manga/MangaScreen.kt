@@ -118,6 +118,7 @@ fun MangaScreen(
     onDownloadActionClicked: ((DownloadAction) -> Unit)?,
     onEditCategoryClicked: (() -> Unit)?,
     onEditFetchIntervalClicked: (() -> Unit)?,
+    onSetAnchorClicked: (() -> Unit)?,
     onMigrateClicked: (() -> Unit)?,
     onReRenderAllClicked: (() -> Unit)?,
     onEditNotesClicked: () -> Unit,
@@ -170,6 +171,7 @@ fun MangaScreen(
             onDownloadActionClicked = onDownloadActionClicked,
             onEditCategoryClicked = onEditCategoryClicked,
             onEditIntervalClicked = onEditFetchIntervalClicked,
+            onSetAnchorClicked = onSetAnchorClicked,
             onMigrateClicked = onMigrateClicked,
             onReRenderAllClicked = onReRenderAllClicked,
             onEditNotesClicked = onEditNotesClicked,
@@ -209,6 +211,7 @@ fun MangaScreen(
             onDownloadActionClicked = onDownloadActionClicked,
             onEditCategoryClicked = onEditCategoryClicked,
             onEditIntervalClicked = onEditFetchIntervalClicked,
+            onSetAnchorClicked = onSetAnchorClicked,
             onMigrateClicked = onMigrateClicked,
             onReRenderAllClicked = onReRenderAllClicked,
             onEditNotesClicked = onEditNotesClicked,
@@ -258,6 +261,7 @@ private fun MangaScreenSmallImpl(
     onDownloadActionClicked: ((DownloadAction) -> Unit)?,
     onEditCategoryClicked: (() -> Unit)?,
     onEditIntervalClicked: (() -> Unit)?,
+    onSetAnchorClicked: (() -> Unit)?,
     onMigrateClicked: (() -> Unit)?,
     onReRenderAllClicked: (() -> Unit)?,
     onEditNotesClicked: () -> Unit,
@@ -421,6 +425,7 @@ private fun MangaScreenSmallImpl(
                             onWebViewLongClicked = onWebViewLongClicked,
                             onTrackingClicked = onTrackingClicked,
                             onEditIntervalClicked = onEditIntervalClicked,
+                            onSetAnchorClicked = onSetAnchorClicked,
                             onEditCategory = onEditCategoryClicked,
                         )
                     }
@@ -507,6 +512,7 @@ fun MangaScreenLargeImpl(
     onDownloadActionClicked: ((DownloadAction) -> Unit)?,
     onEditCategoryClicked: (() -> Unit)?,
     onEditIntervalClicked: (() -> Unit)?,
+    onSetAnchorClicked: (() -> Unit)?,
     onMigrateClicked: (() -> Unit)?,
     onReRenderAllClicked: (() -> Unit)?,
     onEditNotesClicked: () -> Unit,
@@ -658,6 +664,7 @@ fun MangaScreenLargeImpl(
                             onWebViewLongClicked = onWebViewLongClicked,
                             onTrackingClicked = onTrackingClicked,
                             onEditIntervalClicked = onEditIntervalClicked,
+                            onSetAnchorClicked = onSetAnchorClicked,
                             onEditCategory = onEditCategoryClicked,
                         )
                         ExpandableMangaDescription(

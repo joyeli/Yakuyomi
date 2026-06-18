@@ -1,6 +1,8 @@
 package eu.kanade.presentation.browse
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,6 +20,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import eu.kanade.presentation.browse.components.BaseSourceItem
@@ -45,6 +48,10 @@ fun SourcesScreen(
     onClickItem: (Source, Listing) -> Unit,
     onClickPin: (Source) -> Unit,
     onLongClickItem: (Source) -> Unit,
+    // Yakuyomi：有快照的來源 + 快照按鈕的點/長按。
+    snapshotSourceIds: Set<Long> = emptySet(),
+    onClickSnapshot: (Source) -> Unit = {},
+    onLongClickSnapshot: (Source) -> Unit = {},
 ) {
     when {
         state.isLoading -> LoadingScreen(Modifier.padding(contentPadding))
@@ -84,6 +91,9 @@ fun SourcesScreen(
                             onClickItem = onClickItem,
                             onLongClickItem = onLongClickItem,
                             onClickPin = onClickPin,
+                            hasSnapshot = model.source.id in snapshotSourceIds,
+                            onClickSnapshot = onClickSnapshot,
+                            onLongClickSnapshot = onLongClickSnapshot,
                         )
                     }
                 }
@@ -106,6 +116,7 @@ private fun SourceHeader(
     )
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SourceItem(
     source: Source,
@@ -113,6 +124,9 @@ private fun SourceItem(
     onLongClickItem: (Source) -> Unit,
     onClickPin: (Source) -> Unit,
     modifier: Modifier = Modifier,
+    hasSnapshot: Boolean = false,
+    onClickSnapshot: (Source) -> Unit = {},
+    onLongClickSnapshot: (Source) -> Unit = {},
 ) {
     BaseSourceItem(
         modifier = modifier,
@@ -120,6 +134,23 @@ private fun SourceItem(
         onClickItem = { onClickItem(source, Listing.Popular) },
         onLongClickItem = { onLongClickItem(source) },
         action = {
+            // Yakuyomi：快照按鈕（有快照才顯示，在「最新」左側）。點＝開快照清單、長按＝確認清除。
+            if (hasSnapshot) {
+                Text(
+                    text = stringResource(MR.strings.listing_snapshot),
+                    // 與「最新」TextButton 一致：labelLarge + primary 色。
+                    style = MaterialTheme.typography.labelLarge.copy(
+                        color = MaterialTheme.colorScheme.primary,
+                    ),
+                    modifier = Modifier
+                        .clip(MaterialTheme.shapes.small)
+                        .combinedClickable(
+                            onClick = { onClickSnapshot(source) },
+                            onLongClick = { onLongClickSnapshot(source) },
+                        )
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                )
+            }
             if (source.supportsLatest) {
                 TextButton(onClick = { onClickItem(source, Listing.Latest) }) {
                     Text(
