@@ -11,3 +11,14 @@ timestamp,repo,tag,asset,download_count
 "2026-06-15T04:32Z","joyeli/yakuyomi-engine","models-v1","comictextdetector.pt.onnx",11
 "2026-06-15T04:32Z","joyeli/yakuyomi-engine","models-v1","lama-manga.onnx",8
 "2026-06-15T04:32Z","joyeli/yakuyomi-engine","models-v1","ocr_48px_ctc.onnx",8
+"2026-06-22T04:32Z","joyeli/Yakuyomi","v0.3.0","app-arm64-v8a-release.apk",5
+"2026-06-22T04:32Z","joyeli/Yakuyomi","v0.3.0","app-universal-release.apk",0
+"2026-06-22T04:32Z","joyeli/Yakuyomi","v0.2.1","app-arm64-v8a-release.apk",6
+"2026-06-22T04:32Z","joyeli/Yakuyomi","v0.2.1","app-universal-release.apk",2
+"2026-06-22T04:32Z","joyeli/Yakuyomi","v0.2.0","app-arm64-v8a-release.apk",1
+"2026-06-22T04:32Z","joyeli/Yakuyomi","v0.2.0","app-universal-release.apk",1
+"2026-06-22T04:32Z","joyeli/Yakuyomi","v0.1.0","yakuyomi-v0.1.0-arm64-v8a.apk",11
+"2026-06-22T04:32Z","joyeli/Yakuyomi","v0.1.0","yakuyomi-v0.1.0-universal.apk",3
+"2026-06-22T04:32Z","joyeli/yakuyomi-engine","models-v1","comictextdetector.pt.onnx",13
+"2026-06-22T04:32Z","joyeli/yakuyomi-engine","models-v1","lama-manga.onnx",9
+"2026-06-22T04:32Z","joyeli/yakuyomi-engine","models-v1","ocr_48px_ctc.onnx",10
