@@ -40,6 +40,11 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 - **Page-load throttle** — a configurable minimum interval between page loads to keep sources from rate-limiting you.
 - **Auto-refresh on open** — optionally refresh a manga's chapters every time you open it.
 
+**Large screens & foldables** *(new in 0.4.0)*
+- **Adaptive grid cover size** — library and browse columns auto-fit the actual screen width (phone, tablet, folded/unfolded foldable, split-screen). Pick a size by how many fit per row and it scales to every width.
+- **Tablet reading mode** — a separate reading mode for when you're on a large screen / unfolded (e.g. continuous-vertical on the phone, right-to-left paged on the tablet), following the system Tablet UI setting.
+- **Collapsible description** — choose whether a manga's description opens expanded or collapsed.
+
 Everything else is mihon — library, sources/extensions, downloads, trackers, backups, the reader.
 
 ## Download

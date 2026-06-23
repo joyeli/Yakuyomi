@@ -944,10 +944,38 @@ class ReaderViewModel @JvmOverloads constructor(
     }
 
     /**
+     * Yakuyomi：裝置當下是否為平板 UI（外觀→平板介面 設定解析後的狀態）。由 ReaderActivity 設定/更新。
+     * 影響「未指定 per-manga 模式」時的預設閱讀模式（手機 vs 平板）。
+     */
+    var isTabletUi: Boolean = false
+        private set
+
+    /**
+     * Yakuyomi：更新平板 UI 狀態（折/展時呼叫）。回傳是否需要重建 viewer（＝有效閱讀模式因此改變）。
+     * 若需重建，會先把當前頁存成 requestedPage，讓重建後的 viewer 停在原頁（對齊 setMangaReadingMode）。
+     */
+    fun setTabletUiState(value: Boolean): Boolean {
+        if (isTabletUi == value) return false
+        val before = getMangaReadingMode()
+        isTabletUi = value
+        val after = getMangaReadingMode()
+        if (before == after) return false
+        val currChapters = state.value.viewerChapters ?: return false
+        currChapters.currChapter.requestedPage = currChapters.currChapter.chapter.last_page_read
+        return true
+    }
+
+    /**
      * Returns the viewer position used by this manga or the default one.
      */
     fun getMangaReadingMode(resolveDefault: Boolean = true): Int {
-        val default = readerPreferences.defaultReadingMode.get()
+        val default = run {
+            val phone = readerPreferences.defaultReadingMode.get()
+            if (!isTabletUi) return@run phone
+            // Yakuyomi：平板/展開態 → 若有設專屬模式（非 DEFAULT）就用它，否則跟隨手機。
+            val tablet = readerPreferences.tabletReadingMode.get()
+            if (tablet == ReadingMode.DEFAULT.flagValue) phone else tablet
+        }
         val readingMode = ReadingMode.fromPreference(manga?.readingMode?.toInt())
         return when {
             resolveDefault && readingMode == ReadingMode.DEFAULT -> default

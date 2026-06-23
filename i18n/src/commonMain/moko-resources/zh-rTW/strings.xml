@@ -167,6 +167,9 @@
     <string name="white_background">白色</string>
     <string name="black_background">黑色</string>
     <string name="pref_viewer_type">預設閱讀模式</string>
+    <string name="pref_tablet_reading_mode">平板閱讀模式</string>
+    <string name="pref_tablet_reading_mode_summary">處於平板介面時使用的閱讀模式（大螢幕、分割畫面 / 視窗化、或展開的折疊機都會觸發）。由「外觀 &gt; 平板介面」控制何時算平板。</string>
+    <string name="tablet_reading_mode_follow_phone">跟隨手機</string>
     <string name="left_to_right_viewer">單頁(左至右)</string>
     <string name="right_to_left_viewer">單頁(右至左)</string>
     <string name="vertical_viewer">單頁(上至下)</string>
@@ -895,6 +898,8 @@
     <string name="migrationListScreen.migrateDialog.migrateLabel">遷移</string>
     <string name="migrationListScreen.matchWithoutChapterToast">找不到章節，此項目無法用於遷移</string>
     <string name="pref_display_images_description">在漫畫描述中顯示圖片</string>
+    <string name="pref_expand_manga_summary">預設展開簡介</string>
+    <string name="pref_expand_manga_summary_summary">開啟書本時直接展開完整簡介，而非摺疊。</string>
     <string name="pref_disallow_non_ascii_filenames">禁止使用非 ASCII 檔名</string>
     <string name="pref_disallow_non_ascii_filenames_details">確保與不支援 Unicode 的某些儲存媒體相容，啟用此選項後，你需要手動將來源與漫畫資料夾中的非 ASCII 字元改成對應的小寫 UTF-8 十六進位表示方式，章節檔案則不需要重新命名。</string>
     <string name="pref_download_concurrent_sources">同時下載的來源數目</string>

@@ -41,6 +41,13 @@ class ReaderPreferences(
         ReadingMode.RIGHT_TO_LEFT.flagValue,
     )
 
+    // Yakuyomi：平板/展開態的閱讀模式。預設 DEFAULT＝跟隨手機（defaultReadingMode）；非 DEFAULT 時，
+    // 裝置處於平板 UI（外觀→平板介面 自動/一律/橫向）且該本未明確指定模式時改用此模式。
+    val tabletReadingMode: Preference<Int> = preferenceStore.getInt(
+        "pref_tablet_reading_mode_key",
+        ReadingMode.DEFAULT.flagValue,
+    )
+
     val defaultOrientationType: Preference<Int> = preferenceStore.getInt(
         "pref_default_orientation_type_key",
         ReaderOrientation.FREE.flagValue,

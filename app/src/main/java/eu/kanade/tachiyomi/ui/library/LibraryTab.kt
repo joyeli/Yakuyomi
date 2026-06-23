@@ -91,6 +91,9 @@ data object LibraryTab : Tab {
         val settingsScreenModel = rememberScreenModel { LibrarySettingsScreenModel() }
         val state by screenModel.state.collectAsState()
 
+        // Yakuyomi：網格封面最小寬度（dp），欄數依此自適應。
+        val coverMinWidth by screenModel.getCoverMinWidth()
+
         val snackbarHostState = remember { SnackbarHostState() }
 
         val onClickRefresh: (Category?) -> Boolean = { category ->
@@ -212,7 +215,7 @@ data object LibraryTab : Tab {
                         },
                         getItemCountForCategory = { state.getItemCountForCategory(it) },
                         getDisplayMode = { screenModel.getDisplayMode() },
-                        getColumnsForOrientation = { screenModel.getColumnsForOrientation(it) },
+                        coverMinWidth = coverMinWidth,
                         getItemsForCategory = { state.getItemsForCategory(it) },
                     )
                 }

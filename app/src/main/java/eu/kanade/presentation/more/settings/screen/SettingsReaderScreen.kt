@@ -39,6 +39,20 @@ object SettingsReaderScreen : SearchableSettings {
                     .toImmutableMap(),
                 title = stringResource(MR.strings.pref_viewer_type),
             ),
+            // Yakuyomi：平板/展開態的閱讀模式（跟隨手機 = 不分姿態）。觸發條件＝外觀→平板介面。
+            Preference.PreferenceItem.ListPreference(
+                preference = readerPref.tabletReadingMode,
+                entries = buildMap {
+                    put(
+                        ReadingMode.DEFAULT.flagValue,
+                        stringResource(MR.strings.tablet_reading_mode_follow_phone),
+                    )
+                    ReadingMode.entries.drop(1).forEach { put(it.flagValue, stringResource(it.stringRes)) }
+                }.toImmutableMap(),
+                title = stringResource(MR.strings.pref_tablet_reading_mode),
+                // 外面的列顯示當下值（沿用 ListPreference 預設 "%s"）；說明放進選擇對話框內。
+                description = stringResource(MR.strings.pref_tablet_reading_mode_summary),
+            ),
             Preference.PreferenceItem.ListPreference(
                 preference = readerPref.doubleTapAnimSpeed,
                 entries = persistentMapOf(

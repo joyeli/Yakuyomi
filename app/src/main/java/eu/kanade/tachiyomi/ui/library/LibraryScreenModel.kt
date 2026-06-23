@@ -611,9 +611,9 @@ class LibraryScreenModel(
         return libraryPreferences.displayMode.asState(screenModelScope)
     }
 
-    fun getColumnsForOrientation(isLandscape: Boolean): PreferenceMutableState<Int> {
-        return (if (isLandscape) libraryPreferences.landscapeColumns else libraryPreferences.portraitColumns)
-            .asState(screenModelScope)
+    // Yakuyomi：網格封面最小寬度（dp），欄數依此自適應螢幕寬度。
+    fun getCoverMinWidth(): PreferenceMutableState<Int> {
+        return libraryPreferences.gridCoverMinWidth.asState(screenModelScope)
     }
 
     fun getRandomLibraryItemForCurrentCategory(): LibraryItem? {

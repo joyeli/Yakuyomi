@@ -28,9 +28,9 @@ class LibraryPreferences(
 
     val randomSortSeed: Preference<Int> = preferenceStore.getInt("library_random_sort_seed", 0)
 
-    val portraitColumns: Preference<Int> = preferenceStore.getInt("pref_library_columns_portrait_key", 0)
-
-    val landscapeColumns: Preference<Int> = preferenceStore.getInt("pref_library_columns_landscape_key", 0)
+    // Yakuyomi：網格封面最小寬度（dp）。欄數＝GridCells.Adaptive(此值) 依實際螢幕寬度自動算，
+    // 折疊機折/展、手機/平板全自動對應；調此值＝同時改封面大小與每行數量。取代舊的直/橫固定欄數。
+    val gridCoverMinWidth: Preference<Int> = preferenceStore.getInt("pref_grid_cover_min_width_dp", 128)
 
     val lastUpdatedTimestamp: Preference<Long> = preferenceStore.getLong(
         Preference.appStateKey("library_update_last_timestamp"),

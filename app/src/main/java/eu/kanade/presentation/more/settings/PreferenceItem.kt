@@ -107,6 +107,7 @@ internal fun PreferenceItem(
                     value = value,
                     title = item.title,
                     subtitle = item.internalSubtitleProvider(value, item.entries),
+                    description = item.description,
                     icon = item.icon,
                     entries = item.entries,
                     onValueChange = { newValue ->

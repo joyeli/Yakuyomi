@@ -43,7 +43,7 @@ fun LibraryContent(
     onGlobalSearchClicked: () -> Unit,
     getItemCountForCategory: (Category) -> Int?,
     getDisplayMode: (Int) -> PreferenceMutableState<LibraryDisplayMode>,
-    getColumnsForOrientation: (Boolean) -> PreferenceMutableState<Int>,
+    coverMinWidth: Int,
     getItemsForCategory: (Category) -> List<LibraryItem>,
 ) {
     Column(
@@ -99,7 +99,7 @@ fun LibraryContent(
                 onGlobalSearchClicked = onGlobalSearchClicked,
                 getCategoryForPage = { page -> categories[page] },
                 getDisplayMode = getDisplayMode,
-                getColumnsForOrientation = getColumnsForOrientation,
+                coverMinWidth = coverMinWidth,
                 getItemsForCategory = getItemsForCategory,
                 onClickManga = { category, manga ->
                     if (selection.isNotEmpty()) {

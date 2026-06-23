@@ -22,19 +22,25 @@ fun Configuration.isTabletUi(): Boolean {
     return smallestScreenWidthDp >= TABLET_UI_REQUIRED_SCREEN_WIDTH_DP
 }
 
-// TODO: move the logic to `isTabletUi()` when main activity is rewritten in Compose
-fun Context.prepareTabletUiContext(): Context {
-    val configuration = resources.configuration
-    val expected = when (Injekt.get<UiPreferences>().tabletUiMode.get()) {
+// Yakuyomi：依「外觀→平板介面」設定（自動/一律/橫向/永不）解析此 configuration 當下是否該用平板 UI。
+// 直接從傳入的 configuration 算，不靠 createConfigurationContext 覆寫 → 折疊機折/展時用新 config 重算正確。
+fun Configuration.isTabletUiMode(): Boolean {
+    return when (Injekt.get<UiPreferences>().tabletUiMode.get()) {
         TabletUiMode.AUTOMATIC ->
-            configuration.smallestScreenWidthDp >= when (configuration.orientation) {
+            smallestScreenWidthDp >= when (orientation) {
                 Configuration.ORIENTATION_PORTRAIT -> TABLET_UI_MIN_SCREEN_WIDTH_PORTRAIT_DP
                 else -> TABLET_UI_MIN_SCREEN_WIDTH_LANDSCAPE_DP
             }
         TabletUiMode.ALWAYS -> true
-        TabletUiMode.LANDSCAPE -> configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        TabletUiMode.LANDSCAPE -> orientation == Configuration.ORIENTATION_LANDSCAPE
         TabletUiMode.NEVER -> false
     }
+}
+
+// TODO: move the logic to `isTabletUi()` when main activity is rewritten in Compose
+fun Context.prepareTabletUiContext(): Context {
+    val configuration = resources.configuration
+    val expected = configuration.isTabletUiMode()
     if (configuration.isTabletUi() != expected) {
         val overrideConf = Configuration()
         overrideConf.setTo(configuration)

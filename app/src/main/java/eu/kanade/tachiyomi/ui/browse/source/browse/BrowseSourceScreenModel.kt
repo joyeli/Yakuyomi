@@ -1,6 +1,5 @@
 package eu.kanade.tachiyomi.ui.browse.source.browse
 
-import android.content.res.Configuration
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
@@ -220,14 +219,9 @@ class BrowseSourceScreenModel(
         }
     }
 
-    fun getColumnsPreference(orientation: Int): GridCells {
-        val isLandscape = orientation == Configuration.ORIENTATION_LANDSCAPE
-        val columns = if (isLandscape) {
-            libraryPreferences.landscapeColumns
-        } else {
-            libraryPreferences.portraitColumns
-        }.get()
-        return if (columns == 0) GridCells.Adaptive(128.dp) else GridCells.Fixed(columns)
+    // Yakuyomi：欄數依封面最小寬度自適應（跨手機/平板/折疊機自動），與書庫共用同一個設定。
+    fun getColumnsPreference(): GridCells {
+        return GridCells.Adaptive(libraryPreferences.gridCoverMinWidth.get().dp)
     }
 
     fun resetFilters() {

@@ -37,6 +37,9 @@ class UiPreferences(
 
     val imagesInDescription: Preference<Boolean> = preferenceStore.getBoolean("pref_render_images_description", true)
 
+    // Yakuyomi：漫畫詳情頁的簡介區塊預設是否展開（預設摺疊）。
+    val expandMangaSummary: Preference<Boolean> = preferenceStore.getBoolean("pref_expand_manga_summary", false)
+
     companion object {
         fun dateFormat(format: String): DateTimeFormatter = when (format) {
             "" -> DateTimeFormatter.ofLocalizedDate(FormatStyle.SHORT)

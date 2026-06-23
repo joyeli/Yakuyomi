@@ -149,6 +149,12 @@ object SettingsAppearanceScreen : SearchableSettings {
                     preference = uiPreferences.imagesInDescription,
                     title = stringResource(MR.strings.pref_display_images_description),
                 ),
+                // Yakuyomi：漫畫詳情頁簡介預設展開/摺疊（預設摺疊）。
+                Preference.PreferenceItem.SwitchPreference(
+                    preference = uiPreferences.expandMangaSummary,
+                    title = stringResource(MR.strings.pref_expand_manga_summary),
+                    subtitle = stringResource(MR.strings.pref_expand_manga_summary_summary),
+                ),
             ),
         )
     }

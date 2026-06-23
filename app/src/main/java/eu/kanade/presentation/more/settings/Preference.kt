@@ -74,6 +74,8 @@ sealed class Preference {
             override val subtitle: String? = "%s",
             val subtitleProvider: @Composable (value: T, entries: ImmutableMap<T, String>) -> String? =
                 { v, e -> subtitle?.format(e[v]) },
+            // Yakuyomi：選擇對話框內顯示的說明文字（非空才顯示）。讓說明進選單、外面的列仍顯示當下值。
+            val description: String? = null,
             override val icon: ImageVector? = null,
             override val enabled: Boolean = true,
             override val onValueChanged: suspend (value: T) -> Boolean = { true },

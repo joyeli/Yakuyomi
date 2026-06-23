@@ -257,7 +257,6 @@ fun MangaActionRow(
 
 @Composable
 fun ExpandableMangaDescription(
-    defaultExpandState: Boolean,
     description: String?,
     tagsProvider: () -> List<String>?,
     notes: String,
@@ -267,6 +266,8 @@ fun ExpandableMangaDescription(
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier) {
+        // Yakuyomi：簡介預設展開/摺疊由設定決定（預設摺疊）。
+        val defaultExpandState = remember { Injekt.get<UiPreferences>().expandMangaSummary.get() }
         val (expanded, onExpanded) = rememberSaveable {
             mutableStateOf(defaultExpandState)
         }

@@ -1,6 +1,7 @@
 package eu.kanade.presentation.more.settings.widget
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -35,6 +36,8 @@ fun <T> ListPreferenceWidget(
     icon: ImageVector?,
     entries: Map<out T, String>,
     onValueChange: (T) -> Unit,
+    // Yakuyomi：選擇對話框內、清單上方顯示的說明（非空才顯示）。
+    description: String? = null,
 ) {
     var isDialogShown by remember { mutableStateOf(false) }
 
@@ -50,25 +53,39 @@ fun <T> ListPreferenceWidget(
             onDismissRequest = { isDialogShown = false },
             title = { Text(text = title) },
             text = {
-                Box {
-                    val state = rememberLazyListState()
-                    ScrollbarLazyColumn(state = state) {
-                        entries.forEach { current ->
-                            val isSelected = value == current.key
-                            item {
-                                DialogRow(
-                                    label = current.value,
-                                    isSelected = isSelected,
-                                    onSelected = {
-                                        onValueChange(current.key!!)
-                                        isDialogShown = false
-                                    },
-                                )
+                Column {
+                    if (!description.isNullOrBlank()) {
+                        Text(
+                            text = description,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(bottom = 12.dp),
+                        )
+                    }
+                    Box {
+                        val state = rememberLazyListState()
+                        ScrollbarLazyColumn(state = state) {
+                            entries.forEach { current ->
+                                val isSelected = value == current.key
+                                item {
+                                    DialogRow(
+                                        label = current.value,
+                                        isSelected = isSelected,
+                                        onSelected = {
+                                            onValueChange(current.key!!)
+                                            isDialogShown = false
+                                        },
+                                    )
+                                }
                             }
                         }
+                        if (state.canScrollBackward) {
+                            HorizontalDivider(modifier = Modifier.align(Alignment.TopCenter))
+                        }
+                        if (state.canScrollForward) {
+                            HorizontalDivider(modifier = Modifier.align(Alignment.BottomCenter))
+                        }
                     }
-                    if (state.canScrollBackward) HorizontalDivider(modifier = Modifier.align(Alignment.TopCenter))
-                    if (state.canScrollForward) HorizontalDivider(modifier = Modifier.align(Alignment.BottomCenter))
                 }
             },
             confirmButton = {

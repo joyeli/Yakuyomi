@@ -84,6 +84,7 @@ import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
 import eu.kanade.tachiyomi.util.system.isNightMode
+import eu.kanade.tachiyomi.util.system.isTabletUiMode
 import eu.kanade.tachiyomi.util.system.openInBrowser
 import eu.kanade.tachiyomi.util.system.toShareIntent
 import eu.kanade.tachiyomi.util.system.toast
@@ -196,6 +197,9 @@ class ReaderActivity : BaseActivity() {
 
         config = ReaderConfig()
         setMenuVisibility(viewModel.state.value.menuVisible)
+
+        // Yakuyomi：初始化平板 UI 狀態（決定未指定 per-manga 模式時的預設閱讀模式），須在建立 viewer 前。
+        viewModel.setTabletUiState(resources.configuration.isTabletUiMode())
 
         // Finish when incognito mode is disabled
         preferences.incognitoMode.changes()

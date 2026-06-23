@@ -311,6 +311,8 @@
     <string name="pref_relative_format_summary">\"%1$s\" instead of \"%2$s\"</string>
     <string name="pref_date_format">Date format</string>
     <string name="pref_display_images_description">Render images in manga descriptions</string>
+    <string name="pref_expand_manga_summary">Expand description by default</string>
+    <string name="pref_expand_manga_summary_summary">Show the full description when opening an entry instead of collapsing it.</string>
 
     <string name="pref_manage_notifications">Manage notifications</string>
     <string name="pref_app_language">App language</string>
@@ -507,6 +509,9 @@
     <string name="black_background">Black</string>
     <string name="automatic_background">Auto</string>
     <string name="pref_viewer_type">Default reading mode</string>
+    <string name="pref_tablet_reading_mode">Tablet reading mode</string>
+    <string name="pref_tablet_reading_mode_summary">Reading mode used while in tablet UI — large screens, split-screen/windowed, or an unfolded foldable. Controlled by Appearance &gt; Tablet UI mode.</string>
+    <string name="tablet_reading_mode_follow_phone">Follow phone</string>
     <string name="l_nav">L shaped</string>
     <string name="kindlish_nav">Kindle-ish</string>
     <string name="edge_nav">Edge</string>

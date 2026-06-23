@@ -435,7 +435,6 @@ private fun MangaScreenSmallImpl(
                         contentType = MangaScreenItem.DESCRIPTION_WITH_TAG,
                     ) {
                         ExpandableMangaDescription(
-                            defaultExpandState = state.isFromSource,
                             description = state.manga.description,
                             tagsProvider = { state.manga.genre },
                             notes = state.manga.notes,
@@ -668,7 +667,6 @@ fun MangaScreenLargeImpl(
                             onEditCategory = onEditCategoryClicked,
                         )
                         ExpandableMangaDescription(
-                            defaultExpandState = true,
                             description = state.manga.description,
                             tagsProvider = { state.manga.genre },
                             notes = state.manga.notes,

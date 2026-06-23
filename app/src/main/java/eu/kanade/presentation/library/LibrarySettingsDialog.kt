@@ -1,14 +1,17 @@
 package eu.kanade.presentation.library
 
-import android.content.res.Configuration
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -19,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import eu.kanade.presentation.components.TabbedDialog
 import eu.kanade.presentation.components.TabbedDialogPaddings
+import eu.kanade.presentation.library.components.LibraryGridSize
 import eu.kanade.tachiyomi.ui.library.LibrarySettingsScreenModel
 import eu.kanade.tachiyomi.util.system.isReleaseBuildType
 import kotlinx.collections.immutable.persistentListOf
@@ -33,7 +37,6 @@ import tachiyomi.presentation.core.components.BaseSortItem
 import tachiyomi.presentation.core.components.CheckboxItem
 import tachiyomi.presentation.core.components.HeadingItem
 import tachiyomi.presentation.core.components.SettingsChipRow
-import tachiyomi.presentation.core.components.SliderItem
 import tachiyomi.presentation.core.components.SortItem
 import tachiyomi.presentation.core.components.TriStateItem
 import tachiyomi.presentation.core.i18n.stringResource
@@ -247,28 +250,59 @@ private fun ColumnScope.DisplayPage(
     }
 
     if (displayMode != LibraryDisplayMode.List) {
-        val configuration = LocalConfiguration.current
-        val columnPreference = remember {
-            if (configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
-                screenModel.libraryPreferences.landscapeColumns
-            } else {
-                screenModel.libraryPreferences.portraitColumns
+        // Yakuyomi：封面大小＝每行數量。級距依「當前螢幕寬度」現算（每個選項都對應一個實際欄數，無死步、
+        // 大螢幕自動多出更多選項）；選後仍存成封面最小寬度 dp，故折/展、換裝置自動適應。標籤＝該選項在
+        // 目前螢幕排成的欄數（所見即所得）。欄數計算對齊 Compose GridCells.Adaptive：floor((W+s)/(minW+s))。
+        val coverWidthPreference = screenModel.libraryPreferences.gridCoverMinWidth
+        val coverWidth by coverWidthPreference.collectAsState()
+        // 用網格量到的「實際可用寬度」（已扣 nav rail/insets/padding）；尚未量到才退回螢幕寬估算。
+        val measuredAvail = LibraryGridSize.availWidthDp
+        val avail = (
+            if (measuredAvail > 0) measuredAvail else LocalConfiguration.current.screenWidthDp - 16
+            ).coerceAtLeast(120)
+        val spacing = 4 // CommonMangaItemDefaults.GridHorizontalSpacer
+        // 目前設定在此螢幕實際排出的欄數（對齊 Adaptive：floor((W+s)/(minW+s))）。
+        val currentCols = ((avail + spacing) / (coverWidth + spacing)).coerceAtLeast(1)
+        // 正常範圍上限＝以最小封面約 90dp 估的合理欄數。
+        val normalMax = (avail + spacing) / (90 + spacing)
+        // 級距一定涵蓋「目前實際欄數」，否則跨姿態（如折疊選的 dp 在展開排成 7 欄）會沒有對應選項。
+        val maxCols = maxOf(normalMax, currentCols).coerceAtMost(15)
+        val minCols = minOf(2, currentCols)
+        SettingsChipRow(MR.strings.pref_library_columns) {
+            (minCols..maxCols).forEach { cols ->
+                // 殘留值：超出此螢幕正常範圍、只因跨姿態（另一姿態選的尺寸）才出現的當前值 → 特別標示。
+                val isResidual = cols < 2 || cols > normalMax
+                FilterChip(
+                    selected = currentCols == cols,
+                    // 取該欄數區間中點的 dp，避免落在邊界誤判成相鄰欄數。
+                    onClick = {
+                        val dp = ((avail + spacing).toFloat() / (cols + 0.5f) - spacing).toInt().coerceAtLeast(60)
+                        coverWidthPreference.set(dp)
+                    },
+                    label = { Text(cols.toString()) },
+                    leadingIcon = if (isResidual) {
+                        {
+                            Icon(
+                                imageVector = Icons.Outlined.Devices,
+                                contentDescription = null,
+                                modifier = Modifier.size(FilterChipDefaults.IconSize),
+                            )
+                        }
+                    } else {
+                        null
+                    },
+                    colors = if (isResidual) {
+                        FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.tertiary,
+                            selectedLabelColor = MaterialTheme.colorScheme.onTertiary,
+                            selectedLeadingIconColor = MaterialTheme.colorScheme.onTertiary,
+                        )
+                    } else {
+                        FilterChipDefaults.filterChipColors()
+                    },
+                )
             }
         }
-
-        val columns by columnPreference.collectAsState()
-        SliderItem(
-            value = columns,
-            valueRange = 0..10,
-            label = stringResource(MR.strings.pref_library_columns),
-            valueString = if (columns > 0) {
-                columns.toString()
-            } else {
-                stringResource(MR.strings.label_auto)
-            },
-            onChange = columnPreference::set,
-            pillColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-        )
     }
 
     HeadingItem(MR.strings.overlay_header)

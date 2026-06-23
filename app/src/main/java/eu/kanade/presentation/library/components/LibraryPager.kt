@@ -1,6 +1,5 @@
 package eu.kanade.presentation.library.components
 
-import android.content.res.Configuration
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -12,11 +11,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import eu.kanade.core.preference.PreferenceMutableState
 import eu.kanade.tachiyomi.ui.library.LibraryItem
@@ -37,7 +33,7 @@ fun LibraryPager(
     onGlobalSearchClicked: () -> Unit,
     getCategoryForPage: (Int) -> Category,
     getDisplayMode: (Int) -> PreferenceMutableState<LibraryDisplayMode>,
-    getColumnsForOrientation: (Boolean) -> PreferenceMutableState<Int>,
+    coverMinWidth: Int,
     getItemsForCategory: (Category) -> List<LibraryItem>,
     onClickManga: (Category, LibraryManga) -> Unit,
     onLongClickManga: (Category, LibraryManga) -> Unit,
@@ -66,14 +62,6 @@ fun LibraryPager(
         }
 
         val displayMode by getDisplayMode(page)
-        val columns by if (displayMode != LibraryDisplayMode.List) {
-            val configuration = LocalConfiguration.current
-            val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-
-            remember(isLandscape) { getColumnsForOrientation(isLandscape) }
-        } else {
-            remember { mutableIntStateOf(0) }
-        }
 
         val onClickManga: (LibraryManga) -> Unit = { onClickManga(category, it) }
         val onLongClickManga: (LibraryManga) -> Unit = { onLongClickManga(category, it) }
@@ -95,7 +83,7 @@ fun LibraryPager(
                 LibraryCompactGrid(
                     items = items,
                     showTitle = displayMode is LibraryDisplayMode.CompactGrid,
-                    columns = columns,
+                    coverMinWidth = coverMinWidth,
                     contentPadding = contentPadding,
                     selection = selection,
                     onClick = onClickManga,
@@ -108,7 +96,7 @@ fun LibraryPager(
             LibraryDisplayMode.ComfortableGrid -> {
                 LibraryComfortableGrid(
                     items = items,
-                    columns = columns,
+                    coverMinWidth = coverMinWidth,
                     contentPadding = contentPadding,
                     selection = selection,
                     onClick = onClickManga,
