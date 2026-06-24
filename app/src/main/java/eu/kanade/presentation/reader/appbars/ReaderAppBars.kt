@@ -64,6 +64,8 @@ fun ReaderAppBars(
     cropEnabled: Boolean,
     onClickCropBorder: () -> Unit,
     onClickSettings: () -> Unit,
+    // Yakuyomi：對開模式才有的「位移」鈕（非空才顯示）。
+    onClickShiftDoublePage: (() -> Unit)? = null,
 ) {
     val isRtl = viewer is R2LPagerViewer
     val backgroundColor = MaterialTheme.colorScheme
@@ -126,6 +128,7 @@ fun ReaderAppBars(
                     cropEnabled = cropEnabled,
                     onClickCropBorder = onClickCropBorder,
                     onClickSettings = onClickSettings,
+                    onClickShiftDoublePage = onClickShiftDoublePage,
                 )
             }
         }

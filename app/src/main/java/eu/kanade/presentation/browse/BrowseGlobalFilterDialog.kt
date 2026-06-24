@@ -4,6 +4,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.FilterAltOff
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -28,6 +29,7 @@ fun BrowseGlobalFilterDialog(
     read: TriState,
     onToggleFavorite: () -> Unit,
     onToggleRead: () -> Unit,
+    onClear: () -> Unit,
     onDismissRequest: () -> Unit,
     hasSourceFilters: Boolean = false,
     onOpenSourceFilters: (() -> Unit)? = null,
@@ -44,6 +46,14 @@ fun BrowseGlobalFilterDialog(
                 state = read,
                 onClick = { onToggleRead() },
             )
+            // Yakuyomi：清除全域篩選（只在有啟用時顯示）。
+            if (favorite != TriState.DISABLED || read != TriState.DISABLED) {
+                ListItem(
+                    modifier = Modifier.clickable(onClick = onClear),
+                    leadingContent = { Icon(Icons.Outlined.FilterAltOff, contentDescription = null) },
+                    headlineContent = { Text(stringResource(MR.strings.action_clear_filters)) },
+                )
+            }
             if (hasSourceFilters && onOpenSourceFilters != null) {
                 HorizontalDivider()
                 ListItem(

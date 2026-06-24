@@ -397,6 +397,7 @@ data class BrowseSourceScreen(
                 read = readFilter,
                 onToggleFavorite = screenModel::toggleGlobalFavoriteFilter,
                 onToggleRead = screenModel::toggleGlobalReadFilter,
+                onClear = screenModel::clearGlobalFilters,
                 onDismissRequest = { showGlobalFilter = false },
                 hasSourceFilters = state.filters.isNotEmpty(),
                 onOpenSourceFilters = {

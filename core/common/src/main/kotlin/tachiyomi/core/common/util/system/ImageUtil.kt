@@ -193,6 +193,29 @@ object ImageUtil {
         return output
     }
 
+    /**
+     * Yakuyomi：把兩張圖水平併成一張 [Bitmap]（對開／double-page 用）。[leftSource] 放左、[rightSource] 放右，
+     * 兩者縮放到同一高度（取兩者較高者）後緊鄰併接。回傳 Bitmap（不重新壓 JPEG）→ 直接餵 SSIV＝無畫質損失、
+     * 整個跨頁共用同一個縮放/平移。
+     */
+    fun mergeHorizontally(leftSource: BufferedSource, rightSource: BufferedSource): Bitmap {
+        val left = BitmapFactory.decodeStream(leftSource.inputStream())
+        val right = BitmapFactory.decodeStream(rightSource.inputStream())
+
+        val height = maxOf(left.height, right.height)
+        val leftWidth = (left.width.toFloat() * height / left.height).toInt()
+        val rightWidth = (right.width.toFloat() * height / right.height).toInt()
+
+        val result = createBitmap(leftWidth + rightWidth, height)
+        result.applyCanvas {
+            drawBitmap(left, null, Rect(0, 0, leftWidth, height), null)
+            drawBitmap(right, null, Rect(leftWidth, 0, leftWidth + rightWidth, height), null)
+        }
+        left.recycle()
+        right.recycle()
+        return result
+    }
+
     enum class Side {
         RIGHT,
         LEFT,

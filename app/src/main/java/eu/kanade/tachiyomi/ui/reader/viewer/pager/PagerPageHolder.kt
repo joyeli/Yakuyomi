@@ -191,6 +191,10 @@ class PagerPageHolder(
     }
 
     private fun process(page: ReaderPage, imageSource: BufferedSource): BufferedSource {
+        // Yakuyomi：對開模式下不分割/不旋轉（兩頁已並排呈現）。
+        if (viewer.isDoublePage) {
+            return imageSource
+        }
         if (viewer.config.dualPageRotateToFit) {
             return rotateDualPage(imageSource)
         }

@@ -182,6 +182,12 @@ class BrowseSourceScreenModel(
     fun toggleGlobalFavoriteFilter() = browseFilterFavorite.set(browseFilterFavorite.get().next())
     fun toggleGlobalReadFilter() = browseFilterRead.set(browseFilterRead.get().next())
 
+    /** 清除全域篩選（收藏/開卷皆設回忽略）。 */
+    fun clearGlobalFilters() {
+        browseFilterFavorite.set(TriState.DISABLED)
+        browseFilterRead.set(TriState.DISABLED)
+    }
+
     /** 設此 source 的錨點為這本（取代舊的）。 */
     fun setAnchor(manga: Manga) = browseAnchor.set(manga.url)
 

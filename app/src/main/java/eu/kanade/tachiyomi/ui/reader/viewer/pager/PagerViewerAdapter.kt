@@ -99,12 +99,15 @@ class PagerViewerAdapter(private val viewer: PagerViewer) : ViewPagerAdapter() {
         // Resets double-page splits, else insert pages get misplaced
         items.filterIsInstance<InsertPage>().also { items.removeAll(it) }
 
-        if (viewer is R2LPagerViewer) {
-            newItems.reverse()
+        // Yakuyomi：對開模式把同章連續頁配對成版面（封面單獨、不跨章）。
+        val assembled = if (viewer.isDoublePage) pairItems(newItems) else newItems
+
+        if (viewer.isRtl) {
+            assembled.reverse()
         }
 
         preprocessed = mutableMapOf()
-        items = newItems
+        items = assembled
         notifyDataSetChanged()
 
         // Will skip insert page otherwise
@@ -125,10 +128,73 @@ class PagerViewerAdapter(private val viewer: PagerViewer) : ViewPagerAdapter() {
      */
     override fun createView(container: ViewGroup, position: Int): View {
         return when (val item = items[position]) {
+            is PagePair -> PagerDoublePageHolder(readerThemedContext, viewer, item)
             is ReaderPage -> PagerPageHolder(readerThemedContext, viewer, item)
             is ChapterTransition -> PagerTransitionHolder(readerThemedContext, viewer, item)
             else -> throw NotImplementedError("Holder for ${item.javaClass} not implemented")
         }
+    }
+
+    /** Yakuyomi：對開「位移（shift）」的章 id 集合——使用者按 shift 鈕，把該章的配對起點位移一頁，對齊跨頁。 */
+    private val shiftedChapters = HashSet<Long>()
+
+    /** 切換某章的對開位移。 */
+    fun toggleShift(chapterId: Long) {
+        if (!shiftedChapters.add(chapterId)) shiftedChapters.remove(chapterId)
+    }
+
+    /**
+     * Yakuyomi：本身是寬圖/跨頁（載入時偵測為 isWideImage）的頁——配對時讓它單獨佔整版、不跟鄰頁併接。
+     * 用穩定鍵 (chapterId, page.index)（對齊 [shiftedChapters]），避免 ReaderPage 物件跨 reload/換章失配。
+     */
+    private val fullPageKeys = HashSet<Pair<Long?, Int>>()
+
+    private fun isFullPage(page: ReaderPage) = (page.chapter.chapter.id to page.index) in fullPageKeys
+
+    /** 標記一頁為寬圖（單獨佔版）。回傳是否為新標記（無新標記＝不需重配，避免無謂重建）。 */
+    fun markFullPage(page: ReaderPage): Boolean = fullPageKeys.add(page.chapter.chapter.id to page.index)
+
+    /**
+     * Yakuyomi：對開模式把同章連續頁配對成 [PagePair]（章內第一頁＝封面單獨、不跨章配對、不配對同 index）。
+     * 該章若被 shift（[shiftedChapters]）＝封面後第一頁也單獨，把之後的配對整體位移一頁（對齊被拆開的跨頁）。
+     */
+    private fun pairItems(source: List<Any>): MutableList<Any> {
+        val result = mutableListOf<Any>()
+        var i = 0
+        while (i < source.size) {
+            val item = source[i]
+            if (item !is ReaderPage) {
+                result.add(item)
+                i++
+                continue
+            }
+            // 封面單獨；shift 的章＝封面後第一頁(index 1)也單獨，使後續配對位移一頁；寬圖本身單獨佔整版。
+            val shifted = item.chapter.chapter.id in shiftedChapters
+            if (item.index == 0 || (shifted && item.index == 1) || isFullPage(item)) {
+                result.add(PagePair(item, null))
+                i++
+                continue
+            }
+            val next = source.getOrNull(i + 1) as? ReaderPage
+            if (next != null &&
+                next.chapter == item.chapter &&
+                next.index != 0 &&
+                next.index != item.index && // 不配對同 index（避免 InsertPage/重複頁配成自己跟自己）
+                !isFullPage(next) // 寬圖不被當配對的另一半
+            ) {
+                result.add(PagePair(item, next))
+                i += 2
+            } else {
+                result.add(PagePair(item, null))
+                i++
+            }
+        }
+        return result
+    }
+
+    /** Yakuyomi：找出含 [page] 的 item 位置（對開時 page 被包在 [PagePair] 裡，indexOf 找不到）。 */
+    fun positionOf(page: ReaderPage): Int = items.indexOfFirst { item ->
+        item == page || (item is PagePair && (item.first == page || item.second == page))
     }
 
     /**

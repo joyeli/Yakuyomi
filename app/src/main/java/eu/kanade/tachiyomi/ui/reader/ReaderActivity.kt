@@ -82,6 +82,7 @@ import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderSettingsScreenModel
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
+import eu.kanade.tachiyomi.ui.reader.viewer.pager.PagerViewer
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
 import eu.kanade.tachiyomi.util.system.isNightMode
 import eu.kanade.tachiyomi.util.system.isTabletUiMode
@@ -535,6 +536,8 @@ class ReaderActivity : BaseActivity() {
         val cropBorderPaged by readerPreferences.cropBorders.collectAsState()
         val cropBorderWebtoon by readerPreferences.cropBordersWebtoon.collectAsState()
         val isPagerType = ReadingMode.isPagerType(viewModel.getMangaReadingMode())
+        // Yakuyomi：對開模式才提供「位移」鈕。
+        val doublePageViewer = (state.viewer as? PagerViewer)?.takeIf { it.isDoublePage }
         val cropEnabled = if (isPagerType) cropBorderPaged else cropBorderWebtoon
 
         ReaderAppBars(
@@ -577,6 +580,7 @@ class ReaderActivity : BaseActivity() {
                 menuToggleToast = toast(if (enabled) MR.strings.on else MR.strings.off)
             },
             onClickSettings = viewModel::openSettingsDialog,
+            onClickShiftDoublePage = doublePageViewer?.let { { it.shiftCurrentChapter() } },
         )
     }
 

@@ -3,6 +3,7 @@ package eu.kanade.presentation.reader.appbars
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ImportContacts
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -27,6 +28,8 @@ fun ReaderBottomBar(
     onClickCropBorder: () -> Unit,
     onClickSettings: () -> Unit,
     modifier: Modifier = Modifier,
+    // Yakuyomi：對開模式才有的「位移」鈕（非空才顯示）。
+    onClickShiftDoublePage: (() -> Unit)? = null,
 ) {
     Row(
         modifier = modifier
@@ -39,6 +42,15 @@ fun ReaderBottomBar(
                 painter = painterResource(readingMode.iconRes),
                 contentDescription = stringResource(MR.strings.viewer),
             )
+        }
+
+        if (onClickShiftDoublePage != null) {
+            IconButton(onClick = onClickShiftDoublePage) {
+                Icon(
+                    imageVector = Icons.Outlined.ImportContacts,
+                    contentDescription = stringResource(MR.strings.action_shift_double_page),
+                )
+            }
         }
 
         IconButton(onClick = onClickOrientation) {

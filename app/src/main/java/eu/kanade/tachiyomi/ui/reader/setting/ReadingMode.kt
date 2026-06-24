@@ -5,7 +5,9 @@ import dev.icerock.moko.resources.StringResource
 import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import eu.kanade.tachiyomi.ui.reader.viewer.Viewer
+import eu.kanade.tachiyomi.ui.reader.viewer.pager.L2RDoublePagerViewer
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.L2RPagerViewer
+import eu.kanade.tachiyomi.ui.reader.viewer.pager.R2LDoublePagerViewer
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.R2LPagerViewer
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.VerticalPagerViewer
 import eu.kanade.tachiyomi.ui.reader.viewer.webtoon.WebtoonViewer
@@ -54,6 +56,24 @@ enum class ReadingMode(
         Direction.Vertical,
         ViewerType.Webtoon,
     ),
+
+    // Yakuyomi：對開（右至左）＝兩頁並排、manga 方向。
+    DOUBLE_PAGE_RTL(
+        MR.strings.double_page_rtl_viewer,
+        R.drawable.ic_reader_rtl_24dp,
+        0x00000006,
+        Direction.Horizontal,
+        ViewerType.Pager,
+    ),
+
+    // Yakuyomi：對開（左至右）。
+    DOUBLE_PAGE_LTR(
+        MR.strings.double_page_ltr_viewer,
+        R.drawable.ic_reader_ltr_24dp,
+        0x00000007,
+        Direction.Horizontal,
+        ViewerType.Pager,
+    ),
     ;
 
     companion object {
@@ -73,6 +93,8 @@ enum class ReadingMode(
                 VERTICAL -> VerticalPagerViewer(activity)
                 WEBTOON -> WebtoonViewer(activity)
                 CONTINUOUS_VERTICAL -> WebtoonViewer(activity, isContinuous = false)
+                DOUBLE_PAGE_RTL -> R2LDoublePagerViewer(activity)
+                DOUBLE_PAGE_LTR -> L2RDoublePagerViewer(activity)
                 DEFAULT -> throw IllegalStateException("Preference value must be resolved: $preference")
             }
         }

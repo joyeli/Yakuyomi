@@ -381,6 +381,9 @@
     <string name="tapping_inverted_horizontal">水平</string>
     <string name="pref_read_with_tapping_inverted">反轉輕觸區域</string>
     <string name="vertical_plus_viewer">捲動(留空)</string>
+    <string name="double_page_rtl_viewer">對開(右至左)</string>
+    <string name="double_page_ltr_viewer">對開(左至右)</string>
+    <string name="action_shift_double_page">對開位移</string>
     <string name="tapping_inverted_none">無</string>
     <string name="restore_duration">%1$02d 分， %2$02d 秒</string>
     <string name="recent_manga_time">第 %1$s 章 - %2$s</string>
@@ -1035,6 +1038,7 @@
     <string name="action_browse_filter_favorite">已收藏</string>
     <string name="action_browse_filter_read">已開卷</string>
     <string name="action_source_filters">來源篩選</string>
+    <string name="action_clear_filters">清除篩選</string>
     <string name="pref_translation_orientation">排版方向</string>
     <string name="pref_translation_orientation_auto">自動（原文方向）</string>
     <string name="pref_translation_orientation_vertical">垂直（垂直優先）</string>
@@ -1089,4 +1093,22 @@
     <string name="rerender_original">原圖（還原未翻）</string>
     <string name="rerender_all_book">重繪全本（目前去字設定）</string>
     <string name="rerender_none">沒有可重繪的已翻章節</string>
+
+    <!-- Yakuyomi：補上之前漏掉繁中對應的翻譯功能字串（設繁中卻顯示英文的修正）。 -->
+    <string name="action_translate">翻譯</string>
+    <string name="action_display_translation_badge">已翻章數</string>
+    <string name="information_no_translations">佇列中沒有翻譯</string>
+    <string name="translation_status_error">失敗</string>
+    <string name="translation_status_queued">排隊中</string>
+    <string name="translation_status_translating">翻譯中</string>
+    <string name="pref_translation_lang_english">英文</string>
+    <string name="pref_translation_lang_french">法文</string>
+    <string name="pref_translation_lang_german">德文</string>
+    <string name="pref_translation_lang_japanese">日文</string>
+    <string name="pref_translation_lang_korean">韓文</string>
+    <string name="pref_translation_lang_portuguese">葡萄牙文</string>
+    <string name="pref_translation_lang_russian">俄文</string>
+    <string name="pref_translation_lang_simp_chinese">簡體中文</string>
+    <string name="pref_translation_lang_spanish">西班牙文</string>
+    <string name="pref_translation_lang_trad_chinese">繁體中文（台灣）</string>
 </resources>

@@ -46,6 +46,12 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      */
     val config = PagerConfig(this, scope)
 
+    /** Yakuyomi：右至左方向（取代分散的 `viewer is R2LPagerViewer` 判斷，讓對開的 R2L 也涵蓋）。 */
+    open val isRtl: Boolean get() = false
+
+    /** Yakuyomi：對開（double-page）模式——adapter 配對成版面、用 [PagerDoublePageHolder]。 */
+    open val isDoublePage: Boolean get() = false
+
     /**
      * Adapter of the pager.
      */
@@ -55,6 +61,9 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * Currently active item. It can be a chapter page or a chapter transition.
      */
     private var currentPage: Any? = null
+
+    /** Yakuyomi：最後一次設定的章節，供「偵測到寬頁→重新配對版面」時重建 adapter 用。 */
+    private var lastSetChapters: ViewerChapters? = null
 
     /**
      * Viewer chapters to set when the pager enters idle mode. Otherwise, if the view was settling
@@ -120,9 +129,9 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         }
         pager.longTapListener = f@{
             if (activity.viewModel.state.value.menuVisible || config.longTapEnabled) {
-                val item = adapter.items.getOrNull(pager.currentItem)
-                if (item is ReaderPage) {
-                    activity.onPageLongTap(item)
+                val page = itemToPage(adapter.items.getOrNull(pager.currentItem))
+                if (page != null) {
+                    activity.onPageLongTap(page)
                     return@f true
                 }
             }
@@ -170,31 +179,40 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
             .filterIsInstance(PagerPageHolder::class.java)
             .firstOrNull { it.item == page }
 
+    /** Yakuyomi：把 adapter item（[ReaderPage] / [PagePair] / 其他）取出代表頁；對開 pair 取較後那頁。 */
+    private fun itemToPage(item: Any?): ReaderPage? = when (item) {
+        is PagePair -> item.representative
+        is ReaderPage -> item
+        else -> null
+    }
+
     /**
-     * Called when a new page (either a [ReaderPage] or [ChapterTransition]) is marked as active
+     * Called when a new page (either a [ReaderPage]/[PagePair] or [ChapterTransition]) is marked as active
      */
     private fun onPageChange(position: Int) {
-        val page = adapter.items.getOrNull(position)
-        if (page != null && currentPage != page) {
-            val allowPreload = checkAllowPreload(page as? ReaderPage)
+        val item = adapter.items.getOrNull(position)
+        if (item != null && currentPage != item) {
+            val page = itemToPage(item)
+            val prevPage = itemToPage(currentPage)
+            val allowPreload = checkAllowPreload(page)
             val forward = when {
-                currentPage is ReaderPage && page is ReaderPage -> {
+                prevPage != null && page != null -> {
                     // if both pages have the same number, it's a split page with an InsertPage
-                    if (page.number == (currentPage as ReaderPage).number) {
+                    if (page.number == prevPage.number) {
                         // the InsertPage is always the second in the reading direction
                         page is InsertPage
                     } else {
-                        page.number > (currentPage as ReaderPage).number
+                        page.number > prevPage.number
                     }
                 }
-                currentPage is ChapterTransition.Prev && page is ReaderPage ->
+                currentPage is ChapterTransition.Prev && page != null ->
                     false
                 else -> true
             }
-            currentPage = page
-            when (page) {
-                is ReaderPage -> onReaderPageSelected(page, allowPreload, forward)
-                is ChapterTransition -> onTransitionSelected(page)
+            currentPage = item
+            when {
+                page != null -> onReaderPageSelected(page, allowPreload, forward)
+                item is ChapterTransition -> onTransitionSelected(item)
             }
         }
     }
@@ -275,6 +293,7 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * Sets the active [chapters] on this pager.
      */
     private fun setChaptersInternal(chapters: ViewerChapters) {
+        lastSetChapters = chapters
         // Remove listener so the change in item doesn't trigger it
         pager.removeOnPageChangeListener(pagerListener)
 
@@ -299,7 +318,7 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * Tells this viewer to move to the given [page].
      */
     override fun moveToPage(page: ReaderPage) {
-        val position = adapter.items.indexOf(page)
+        val position = adapter.positionOf(page)
         if (position != -1) {
             val currentPosition = pager.currentItem
             pager.setCurrentItem(position, true)
@@ -440,6 +459,60 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
             }
         }
         return false
+    }
+
+    /**
+     * Yakuyomi：對開模式——切換「當前章」的配對位移（shift）並重建版面、保留當前頁。
+     * 使用者按 shift 鈕觸發：當一個跨頁被配對邊界拆開時，位移一頁讓它對齊。
+     */
+    fun shiftCurrentChapter() {
+        activity.runOnUiThread {
+            val chapters = lastSetChapters ?: return@runOnUiThread
+            val currentReaderPage = itemToPage(adapter.items.getOrNull(pager.currentItem))
+            val chapterId = currentReaderPage?.chapter?.chapter?.id ?: return@runOnUiThread
+            adapter.toggleShift(chapterId)
+            pager.removeOnPageChangeListener(pagerListener)
+            adapter.setChapters(chapters, config.alwaysShowChapterTransition)
+            // 先 null 再設回，強制 ViewPager 丟棄所有舊 view 重建（set 同一實例不保證重建）。
+            pager.adapter = null
+            pager.adapter = adapter
+            val pos = adapter.positionOf(currentReaderPage)
+            if (pos != -1) {
+                pager.setCurrentItem(pos, false)
+            }
+            pager.addOnPageChangeListener(pagerListener)
+            onPageChange(pager.currentItem)
+        }
+    }
+
+    /**
+     * Yakuyomi：對開模式 holder 偵測到本身是寬圖/跨頁的頁時呼叫（已在 UI thread）——標記為單獨佔整版、
+     * 重建版面（重跑 pairItems，與 shift 同一條路徑＝單一真理來源）、並定位回「當前實際在看的頁」。
+     * 回傳是否真的重配了（holder 據此：true＝你會被 recreate、不必顯示；false＝請 fallback 顯示）。
+     */
+    fun onFullPagesDetected(pages: List<ReaderPage>): Boolean {
+        var changed = false
+        pages.forEach { if (adapter.markFullPage(it)) changed = true }
+        if (!changed || lastSetChapters == null) return false
+        // 整個重配延後到下一個 message loop，脫離「holder 載入的 callstack」——在 ViewPager 正 populate 該 holder
+        // 時同步 notifyDataSetChanged 會重入/被忽略，導致重建沒生效、舊併圖 holder 殘留（＝大圖仍被併的真因）。
+        pager.post {
+            val chapters = lastSetChapters ?: return@post
+            // 拆前抓「當前實際在看的頁」當定位錨點（非觸發的寬頁本身，避免被預載頁/另一頁拉走）。
+            val currentReaderPage = itemToPage(adapter.items.getOrNull(pager.currentItem))
+            pager.removeOnPageChangeListener(pagerListener)
+            adapter.setChapters(chapters, config.alwaysShowChapterTransition)
+            // 強制 ViewPager 丟棄所有舊 view 重建（set 同一實例不保證重建；與 shiftCurrentChapter 一致）。
+            pager.adapter = null
+            pager.adapter = adapter
+            val pos = currentReaderPage?.let { adapter.positionOf(it) } ?: -1
+            if (pos != -1) {
+                pager.setCurrentItem(pos, false)
+            }
+            pager.addOnPageChangeListener(pagerListener)
+            onPageChange(pager.currentItem)
+        }
+        return true
     }
 
     fun onPageSplit(currentPage: ReaderPage, newPage: InsertPage) {
