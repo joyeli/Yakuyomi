@@ -41,9 +41,16 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 - **Auto-refresh on open** — optionally refresh a manga's chapters every time you open it.
 
 **Large screens & foldables** *(new in 0.4.0)*
+
+<div align="center">
+<img src="./.github/assets/yakuyomi-foldable.gif" alt="Foldable: single page when folded, double-page spread when unfolded" width="420"/>
+<br>
+<sub><b>Fold → single page; unfold → double-page spread, automatically.</b> Both pages translated on-device.</sub>
+</div>
+
 - **Adaptive grid cover size** — library and browse columns auto-fit the actual screen width (phone, tablet, folded/unfolded foldable, split-screen). Pick a size by how many fit per row and it scales to every width.
 - **Tablet reading mode** — a separate reading mode for when you're on a large screen / unfolded (e.g. continuous-vertical on the phone, right-to-left paged on the tablet), following the system Tablet UI setting.
-- **Double-page spread** *(new in 0.5.0)* — read two pages side by side on tablets/large screens (right-to-left or left-to-right). Wide/spread pages get their own full-width page instead of being squeezed in; a manual shift button aligns spreads split across the pairing. It's a reading mode, so it pairs with the tablet reading-mode setting above.
+- **Double-page spread** *(new in 0.5.0)* — read two pages side by side on tablets/large screens (right-to-left or left-to-right). Wide/spread pages get their own full-width page instead of being squeezed in; a manual shift button aligns spreads split across the pairing. It's a reading mode, so it pairs with the tablet reading-mode setting above. Fill mode (fit width / fit height) and alignment are configurable under Settings → Reader → Double-page *(0.6.0)*.
 - **Collapsible description** — choose whether a manga's description opens expanded or collapsed.
 
 Everything else is mihon — library, sources/extensions, downloads, trackers, backups, the reader.
