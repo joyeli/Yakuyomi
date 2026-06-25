@@ -50,8 +50,9 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 <div align="center">
 <img src="./.github/assets/yakuyomi-browse-filter.gif" alt="Global browse filter: filter a source's loaded list by in-library / started / fetched" width="230"/>
 <img src="./.github/assets/yakuyomi-browse-snapshot.gif" alt="Offline snapshot: save a source's loaded list to browse offline" width="230"/>
+<img src="./.github/assets/yakuyomi-browse-anchor.gif" alt="Per-source anchor: auto-load and scroll the Latest feed down to your last-processed point" width="230"/>
 <br>
-<sub><b>Catch up on any source</b> — filter the loaded list by <i>in library / started reading / details fetched</i>, and save it as an offline snapshot.</sub>
+<sub><b>Catch up on any source</b> — filter the loaded list by <i>in library / started reading / details fetched</i>, auto-load down to your anchor, and save it as an offline snapshot.</sub>
 </div>
 
 **Large screens & foldables** *(new in 0.4.0)*

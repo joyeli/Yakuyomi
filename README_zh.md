@@ -50,8 +50,9 @@ Yakuyomi 是 [mihon](https://github.com/mihonapp/mihon) 的 fork，邊下載 / �
 <div align="center">
 <img src="./.github/assets/yakuyomi-browse-filter.gif" alt="全域瀏覽篩選：把來源清單依 已收藏／已開卷／已擷取 就地過濾" width="230"/>
 <img src="./.github/assets/yakuyomi-browse-snapshot.gif" alt="離線快照：把來源清單存起來離線瀏覽" width="230"/>
+<img src="./.github/assets/yakuyomi-browse-anchor.gif" alt="每來源錨點：自動載入並往下捲「最新」清單，直到抵達你上次處理到的位置" width="230"/>
 <br>
-<sub><b>在任一來源追進度</b>——把載入的清單依<i>已收藏／已開卷／已擷取</i>就地過濾，並存成離線快照。</sub>
+<sub><b>在任一來源追進度</b>——把載入的清單依<i>已收藏／已開卷／已擷取</i>就地過濾、自動載入往下捲到你標的錨點，並存成離線快照。</sub>
 </div>
 
 **大螢幕與折疊機** *(0.4.0 新增)*
