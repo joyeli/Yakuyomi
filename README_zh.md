@@ -34,15 +34,10 @@ Yakuyomi 是 [mihon](https://github.com/mihonapp/mihon) 的 fork，邊下載 / �
 - **品質旋鈕** — 三種去字模式（平塗 / 整頁 LaMa / 逐區 LaMa）、直 / 橫排版、約 20 個可調參數。無 telemetry。
 
 <div align="center">
-<img src="./.github/assets/yakuyomi-rerender.gif" alt="重繪：換頁面的去字方法、就地重繪" width="300"/>
+<img src="./.github/assets/yakuyomi-live-translate.gif" alt="即時翻譯：對話框邊讀邊從日文變成你的語言" width="240"/>
+<img src="./.github/assets/yakuyomi-rerender.gif" alt="重繪：就地換頁面的去字方法" width="240"/>
 <br>
-<sub><b>任一頁可重繪</b>——換去字方法（快速平塗 ⇄ LaMa），就地重新算繪。</sub>
-</div>
-
-<div align="center">
-<img src="./.github/assets/yakuyomi-live-translate.gif" alt="即時翻譯：對話框邊讀邊從日文變中文" width="360"/>
-<br>
-<sub><b>邊讀邊翻</b>——頁面就地從日文變成你的語言。</sub>
+<sub><b>邊讀邊翻</b>（左）＋ <b>一鍵重繪</b>換去字方法、快速平塗 ⇄ LaMa（右）——都就地更新頁面。</sub>
 </div>
 
 **瀏覽與追進度** *(0.3.0 新增)*

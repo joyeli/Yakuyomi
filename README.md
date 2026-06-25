@@ -34,15 +34,10 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 - **Quality knobs** — three text-removal modes (flat-fill / whole-image LaMa / per-region LaMa), vertical/horizontal typesetting, ~20 tunable parameters. No telemetry.
 
 <div align="center">
-<img src="./.github/assets/yakuyomi-rerender.gif" alt="Re-render: switch a page's text-removal method and re-render in place" width="300"/>
+<img src="./.github/assets/yakuyomi-live-translate.gif" alt="Live translation: speech bubbles turn from Japanese into your language as you read" width="240"/>
+<img src="./.github/assets/yakuyomi-rerender.gif" alt="Re-render: switch a page's text-removal method in place" width="240"/>
 <br>
-<sub><b>Re-render any page</b> — switch the text-removal method (fast box-fill ⇄ LaMa) and it re-renders in place.</sub>
-</div>
-
-<div align="center">
-<img src="./.github/assets/yakuyomi-live-translate.gif" alt="Live translation: speech bubbles turn from Japanese to Chinese as you read" width="360"/>
-<br>
-<sub><b>Live translation while you read</b> — pages turn from Japanese into your language, in place.</sub>
+<sub><b>Live translation as you read</b> (left), and <b>one-tap re-render</b> to switch the text-removal method — fast box-fill ⇄ LaMa (right). Both update the page in place.</sub>
 </div>
 
 **Browse & catch-up** *(new in 0.3.0)*
