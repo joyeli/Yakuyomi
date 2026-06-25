@@ -33,6 +33,12 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 - **Your models** — the three ONNX models download in one tap with sha256 verification, or you supply them manually ([models doc](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/MODELS.md)).
 - **Quality knobs** — three text-removal modes (flat-fill / whole-image LaMa / per-region LaMa), vertical/horizontal typesetting, ~20 tunable parameters. No telemetry.
 
+<div align="center">
+<img src="./.github/assets/yakuyomi-live-translate.gif" alt="Live translation: speech bubbles turn from Japanese to Chinese as you read" width="360"/>
+<br>
+<sub><b>Live translation while you read</b> — pages turn from Japanese into your language, in place.</sub>
+</div>
+
 **Browse & catch-up** *(new in 0.3.0)*
 - **Global browse filter** — filter any source's results by *in your library* / *started reading*, applied instantly to the loaded list without re-fetching.
 - **Per-source anchor** — mark a title as your "last processed point"; a one-tap action keeps loading and auto-scrolls the Latest feed until it reaches the anchor, so you never lose your place.

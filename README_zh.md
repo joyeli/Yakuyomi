@@ -33,6 +33,12 @@ Yakuyomi 是 [mihon](https://github.com/mihonapp/mihon) 的 fork，邊下載 / �
 - **自備模型** — 三顆 ONNX 模型可一鍵下載（含 sha256 驗證），或自己手動放（[模型說明](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/MODELS_zh.md)）。
 - **品質旋鈕** — 三種去字模式（平塗 / 整頁 LaMa / 逐區 LaMa）、直 / 橫排版、約 20 個可調參數。無 telemetry。
 
+<div align="center">
+<img src="./.github/assets/yakuyomi-live-translate.gif" alt="即時翻譯：對話框邊讀邊從日文變中文" width="360"/>
+<br>
+<sub><b>邊讀邊翻</b>——頁面就地從日文變成你的語言。</sub>
+</div>
+
 **瀏覽與追進度** *(0.3.0 新增)*
 - **全域瀏覽篩選** — 把任一來源的結果依「已收藏 / 已開卷」就地過濾，不重抓、即時生效。
 - **每來源錨點** — 把一本書標成「上次處理到這」；一鍵持續載入並自動往下捲「最新」清單直到抵達錨點，不再迷失進度。
