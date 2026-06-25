@@ -52,6 +52,13 @@ Yakuyomi 是 [mihon](https://github.com/mihonapp/mihon) 的 fork，邊下載 / �
 - **翻頁節流** — 可設定的翻頁最小間隔，避免被來源限流。
 - **開啟即刷新** — 可選每次打開漫畫就刷新章節。
 
+<div align="center">
+<img src="./.github/assets/yakuyomi-browse-filter.gif" alt="全域瀏覽篩選：把來源清單依 已收藏／已開卷／已擷取 就地過濾" width="230"/>
+<img src="./.github/assets/yakuyomi-browse-snapshot.gif" alt="離線快照：把來源清單存起來離線瀏覽" width="230"/>
+<br>
+<sub><b>在任一來源追進度</b>——把載入的清單依<i>已收藏／已開卷／已擷取</i>就地過濾，並存成離線快照。</sub>
+</div>
+
 **大螢幕與折疊機** *(0.4.0 新增)*
 
 <div align="center">

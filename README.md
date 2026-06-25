@@ -52,6 +52,13 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 - **Page-load throttle** — a configurable minimum interval between page loads to keep sources from rate-limiting you.
 - **Auto-refresh on open** — optionally refresh a manga's chapters every time you open it.
 
+<div align="center">
+<img src="./.github/assets/yakuyomi-browse-filter.gif" alt="Global browse filter: filter a source's loaded list by in-library / started / fetched" width="230"/>
+<img src="./.github/assets/yakuyomi-browse-snapshot.gif" alt="Offline snapshot: save a source's loaded list to browse offline" width="230"/>
+<br>
+<sub><b>Catch up on any source</b> — filter the loaded list by <i>in library / started reading / details fetched</i>, and save it as an offline snapshot.</sub>
+</div>
+
 **Large screens & foldables** *(new in 0.4.0)*
 
 <div align="center">
