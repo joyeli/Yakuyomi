@@ -62,9 +62,13 @@ import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.manga.model.Manga
+import tachiyomi.domain.translation.service.TranslationPreferences
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.screens.LoadingScreen
+import tachiyomi.presentation.core.util.collectAsState
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 
 class MangaScreen(
     private val mangaId: Long,
@@ -100,6 +104,10 @@ class MangaScreen(
 
         val successState = state as MangaScreenModel.State.Success
         val isHttpSource = remember { successState.source is HttpSource }
+        // 硬總開關：關閉時不提供任何翻譯 / 重繪 affordance（章節翻譯鈕、多選翻譯、重繪全本一律 null＝隱藏，
+        // 而非靜默 no-op）。已翻成果仍在書庫徽章可見。
+        val translationPreferences = remember { Injekt.get<TranslationPreferences>() }
+        val translationMasterEnabled by translationPreferences.translationMasterEnabled.collectAsState()
 
         LaunchedEffect(successState.manga, screenModel.source) {
             if (isHttpSource) {
@@ -123,8 +131,8 @@ class MangaScreen(
             navigateUp = navigator::pop,
             onChapterClicked = { openChapter(context, it) },
             onDownloadChapter = screenModel::runChapterDownloadActions.takeIf { !successState.source.isLocalOrStub() },
-            onTranslateChapter = screenModel::runChapterTranslateAction,
-            onReRenderChapter = screenModel::runChapterReRenderAction,
+            onTranslateChapter = screenModel::runChapterTranslateAction.takeIf { translationMasterEnabled },
+            onReRenderChapter = screenModel::runChapterReRenderAction.takeIf { translationMasterEnabled },
             onAddToLibraryClicked = {
                 screenModel.toggleFavorite()
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -167,8 +175,8 @@ class MangaScreen(
             onMigrateClicked = {
                 navigator.push(MigrationConfigScreen(successState.manga.id))
             }.takeIf { successState.manga.favorite },
-            // 重繪全本：用目前去字設定重做本作已下載且已翻的章（空集合由 screenModel 提示）
-            onReRenderAllClicked = screenModel::runMangaReRenderAction,
+            // 重繪全本：用目前去字設定重做本作已下載且已翻的章（空集合由 screenModel 提示）。硬總開關關時隱藏。
+            onReRenderAllClicked = screenModel::runMangaReRenderAction.takeIf { translationMasterEnabled },
             onEditNotesClicked = { navigator.push(MangaNotesScreen(manga = successState.manga)) },
             onMultiBookmarkClicked = screenModel::bookmarkChapters,
             onMultiMarkAsReadClicked = screenModel::markChaptersRead,

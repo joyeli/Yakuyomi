@@ -157,6 +157,13 @@ class TranslationManager(private val context: Context) {
     fun isSourceExcluded(manga: Manga): Boolean =
         manga.source.toString() in translationPreferences.translationSourcesExclude.get()
 
+    /**
+     * 翻譯總開關（[TranslationPreferences.translationMasterEnabled]）是否開啟。
+     * 這是**硬總開關**：關閉時自動/手動翻一律不排入、佇列一律不 drain、引擎不建——把關責任集中在佇列這層
+     * （入口各 gate 之外的最後一道），避免「持久佇列還原/手動排入」繞過總開關。
+     */
+    private fun masterEnabled(): Boolean = translationPreferences.translationMasterEnabled.get()
+
     private fun publish() {
         _queueState.value = synchronized(lock) {
             entries.map {
@@ -234,7 +241,8 @@ class TranslationManager(private val context: Context) {
         val hasQueued = synchronized(lock) {
             entries.any { it.status == TranslationItem.Status.QUEUE }
         }
-        if (hasQueued && !_isPaused.value) {
+        // 硬總開關：master 關時只還原佇列快照、**不**自動 drain / 不重啟前景服務 / 不建引擎（總開關再開時由 [resumeForMasterOn] 續跑）。
+        if (hasQueued && !_isPaused.value && masterEnabled()) {
             ensureDrain()
             TranslationJob.start(context)
         }
@@ -252,6 +260,7 @@ class TranslationManager(private val context: Context) {
      */
     fun translate(manga: Manga, chapters: List<Chapter>, atFront: Boolean = false) {
         if (chapters.isEmpty()) return
+        if (!masterEnabled()) return // 硬總開關：關閉時自動/手動翻一律不排入
         val m = translationPreferences.inpaintMethod.get() // 排入當下擷取一次去字法，逐章帶走
         synchronized(lock) {
             if (atFront) {
@@ -296,6 +305,7 @@ class TranslationManager(private val context: Context) {
      */
     fun reRender(manga: Manga, chapters: List<Chapter>, method: String) {
         if (chapters.isEmpty()) return
+        if (!masterEnabled()) return // 硬總開關：關閉時不排入重繪
         synchronized(lock) {
             // 已排隊的重繪章 id（含進行中）；一般翻譯項不算，重繪可與其並存
             val pending = entries.filter { it.reRenderMethod != null }.mapTo(HashSet()) { it.chapter.id }
@@ -421,6 +431,7 @@ class TranslationManager(private val context: Context) {
 
     /** 重試失敗的章（重新排隊）。 */
     fun retry(chapterIds: List<Long>) {
+        if (!masterEnabled()) return // 硬總開關：關閉時不重試
         val ids = chapterIds.toHashSet()
         synchronized(lock) {
             entries.forEach {
@@ -453,10 +464,29 @@ class TranslationManager(private val context: Context) {
     }
 
     fun resume() {
+        if (!masterEnabled()) return // 硬總開關：關閉時不能 resume（佇列維持暫停待總開關再開）
         _isPaused.value = false
         ensureDrain()
         TranslationJob.start(context)
         persist()
+    }
+
+    /**
+     * 翻譯總開關關閉（硬總開關）：中止正在翻的章（停在下一頁邊界、回 QUEUE）；drain 因 [masterEnabled] gate 退出、
+     * 引擎於 drain 尾自然釋放。**不**動 [_isPaused]（總開關與使用者暫停獨立）；佇列保留待總開關再開時由 [resumeForMasterOn] 續跑。
+     */
+    fun haltForMasterOff() {
+        synchronized(lock) { stopActive = true }
+        TranslationJob.stop(context) // 主動停前景服務（否則殘留「翻譯中」通知；drain 自身已被 master gate 擋住不取新章）
+    }
+
+    /** 翻譯總開關開啟：若有排隊章且未（使用者）暫停 → 續跑佇列（drain 的 master gate 此時已放行）。 */
+    fun resumeForMasterOn() {
+        val hasQueued = synchronized(lock) { entries.any { it.status == TranslationItem.Status.QUEUE } }
+        if (hasQueued && !_isPaused.value) {
+            ensureDrain()
+            TranslationJob.start(context)
+        }
     }
 
     /** 確保有一條 drain 在跑（drainMutex 保證單一消費者；重複呼叫會排隊後再掃一遍）。 */
@@ -465,7 +495,8 @@ class TranslationManager(private val context: Context) {
     }
 
     private suspend fun drainLoop() = drainMutex.withLock {
-        while (!_isPaused.value) {
+        // 硬總開關：master 關時一律不取新章（一道 gate 收掉所有 drain 來源——還原/下載/手動/重繪）。
+        while (!_isPaused.value && masterEnabled()) {
             val entry = synchronized(lock) {
                 entries.firstOrNull { it.status == TranslationItem.Status.QUEUE }
             } ?: break
@@ -507,10 +538,11 @@ class TranslationManager(private val context: Context) {
             publish()
             persist()
         }
-        // 佇列翻完（迴圈因「無 QUEUE 項」自然結束＝此時 _isPaused 必為 false；暫停退出走另一分支、不到這）：
+        // 迴圈退出（因「無 QUEUE 項」自然翻完，或「總開關關」使 while 條件 false 退出；暫停則走另一分支不到這）：
         // 即時翻**關著**時釋放 warm 引擎，別讓 ~450MB 閒置；即時翻**開著**時保 warm（reader 隨時要讀下一章）。
         // 引擎之後會在下次 translatePage lazy 重建。shutdown 走服務自己的 Mutex（與 drainMutex 不同鎖、不死鎖）。
-        if (!_isPaused.value && !translationPreferences.liveTranslate.get()) {
+        // 釋放 warm 引擎：只有「總開關開 + 即時翻開」才保 warm（reader 要讀下一章）；總開關關或即時翻關 → 釋放 ~450MB。
+        if (!_isPaused.value && !(masterEnabled() && translationPreferences.liveTranslate.get())) {
             engineService.shutdown()
         }
     }

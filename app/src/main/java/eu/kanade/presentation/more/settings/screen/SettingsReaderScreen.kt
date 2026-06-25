@@ -80,6 +80,7 @@ object SettingsReaderScreen : SearchableSettings {
             getEInkGroup(readerPreferences = readerPref),
             getReadingGroup(readerPreferences = readerPref),
             getPagedGroup(readerPreferences = readerPref),
+            getDoublePageGroup(readerPreferences = readerPref),
             getWebtoonGroup(readerPreferences = readerPref),
             getNavigationGroup(readerPreferences = readerPref),
             getActionsGroup(readerPreferences = readerPref),
@@ -299,6 +300,33 @@ object SettingsReaderScreen : SearchableSettings {
                     preference = readerPreferences.dualPageRotateToFitInvert,
                     title = stringResource(MR.strings.pref_page_rotate_invert),
                     enabled = rotateToFit,
+                ),
+            ),
+        )
+    }
+
+    // Yakuyomi：對開（double-page spread）版面設定——填滿方式 + 對齊（與單頁/捲動並列的「對開」分類）。
+    @Composable
+    private fun getDoublePageGroup(readerPreferences: ReaderPreferences): Preference.PreferenceGroup {
+        return Preference.PreferenceGroup(
+            title = stringResource(MR.strings.pref_category_double_page),
+            preferenceItems = persistentListOf(
+                Preference.PreferenceItem.ListPreference(
+                    preference = readerPreferences.doublePageFillMode,
+                    entries = persistentMapOf(
+                        0 to stringResource(MR.strings.pref_double_page_fill_width),
+                        1 to stringResource(MR.strings.pref_double_page_fill_height),
+                    ),
+                    title = stringResource(MR.strings.pref_double_page_fill),
+                ),
+                Preference.PreferenceItem.ListPreference(
+                    preference = readerPreferences.doublePageAlign,
+                    entries = persistentMapOf(
+                        0 to stringResource(MR.strings.pref_double_page_align_center),
+                        1 to stringResource(MR.strings.pref_double_page_align_side),
+                    ),
+                    title = stringResource(MR.strings.pref_double_page_align),
+                    subtitle = stringResource(MR.strings.pref_double_page_align_summary),
                 ),
             ),
         )

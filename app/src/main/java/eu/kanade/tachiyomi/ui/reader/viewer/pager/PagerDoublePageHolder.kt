@@ -5,6 +5,8 @@ import android.content.Context
 import android.graphics.drawable.BitmapDrawable
 import android.view.LayoutInflater
 import androidx.core.view.isVisible
+import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView.SCALE_TYPE_CENTER_CROP
+import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView.SCALE_TYPE_CENTER_INSIDE
 import eu.kanade.presentation.util.formattedMessage
 import eu.kanade.tachiyomi.databinding.ReaderErrorBinding
 import eu.kanade.tachiyomi.source.model.Page
@@ -128,9 +130,24 @@ class PagerDoublePageHolder(
             landscapeZoom = false,
         )
 
+        // Yakuyomi 對開填滿/對齊（B）：寬度為主＝CENTER_INSIDE（fit 寬、上下留白、整頁一眼看完）；高度為主＝
+        // CENTER_CROP（fit 高、左右超出可平移）。對齊只在高度為主有感：靠邊＝起始停頁碼小側（RTL 右/LTR 左）。
+        // 套用對象＝合成跨頁（必寬）＋「本身就是寬圖／跨頁」被單獨佔版的頁——後者若不套，大圖不會照填滿設定縮放。
+        val fillHeight = viewer.config.doublePageFillMode == 1
+        val sideAlign = viewer.config.doublePageAlign == 1
+        val fillConfig = config.copy(
+            minimumScaleType = if (fillHeight) SCALE_TYPE_CENTER_CROP else SCALE_TYPE_CENTER_INSIDE,
+            zoomStartPosition = if (fillHeight && sideAlign) {
+                if (viewer.isRtl) ZoomStartPosition.RIGHT else ZoomStartPosition.LEFT
+            } else {
+                ZoomStartPosition.CENTER
+            },
+        )
+
         try {
             if (secondStreamFn == null) {
-                val (source, isAnimated, background) = withIOContext {
+                // 單頁：一般頁用 config（fit）；但「本身就是寬圖／跨頁」被單獨佔版的頁也要照對開填滿設定縮放。
+                val (loaded, soloConfig) = withIOContext {
                     val source = firstStreamFn().use { Buffer().readFrom(it) }
                     val isAnimated = ImageUtil.isAnimatedAndSupported(source)
                     val background = if (!isAnimated && viewer.config.automaticBackground) {
@@ -138,10 +155,12 @@ class PagerDoublePageHolder(
                     } else {
                         null
                     }
-                    Triple(source, isAnimated, background)
+                    val cfg = if (ImageUtil.isWideImage(source)) fillConfig else config
+                    Triple(source, isAnimated, background) to cfg
                 }
+                val (source, isAnimated, background) = loaded
                 withUIContext {
-                    setImage(source, isAnimated, config)
+                    setImage(source, isAnimated, soloConfig)
                     if (!isAnimated) pageBackground = background
                     removeErrorLayout()
                 }
@@ -174,11 +193,11 @@ class PagerDoublePageHolder(
                         detectedFull = true
                         // 回報重配：true＝本 holder 會被 recreate（不顯示）；false＝沒拆成 → fallback 顯示併圖、不留白。
                         if (!viewer.onFullPagesDetected(wides)) {
-                            setImage(BitmapDrawable(resources, fallbackBitmap), config)
+                            setImage(BitmapDrawable(resources, fallbackBitmap), fillConfig)
                             removeErrorLayout()
                         }
                     } else {
-                        setImage(BitmapDrawable(resources, fallbackBitmap), config)
+                        setImage(BitmapDrawable(resources, fallbackBitmap), fillConfig)
                         removeErrorLayout()
                     }
                 }

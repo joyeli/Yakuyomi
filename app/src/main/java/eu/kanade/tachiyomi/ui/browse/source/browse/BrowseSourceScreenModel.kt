@@ -117,9 +117,10 @@ class BrowseSourceScreenModel(
      */
     private val hideInLibraryItems = sourcePreferences.hideInLibraryItems.get()
 
-    // Yakuyomi：探索全域篩選（收藏/開卷三態，跨所有來源、與 source 自帶 extension filter 獨立）。
+    // Yakuyomi：探索全域篩選（收藏/開卷/擷取三態，跨所有來源、與 source 自帶 extension filter 獨立）。
     val browseFilterFavorite = sourcePreferences.browseFilterFavorite
     val browseFilterRead = sourcePreferences.browseFilterRead
+    val browseFilterFetched = sourcePreferences.browseFilterFetched
 
     // Yakuyomi：探索「錨點」（每 source 一本，值＝mangaUrl）。標「上次處理到這」，瀏覽清單以旗標徽章標出。
     val browseAnchor = sourcePreferences.browseAnchor(sourceId)
@@ -158,19 +159,26 @@ class BrowseSourceScreenModel(
                 cached,
                 browseFilterFavorite.changes(),
                 browseFilterRead.changes(),
-                ::Triple,
-            ).map { (pagingData, favFilter, readFilter) ->
+                browseFilterFetched.changes(),
+            ) { pagingData, favFilter, readFilter, fetchedFilter ->
                 pagingData.filter { stateFlow ->
                     val m = stateFlow.value
                     if (hideInLibraryItems && m.favorite) return@filter false
                     // 收藏（三態）
                     if (favFilter == TriState.ENABLED_IS && !m.favorite) return@filter false
                     if (favFilter == TriState.ENABLED_NOT && m.favorite) return@filter false
-                    // 開卷＝該本任一章已讀（只在篩選啟用時查 DB）。讀過 ≠ 收藏，獨立維度。
+                    // 開卷＝該本任一章「已讀 or 有閱讀進度（lastPageRead>0）」：有讀過就算，不限整話讀完。只在啟用時查 DB。
                     if (readFilter != TriState.DISABLED) {
-                        val started = m.id > 0L && getChaptersByMangaId.await(m.id).any { it.read }
+                        val started = m.id > 0L &&
+                            getChaptersByMangaId.await(m.id).any { it.read || it.lastPageRead > 0 }
                         if (readFilter == TriState.ENABLED_IS && !started) return@filter false
                         if (readFilter == TriState.ENABLED_NOT && started) return@filter false
+                    }
+                    // 擷取＝詳情曾被載入過（initialized：曾點進去/載過書目說明）；未擷取＝全新沒點過。
+                    if (fetchedFilter != TriState.DISABLED) {
+                        val fetched = m.initialized
+                        if (fetchedFilter == TriState.ENABLED_IS && !fetched) return@filter false
+                        if (fetchedFilter == TriState.ENABLED_NOT && fetched) return@filter false
                     }
                     true
                 }
@@ -181,11 +189,13 @@ class BrowseSourceScreenModel(
     /** 全域篩選三態循環（忽略→只顯示→只不顯示→忽略），對齊書庫的 toggleFilter。 */
     fun toggleGlobalFavoriteFilter() = browseFilterFavorite.set(browseFilterFavorite.get().next())
     fun toggleGlobalReadFilter() = browseFilterRead.set(browseFilterRead.get().next())
+    fun toggleGlobalFetchedFilter() = browseFilterFetched.set(browseFilterFetched.get().next())
 
-    /** 清除全域篩選（收藏/開卷皆設回忽略）。 */
+    /** 清除全域篩選（收藏/開卷/擷取皆設回忽略）。 */
     fun clearGlobalFilters() {
         browseFilterFavorite.set(TriState.DISABLED)
         browseFilterRead.set(TriState.DISABLED)
+        browseFilterFetched.set(TriState.DISABLED)
     }
 
     /** 設此 source 的錨點為這本（取代舊的）。 */

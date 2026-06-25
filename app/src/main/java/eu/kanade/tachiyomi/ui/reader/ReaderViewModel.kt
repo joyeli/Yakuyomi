@@ -1227,6 +1227,7 @@ class ReaderViewModel @JvmOverloads constructor(
     fun reRenderPage(method: String) {
         val page = (state.value.dialog as? Dialog.ReRenderMethod)?.page ?: return
         closeDialog()
+        if (!translationPreferences.translationMasterEnabled.get()) return // 硬總開關：關時不重繪、不載引擎
         val manga = manga ?: return
         val chapter = page.chapter
 
@@ -1293,6 +1294,7 @@ class ReaderViewModel @JvmOverloads constructor(
     fun translateThisPage() {
         val page = (state.value.dialog as? Dialog.PageActions)?.page ?: return
         closeDialog()
+        if (!translationPreferences.translationMasterEnabled.get()) return // 硬總開關：關時不翻、不載引擎
         val manga = manga ?: return
         val chapter = page.chapter
         val method = translationPreferences.inpaintMethod.get()
@@ -1357,6 +1359,7 @@ class ReaderViewModel @JvmOverloads constructor(
      */
     fun startChapterTranslate() {
         closeDialog()
+        if (!translationPreferences.translationMasterEnabled.get()) return // 硬總開關：關時不翻、不送「已開始」假回饋
         val manga = manga ?: return
         val readerChapter = getCurrentChapter() ?: return
         val domainChapter = readerChapter.chapter.toDomainChapter() ?: return

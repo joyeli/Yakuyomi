@@ -20,6 +20,7 @@ import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import kotlinx.collections.immutable.persistentMapOf
 
@@ -62,6 +63,7 @@ fun Badge(
     color: Color = MaterialTheme.colorScheme.secondary,
     iconColor: Color = MaterialTheme.colorScheme.onSecondary,
     shape: Shape = RectangleShape,
+    iconSize: TextUnit = MaterialTheme.typography.bodySmall.fontSize,
 ) {
     val iconContentPlaceholder = "[icon]"
     val text = buildAnnotatedString {
@@ -72,8 +74,8 @@ fun Badge(
             iconContentPlaceholder,
             InlineTextContent(
                 Placeholder(
-                    width = MaterialTheme.typography.bodySmall.fontSize,
-                    height = MaterialTheme.typography.bodySmall.fontSize,
+                    width = iconSize,
+                    height = iconSize,
                     placeholderVerticalAlign = PlaceholderVerticalAlign.Center,
                 ),
             ) {

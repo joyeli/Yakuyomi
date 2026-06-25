@@ -63,11 +63,13 @@ import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.flow.StateFlow
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
+import tachiyomi.domain.translation.service.TranslationPreferences
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.Pill
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.screens.EmptyScreen
+import tachiyomi.presentation.core.util.collectAsState
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
@@ -111,6 +113,8 @@ private fun TranslationQueueContent(
     val navigator = LocalNavigator.currentOrThrow
     val items by screenModel.queueState.collectAsState()
     val isPaused by screenModel.isPaused.collectAsState()
+    // 硬總開關：關閉時藏引擎面板（不讓手動預載繞過總開關）、佇列空則顯示「翻譯已關閉」。佇列非空（殘留）仍可看/清。
+    val masterEnabled by remember { Injekt.get<TranslationPreferences>() }.translationMasterEnabled.collectAsState()
 
     // 拖曳重排（#1）：本地鏡像 + reorderable。拖曳中本地先行重排（順手）、同時回寫 manager（持久化、drain 立即生效）；
     // 非拖曳中以最新佇列（含進度更新）重新同步。
@@ -193,10 +197,18 @@ private fun TranslationQueueContent(
         },
     ) { contentPadding ->
         Column(modifier = Modifier.padding(contentPadding)) {
-            // 引擎狀態面板（#7）：常駐顯示在佇列頁頂，可卸下 / 預載。
-            EngineStatusPanel()
+            // 引擎狀態面板（#7）：常駐顯示在佇列頁頂，可卸下 / 預載。總開關關時藏起（引擎本就不該載）。
+            if (masterEnabled) {
+                EngineStatusPanel()
+            }
             if (items.isEmpty()) {
-                EmptyScreen(stringRes = MR.strings.information_no_translations)
+                EmptyScreen(
+                    stringRes = if (masterEnabled) {
+                        MR.strings.information_no_translations
+                    } else {
+                        MR.strings.translation_master_off_message
+                    },
+                )
             } else {
                 LazyColumn(state = lazyListState, modifier = Modifier.fillMaxWidth()) {
                     items(reorderItems, key = { it.chapter.id }) { item ->

@@ -450,6 +450,14 @@
     <string name="manga_from_library">書櫃上的作品</string>
     <string name="downloaded_chapters">已下載的章節</string>
     <string name="pref_dual_page_split">分割寬頁</string>
+    <string name="pref_category_double_page">對開（展開）</string>
+    <string name="pref_double_page_fill">對開填滿方式</string>
+    <string name="pref_double_page_fill_width">寬度為主</string>
+    <string name="pref_double_page_fill_height">高度為主</string>
+    <string name="pref_double_page_align">對開對齊</string>
+    <string name="pref_double_page_align_center">置中</string>
+    <string name="pref_double_page_align_side">靠頁碼小側</string>
+    <string name="pref_double_page_align_summary">靠邊只在「高度為主」時有效；側別依閱讀方向（頁碼小那側）</string>
     <string name="pref_dual_page_invert_summary">若分割後的排版方向與翻閱順序不符</string>
     <string name="pref_dual_page_invert">調換分割寬頁排版</string>
     <string name="pref_dns_over_https">DNS over HTTPS (DoH)</string>
@@ -925,6 +933,7 @@
     <string name="pref_translation_show_advanced_summary">展開所有微調參數（一般使用者免動）</string>
     <string name="pref_translation_master">啟用翻譯</string>
     <string name="pref_translation_master_summary">總開關。關閉時一律不自動翻譯（下載時與閱讀時皆不翻）</string>
+    <string name="translation_master_off_message">翻譯已關閉。到設定開啟「啟用翻譯」即可翻譯。</string>
     <string name="pref_translation_on_download">下載時翻譯章節</string>
     <string name="pref_translation_on_download_summary">偵測 / OCR / 去字在裝置上跑；翻譯走雲端 LLM</string>
     <string name="pref_translation_live">即時翻譯（邊讀邊翻）</string>
@@ -1037,6 +1046,7 @@
     <string name="save_snapshot_after_load_confirm">已載入 %1$d 本。要存成快照，下次離線重看嗎？</string>
     <string name="action_browse_filter_favorite">已收藏</string>
     <string name="action_browse_filter_read">已開卷</string>
+    <string name="action_browse_filter_fetched">已擷取詳情</string>
     <string name="action_source_filters">來源篩選</string>
     <string name="action_clear_filters">清除篩選</string>
     <string name="pref_translation_orientation">排版方向</string>

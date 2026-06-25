@@ -331,13 +331,14 @@ private fun Modifier.selectedOutline(
 ) = drawBehind { if (isSelected) drawRect(color = color) }
 
 /**
- * Yakuyomi：探索錨點高亮——封面外圍粗紅框。配合旗標徽章一起凸顯「上次處理到這」。
+ * Yakuyomi：探索錨點高亮——封面外圍粗紅框。配合放大的旗標徽章（左上）一起凸顯「上次處理到這」，
+ * 與收藏的「整張變暗 mask」用不同視覺語言區隔。
  */
 @Composable
 private fun Modifier.anchorBorder(isAnchor: Boolean): Modifier =
     if (isAnchor) {
         border(
-            width = 6.dp,
+            width = 7.dp,
             color = MaterialTheme.colorScheme.error,
             shape = MaterialTheme.shapes.extraSmall,
         )

@@ -123,6 +123,12 @@ class ReaderPreferences(
         false,
     )
 
+    // Yakuyomi 對開（double-page）版面：填滿方式（0=寬度為主、1=高度為主）。
+    val doublePageFillMode: Preference<Int> = preferenceStore.getInt("yaku_double_page_fill", 0)
+
+    // Yakuyomi 對開版面：對齊（0=置中優先、1=靠邊優先＝靠頁碼小那側，側別由閱讀方向決定）。
+    val doublePageAlign: Preference<Int> = preferenceStore.getInt("yaku_double_page_align", 0)
+
     // endregion
 
     // region Color filter

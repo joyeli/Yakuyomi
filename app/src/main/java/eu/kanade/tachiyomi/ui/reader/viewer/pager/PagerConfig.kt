@@ -48,6 +48,13 @@ class PagerConfig(
     var landscapeZoom = false
         private set
 
+    // Yakuyomi 對開版面：填滿方式（0=寬度為主、1=高度為主）+ 對齊（0=置中、1=靠頁碼小側）。holder 據此設 SSIV 縮放/起始位置。
+    var doublePageFillMode = 0
+        private set
+
+    var doublePageAlign = 0
+        private set
+
     init {
         readerPreferences.readerTheme
             .register(
@@ -72,6 +79,12 @@ class PagerConfig(
 
         readerPreferences.landscapeZoom
             .register({ landscapeZoom = it }, { imagePropertyChangedListener?.invoke() })
+
+        readerPreferences.doublePageFillMode
+            .register({ doublePageFillMode = it }, { imagePropertyChangedListener?.invoke() })
+
+        readerPreferences.doublePageAlign
+            .register({ doublePageAlign = it }, { imagePropertyChangedListener?.invoke() })
 
         readerPreferences.navigationModePager
             .register({ navigationMode = it }, { updateNavigation(navigationMode) })

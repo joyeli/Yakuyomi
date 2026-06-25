@@ -318,6 +318,20 @@ object SettingsTranslationScreen : SearchableSettings {
                         preference = prefs.translationMasterEnabled,
                         title = stringResource(MR.strings.pref_translation_master),
                         subtitle = stringResource(MR.strings.pref_translation_master_summary),
+                        onValueChanged = { enabled ->
+                            if (enabled) {
+                                // 總開關開：續跑佇列 + 若即時翻也開且引擎就緒則預暖。
+                                translationManager.resumeForMasterOn()
+                                if (prefs.liveTranslate.get() && engineService.isReady()) {
+                                    engineService.warmUpAsync()
+                                }
+                            } else {
+                                // 總開關關：中止當前章 + 釋放 warm 引擎（~450MB）。
+                                translationManager.haltForMasterOff()
+                                engineService.shutdownAsync()
+                            }
+                            true
+                        },
                     ),
                     Preference.PreferenceItem.SwitchPreference(
                         preference = prefs.translationEnabled,
@@ -506,9 +520,10 @@ object SettingsTranslationScreen : SearchableSettings {
                     ),
                 ).toImmutableList(),
             ),
-            // —— 去字 ——
+            // —— 去字 ——（翻譯總開關關時整組收起：純渲染參數、關閉時無意義）
             Preference.PreferenceGroup(
                 title = stringResource(MR.strings.pref_translation_group_inpaint),
+                enabled = masterEnabled,
                 preferenceItems = listOfNotNull<Item>(
                     Preference.PreferenceItem.ListPreference(
                         preference = prefs.inpaintMethod,
@@ -519,7 +534,9 @@ object SettingsTranslationScreen : SearchableSettings {
                         ),
                         title = stringResource(MR.strings.pref_translation_inpaint_method),
                         onValueChanged = { _ ->
-                            if (prefs.translationEnabled.get() || prefs.liveTranslate.get()) {
+                            if (prefs.translationMasterEnabled.get() &&
+                                (prefs.translationEnabled.get() || prefs.liveTranslate.get())
+                            ) {
                                 pendingRenderUpdate = RenderUpdateKind.UPGRADE
                             }
                             true
@@ -550,9 +567,10 @@ object SettingsTranslationScreen : SearchableSettings {
                     ),
                 ).toImmutableList(),
             ),
-            // —— 排版 ——
+            // —— 排版 ——（翻譯總開關關時整組收起）
             Preference.PreferenceGroup(
                 title = stringResource(MR.strings.pref_translation_group_typeset),
+                enabled = masterEnabled,
                 preferenceItems = listOfNotNull<Item>(
                     Preference.PreferenceItem.ListPreference(
                         preference = prefs.orientation,
@@ -563,7 +581,9 @@ object SettingsTranslationScreen : SearchableSettings {
                         ),
                         title = stringResource(MR.strings.pref_translation_orientation),
                         onValueChanged = { _ ->
-                            if (prefs.translationEnabled.get() || prefs.liveTranslate.get()) {
+                            if (prefs.translationMasterEnabled.get() &&
+                                (prefs.translationEnabled.get() || prefs.liveTranslate.get())
+                            ) {
                                 pendingRenderUpdate = RenderUpdateKind.LAYOUT
                             }
                             true
@@ -577,7 +597,9 @@ object SettingsTranslationScreen : SearchableSettings {
                         ),
                         title = stringResource(MR.strings.pref_translation_color_mode),
                         onValueChanged = { _ ->
-                            if (prefs.translationEnabled.get() || prefs.liveTranslate.get()) {
+                            if (prefs.translationMasterEnabled.get() &&
+                                (prefs.translationEnabled.get() || prefs.liveTranslate.get())
+                            ) {
                                 pendingRenderUpdate = RenderUpdateKind.LAYOUT
                             }
                             true
@@ -588,7 +610,9 @@ object SettingsTranslationScreen : SearchableSettings {
                         title = stringResource(MR.strings.pref_translation_font_border),
                         subtitle = stringResource(MR.strings.pref_translation_font_border_summary),
                         onValueChanged = { _ ->
-                            if (prefs.translationEnabled.get() || prefs.liveTranslate.get()) {
+                            if (prefs.translationMasterEnabled.get() &&
+                                (prefs.translationEnabled.get() || prefs.liveTranslate.get())
+                            ) {
                                 pendingRenderUpdate = RenderUpdateKind.LAYOUT
                             }
                             true
@@ -632,9 +656,10 @@ object SettingsTranslationScreen : SearchableSettings {
                     ),
                 ).toImmutableList(),
             ),
-            // —— 效能 ——
+            // —— 效能 ——（翻譯總開關關時整組收起）
             Preference.PreferenceGroup(
                 title = stringResource(MR.strings.pref_translation_group_performance),
+                enabled = masterEnabled,
                 preferenceItems = listOfNotNull<Item>(
                     Preference.PreferenceItem.ListPreference(
                         preference = prefs.ocrConcurrency,
@@ -653,7 +678,7 @@ object SettingsTranslationScreen : SearchableSettings {
             // —— 辨識（進階）——
             Preference.PreferenceGroup(
                 title = stringResource(MR.strings.pref_translation_group_recognition),
-                enabled = showAdvanced,
+                enabled = showAdvanced && masterEnabled,
                 preferenceItems = listOfNotNull<Item>(
                     adv(
                         showAdvanced,

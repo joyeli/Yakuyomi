@@ -99,9 +99,10 @@ data class BrowseSourceScreen(
         val screenModel = rememberScreenModel { BrowseSourceScreenModel(sourceId, listingQuery) }
         val state by screenModel.state.collectAsState()
 
-        // Yakuyomi：探索全域篩選（收藏/開卷）狀態 + sheet 顯示旗標。
+        // Yakuyomi：探索全域篩選（收藏/開卷/擷取）狀態 + sheet 顯示旗標。
         val favoriteFilter by screenModel.browseFilterFavorite.prefCollectAsState()
         val readFilter by screenModel.browseFilterRead.prefCollectAsState()
+        val fetchedFilter by screenModel.browseFilterFetched.prefCollectAsState()
         var showGlobalFilter by remember { mutableStateOf(false) }
 
         // Yakuyomi：錨點 url（已設就在任何清單顯示旗標徽章，含快照）。
@@ -307,10 +308,11 @@ data class BrowseSourceScreen(
                                 },
                             )
                         }
-                        // Yakuyomi：篩選（整合全域收藏/開卷三態 + 來源自帶 extension 篩選）。永遠顯示。
+                        // Yakuyomi：篩選（整合全域收藏/開卷/擷取三態 + 來源自帶 extension 篩選）。永遠顯示。
                         FilterChip(
                             selected = favoriteFilter != TriState.DISABLED ||
                                 readFilter != TriState.DISABLED ||
+                                fetchedFilter != TriState.DISABLED ||
                                 state.listing is Listing.Search,
                             onClick = { showGlobalFilter = true },
                             leadingIcon = {
@@ -395,8 +397,10 @@ data class BrowseSourceScreen(
             BrowseGlobalFilterDialog(
                 favorite = favoriteFilter,
                 read = readFilter,
+                fetched = fetchedFilter,
                 onToggleFavorite = screenModel::toggleGlobalFavoriteFilter,
                 onToggleRead = screenModel::toggleGlobalReadFilter,
+                onToggleFetched = screenModel::toggleGlobalFetchedFilter,
                 onClear = screenModel::clearGlobalFilters,
                 onDismissRequest = { showGlobalFilter = false },
                 hasSourceFilters = state.filters.isNotEmpty(),

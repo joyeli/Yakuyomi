@@ -58,6 +58,9 @@ class SourcePreferences(
     )
     val browseFilterRead: Preference<TriState> = preferenceStore.getEnum("browse_filter_read", TriState.DISABLED)
 
+    // 擷取＝該本詳情曾被載入過（[tachiyomi.domain.manga.model.Manga.initialized]，曾點進去/載過書目說明）；未擷取＝全新沒點過。
+    val browseFilterFetched: Preference<TriState> = preferenceStore.getEnum("browse_filter_fetched", TriState.DISABLED)
+
     // 探索翻頁最小間隔（秒）。擋住客戶端篩選稀疏時的連翻爆衝、防 ban。與 data 層 SourcePagingSource.PREF_LOAD_INTERVAL 同 key。
     val browseLoadInterval: Preference<Int> = preferenceStore.getInt("browse_load_interval", 1)
 

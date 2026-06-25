@@ -27,8 +27,10 @@ import tachiyomi.presentation.core.i18n.stringResource
 fun BrowseGlobalFilterDialog(
     favorite: TriState,
     read: TriState,
+    fetched: TriState,
     onToggleFavorite: () -> Unit,
     onToggleRead: () -> Unit,
+    onToggleFetched: () -> Unit,
     onClear: () -> Unit,
     onDismissRequest: () -> Unit,
     hasSourceFilters: Boolean = false,
@@ -46,8 +48,13 @@ fun BrowseGlobalFilterDialog(
                 state = read,
                 onClick = { onToggleRead() },
             )
+            TriStateItem(
+                label = stringResource(MR.strings.action_browse_filter_fetched),
+                state = fetched,
+                onClick = { onToggleFetched() },
+            )
             // Yakuyomi：清除全域篩選（只在有啟用時顯示）。
-            if (favorite != TriState.DISABLED || read != TriState.DISABLED) {
+            if (favorite != TriState.DISABLED || read != TriState.DISABLED || fetched != TriState.DISABLED) {
                 ListItem(
                     modifier = Modifier.clickable(onClick = onClear),
                     leadingContent = { Icon(Icons.Outlined.FilterAltOff, contentDescription = null) },

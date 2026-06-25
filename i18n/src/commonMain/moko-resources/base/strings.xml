@@ -47,6 +47,7 @@
     <string name="save_snapshot_after_load_confirm">Loaded %1$d entries. Save them as a snapshot so you can review offline next time?</string>
     <string name="action_browse_filter_favorite">In your library</string>
     <string name="action_browse_filter_read">Started reading</string>
+    <string name="action_browse_filter_fetched">Details fetched</string>
     <string name="action_source_filters">Source filters</string>
     <string name="action_clear_filters">Clear filters</string>
     <string name="label_library">Library</string>
@@ -451,6 +452,14 @@
     <string name="pref_show_navigation_mode">Show tap zones overlay</string>
     <string name="pref_show_navigation_mode_summary">Briefly show when reader is opened</string>
     <string name="pref_dual_page_split">Split wide pages</string>
+    <string name="pref_category_double_page">Double-page (spread)</string>
+    <string name="pref_double_page_fill">Double-page fill</string>
+    <string name="pref_double_page_fill_width">Fit width</string>
+    <string name="pref_double_page_fill_height">Fit height</string>
+    <string name="pref_double_page_align">Double-page alignment</string>
+    <string name="pref_double_page_align_center">Center</string>
+    <string name="pref_double_page_align_side">Lower-page side</string>
+    <string name="pref_double_page_align_summary">Side alignment only applies with Fit height; side follows reading direction</string>
     <string name="pref_dual_page_invert">Invert split page placement</string>
     <string name="pref_dual_page_invert_summary">If the placement of the split wide pages don\'t match reading direction</string>
     <string name="pref_page_rotate">Rotate wide pages to fit</string>
@@ -1150,6 +1159,7 @@
     <string name="pref_translation_show_advanced_summary">Expand all fine-tuning parameters (most users can skip)</string>
     <string name="pref_translation_master">Enable translation</string>
     <string name="pref_translation_master_summary">Master switch. When off, nothing is translated automatically (on download or while reading)</string>
+    <string name="translation_master_off_message">Translation is off. Turn on \"Enable translation\" in Settings to translate.</string>
     <string name="pref_translation_on_download">Translate chapters on download</string>
     <string name="pref_translation_on_download_summary">Detection / OCR / text removal run on-device; translation uses a cloud LLM</string>
     <string name="pref_translation_live">Live translation (as you read)</string>

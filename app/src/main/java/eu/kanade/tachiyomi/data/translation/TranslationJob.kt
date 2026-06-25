@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.takeWhile
 import tachiyomi.core.common.i18n.stringResource
+import tachiyomi.domain.translation.service.TranslationPreferences
 import tachiyomi.i18n.MR
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -37,6 +38,7 @@ import uy.kohesive.injekt.api.get
 class TranslationJob(context: Context, workerParams: WorkerParameters) : CoroutineWorker(context, workerParams) {
 
     private val translationManager: TranslationManager = Injekt.get()
+    private val translationPreferences: TranslationPreferences = Injekt.get()
 
     override suspend fun getForegroundInfo(): ForegroundInfo {
         return ForegroundInfo(
@@ -72,6 +74,8 @@ class TranslationJob(context: Context, workerParams: WorkerParameters) : Corouti
 
     private fun hasActiveWork(items: List<TranslationItem>, paused: Boolean): Boolean {
         if (paused) return false
+        // 硬總開關：master 關時佇列不會 drain → 不算「有活」，避免前景服務 +「翻譯中」通知無限常駐。
+        if (!translationPreferences.translationMasterEnabled.get()) return false
         return items.any {
             it.status == TranslationItem.Status.QUEUE || it.status == TranslationItem.Status.TRANSLATING
         }

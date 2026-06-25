@@ -82,10 +82,9 @@ private fun BrowseSourceCompactGridItem(
         ),
         coverAlpha = if (manga.favorite) CommonMangaItemDefaults.BrowseFavoriteCoverAlpha else 1f,
         coverBadgeStart = {
-            InLibraryBadge(enabled = manga.favorite)
-        },
-        coverBadgeEnd = {
+            // Yakuyomi：錨點旗標移到左上（與收藏徽章同側、置最前＝最角落）。
             AnchorBadge(enabled = isAnchor)
+            InLibraryBadge(enabled = manga.favorite)
         },
         isAnchor = isAnchor,
         onLongClick = onLongClick,
