@@ -258,10 +258,12 @@ class TranslationManager(private val context: Context) {
      *   新章排到既有排隊項之前；若該章已在佇列（且尚未開始翻）則**移到最前**而非加重複項。
      *   **注意**：只重排 QUEUE 項——正在翻（TRANSLATING）的那章不會被中途搶占（會翻完當前章才換下一章），此為已知限制。
      */
-    fun translate(manga: Manga, chapters: List<Chapter>, atFront: Boolean = false) {
+    fun translate(manga: Manga, chapters: List<Chapter>, atFront: Boolean = false, method: String? = null) {
         if (chapters.isEmpty()) return
         if (!masterEnabled()) return // 硬總開關：關閉時自動/手動翻一律不排入
-        val m = translationPreferences.inpaintMethod.get() // 排入當下擷取一次去字法，逐章帶走
+        // method 非 null＝呼叫端指定去字法（即時翻/reader 情境一律 [LIVE_INPAINT_METHOD] 求快）；
+        // null＝用設定的去字法（下載時翻、詳情頁手動翻——可慢可高品質）。
+        val m = method ?: translationPreferences.inpaintMethod.get()
         synchronized(lock) {
             if (atFront) {
                 // 插隊：依輸入順序，把每章放到佇列最前（已排隊則搬到最前、不加重複）。
@@ -664,5 +666,11 @@ class TranslationManager(private val context: Context) {
     companion object {
         private const val MARKER_NAME = ".yakuyomi_translated"
         private const val TMP_SUFFIX = ".yakutmp"
+
+        /**
+         * 即時翻/reader 情境固定用的去字法＝快速 boxfill（不管使用者設定的去字模式）。讀到時求低延遲，
+         * 不跑慢的整頁/逐區 lama；素材記成 boxfill，日後可經重繪升級到 lama（設計：讀時 boxfill、閒置升 lama）。
+         */
+        const val LIVE_INPAINT_METHOD = "boxfill"
     }
 }

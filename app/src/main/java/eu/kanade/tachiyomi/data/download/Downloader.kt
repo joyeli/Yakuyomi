@@ -433,7 +433,13 @@ class Downloader(
             //    （正在讀的章優先翻），與 TranslatingPageLoader 的插隊語義一致。
             val pending = translationManager.isPendingTranslate(download.chapter.id)
             if ((translationManager.isReady() && !translationManager.isSourceExcluded(download.manga)) || pending) {
-                translationManager.translate(download.manga, listOf(download.chapter), atFront = pending)
+                translationManager.translate(
+                    download.manga,
+                    listOf(download.chapter),
+                    atFront = pending,
+                    // pending＝reader 即時翻/控制鈕觸發的線上章 → 一律快速 boxfill；自動下載時翻（!pending）用設定去字法。
+                    method = if (pending) TranslationManager.LIVE_INPAINT_METHOD else null,
+                )
                 if (pending) translationManager.clearPending(download.chapter.id)
             }
         } catch (error: Throwable) {

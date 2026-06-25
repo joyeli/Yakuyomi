@@ -173,7 +173,13 @@ internal class TranslatingPageLoader(
                 return
             }
             // 整章排入受管理佇列（背景翻、可暫停/取消/重試、清單顯示翻譯中）。atFront＝true：正在讀的章插隊到最前。
-            translationManager.translate(manga, listOf(domainChapter), atFront = true)
+            // 即時翻一律 boxfill（快），不用設定的去字法——讀到時求低延遲。
+            translationManager.translate(
+                manga,
+                listOf(domainChapter),
+                atFront = true,
+                method = TranslationManager.LIVE_INPAINT_METHOD,
+            )
             startQueueObserver()
         }
     }

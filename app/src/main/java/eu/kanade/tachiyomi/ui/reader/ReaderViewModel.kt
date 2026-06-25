@@ -485,8 +485,12 @@ class ReaderViewModel @JvmOverloads constructor(
                 skipCache = true,
             )
             if (downloaded) {
-                // 背景翻（非 atFront）：當前章已被 onActivated 插隊到最前、優先翻完，下一章接著翻。
-                translationManager.translate(manga, listOf(next))
+                // 背景翻（非 atFront）：當前章已被 onActivated 插隊到最前、優先翻完，下一章接著翻。即時翻預取一律 boxfill。
+                translationManager.translate(
+                    manga,
+                    listOf(next),
+                    method = TranslationManager.LIVE_INPAINT_METHOD,
+                )
             }
         }
     }
@@ -1380,7 +1384,13 @@ class ReaderViewModel @JvmOverloads constructor(
                     if (pageLoader is TranslatingPageLoader) {
                         pageLoader.onActivated()
                     } else {
-                        translationManager.translate(manga, listOf(domainChapter), atFront = true)
+                        // reader 控制鈕「翻這話」＝即時情境 → boxfill（與自動即時翻一致）。
+                        translationManager.translate(
+                            manga,
+                            listOf(domainChapter),
+                            atFront = true,
+                            method = TranslationManager.LIVE_INPAINT_METHOD,
+                        )
                     }
                 } else {
                     // 線上：走與自動相同的「下載 + 完成後重載進已下載路徑」流程（本 session 也會顯示）。
