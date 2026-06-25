@@ -40,8 +40,8 @@ android {
     defaultConfig {
         applicationId = "li.joye.yakuyomi"
 
-        versionCode = 30
-        versionName = "0.6.1"
+        versionCode = 31
+        versionName = "0.6.2"
 
         buildConfigField("String", "COMMIT_COUNT", "\"${getLatestCommitCount()}\"")
         buildConfigField("String", "COMMIT_SHA", "\"${getLatestCommitSha()}\"")

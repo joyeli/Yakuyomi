@@ -1236,15 +1236,14 @@ class ReaderViewModel @JvmOverloads constructor(
         val chapter = page.chapter
 
         viewModelScope.launchIO {
-            // 收尾：回 UI thread 刷新該頁（retryPage → Ready → holder 重 decode，把 spinner 換回圖）並回報成敗。
-            // 成功＝顯示新圖；失敗/無素材＝重新 decode 原圖（未動），避免頁面卡在「重繪中」轉圈圈。
+            // 收尾：成功 → page.reload() 驅動 holder **就地**重 decode 譯圖（與即時翻 swapToFile 同機制、保留縮放，
+            // 不走「轉圈→retry→重 fit」→ 避免上下黑邊閃動）；失敗/無素材 → 不動（頁面從未進載入態、維持原顯示）。
             suspend fun finish(ok: Boolean) {
-                withUIContext { page.chapter.pageLoader?.retryPage(page) }
+                if (ok) withUIContext { page.reload() }
                 eventChannel.send(Event.ReRenderResult(ok))
             }
 
-            // 先讓頁面進入載入態（顯示轉圈圈），並提示「重繪中…」。
-            withUIContext { page.status = Page.State.Queue }
+            // 提示「重繪中…」。不再把頁面設成載入態 → 處理期間維持原圖、好了才就地換、不閃黑邊。
             eventChannel.send(Event.ReRenderStarted)
 
             try {

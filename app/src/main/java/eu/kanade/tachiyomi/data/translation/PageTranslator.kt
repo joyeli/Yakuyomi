@@ -124,6 +124,7 @@ class PageTranslator(private val context: Context) {
         // 逐頁錯誤累積：某頁 Failed → 跳過、續翻下一頁（不再因連續失敗中止整章），失敗的頁名+原因寫進
         // 該話資料夾的 [ERRORS_FILE]（同步到雲端可直接查；未標記的頁留待重試＝整章 isChapterTranslated=false 變紅）。
         val errors = StringBuilder()
+        var materialsFailed = false // 素材存失敗只記一次（避免 18 頁刷 18 行）
         try {
             // 逐頁透過 warm [engineService] 翻（引擎跨章常駐、不每章重載 ~450MB）。
             // 服務內部以 Mutex 序列化引擎存取；drain 是單一消費者故呼叫天然序列。§11 三態處理與舊版完全一致。
@@ -137,7 +138,12 @@ class PageTranslator(private val context: Context) {
                         writeBack(img, r.page)
                         // 保留重繪素材（best-effort、不擋翻譯）：bmp 為剛解碼的原圖（引擎不會 mutate 輸入、回的是新 bitmap）。
                         if (keepMaterials && r.analysis != null) {
-                            saveMaterials(chapterDir, name, bmp, r.analysis!!, inpaintMethodRaw)
+                            // 素材存失敗（如 SD/SAF 不支援 .yakuyomi 子夾）不再無聲 → 首次失敗寫進該話錯誤檔，供 adb-less 診斷。
+                            val matErr = saveMaterials(chapterDir, name, bmp, r.analysis!!, inpaintMethodRaw)
+                            if (matErr != null && !materialsFailed) {
+                                materialsFailed = true
+                                errors.appendLine("(materials)\t$matErr")
+                            }
                         }
                         translated++
                         done.add(name)
@@ -737,10 +743,12 @@ class PageTranslator(private val context: Context) {
         original: Bitmap,
         analysis: PageAnalysis,
         method: String,
-    ) {
-        runCatching {
+    ): String? {
+        return runCatching {
             val base = pageName.substringBeforeLast('.')
-            val dir = chapterDir.findFile(MATERIALS_DIR) ?: chapterDir.createDirectory(MATERIALS_DIR) ?: return
+            val dir = chapterDir.findFile(MATERIALS_DIR)
+                ?: chapterDir.createDirectory(MATERIALS_DIR)
+                ?: return "素材存失敗：無法建立 .yakuyomi 子夾（此儲存位置可能不支援，建議改用內部儲存）"
             // 原圖 → WEBP（API≥30 用 WEBP_LOSSY，否則舊 WEBP）。
             val webpFmt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 Bitmap.CompressFormat.WEBP_LOSSY
@@ -772,7 +780,14 @@ class PageTranslator(private val context: Context) {
             // mask 改存獨立檔 → materials 不帶 mask（預設空字串、不序列化進 json）。
             val materials = PageMaterials(method = method, regions = regions)
             overwriteBytes(dir, "$base.json", MATERIALS_JSON.encodeToString(materials).toByteArray())
-        }.onFailure { logcat(LogPriority.WARN, it) { "保留重繪素材失敗 $pageName（不影響翻譯）" } }
+        }.fold(
+            onSuccess = { null },
+            onFailure = { e ->
+                logcat(LogPriority.WARN, e) { "保留重繪素材失敗 $pageName（不影響翻譯）" }
+                "素材存失敗（此儲存位置可能不支援保留素材／重繪，建議改用內部儲存）：" +
+                    "${e.javaClass.simpleName}${e.message?.let { ": $it" } ?: ""}"
+            },
+        )
     }
 
     /** 二值化 seg 遮罩（>127 白 / 否則黑）→ 新 ARGB Bitmap（呼叫端負責 recycle）。getPixels/setPixels 批次，不逐像素。 */
