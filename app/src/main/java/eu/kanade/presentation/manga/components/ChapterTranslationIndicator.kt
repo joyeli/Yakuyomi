@@ -1,9 +1,14 @@
 package eu.kanade.presentation.manga.components
 
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material3.CircularProgressIndicator
@@ -25,7 +30,7 @@ enum class ChapterTranslationState {
     NONE, // 已下載未翻、可翻（顯示翻譯鈕）
     QUEUED, // 排隊中（灰）
     TRANSLATING, // 翻譯中（轉圈）
-    TRANSLATED, // 已翻（主色）
+    TRANSLATED, // 已翻（主色＋打勾徽章）
     ERROR, // 失敗（紅）
 }
 
@@ -75,22 +80,43 @@ fun ChapterTranslationIndicator(
                 enabled = enabled,
                 modifier = modifier.size(40.dp),
             ) {
-                Icon(
-                    imageVector = if (state == ChapterTranslationState.ERROR) {
-                        Icons.Outlined.ErrorOutline
-                    } else {
-                        Icons.Outlined.Translate
-                    },
-                    contentDescription = stringResource(MR.strings.action_translate),
-                    modifier = Modifier.size(26.dp),
-                    tint = when (state) {
-                        ChapterTranslationState.TRANSLATED -> MaterialTheme.colorScheme.primary
-                        ChapterTranslationState.ERROR -> MaterialTheme.colorScheme.error
-                        ChapterTranslationState.QUEUED ->
-                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-                        else -> MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                )
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = if (state == ChapterTranslationState.ERROR) {
+                            Icons.Outlined.ErrorOutline
+                        } else {
+                            Icons.Outlined.Translate
+                        },
+                        contentDescription = stringResource(MR.strings.action_translate),
+                        modifier = Modifier.size(26.dp),
+                        tint = when (state) {
+                            ChapterTranslationState.TRANSLATED -> MaterialTheme.colorScheme.primary
+                            ChapterTranslationState.ERROR -> MaterialTheme.colorScheme.error
+                            ChapterTranslationState.QUEUED ->
+                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                    // 已翻：右下疊一個打勾徽章。未翻(NONE)與已翻(TRANSLATED)本是同一顆翻譯圖示、只差色調，
+                    // 易被誤判為「已完成」（連開發者都中過）。加打勾後兩者一眼分得出。
+                    if (state == ChapterTranslationState.TRANSLATED) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .size(14.dp)
+                                .background(MaterialTheme.colorScheme.surface, CircleShape)
+                                .padding(1.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.CheckCircle,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+                    }
+                }
             }
         }
     }

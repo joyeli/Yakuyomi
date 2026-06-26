@@ -1047,6 +1047,10 @@
     <string name="action_browse_filter_favorite">已收藏</string>
     <string name="action_browse_filter_read">已開卷</string>
     <string name="action_browse_filter_fetched">已擷取詳情</string>
+    <string name="action_fetch_details">擷取詳情</string>
+    <string name="fetch_details_empty">此清單沒有可擷取的書目</string>
+    <string name="fetch_details_summary">已擷取 %1$d 本、失敗 %2$d 本</string>
+    <string name="fetch_details_failed_title">擷取失敗</string>
     <string name="action_source_filters">來源篩選</string>
     <string name="action_clear_filters">清除篩選</string>
     <string name="pref_translation_orientation">排版方向</string>
@@ -1109,6 +1113,7 @@
     <string name="action_display_translation_badge">已翻章數</string>
     <string name="information_no_translations">佇列中沒有翻譯</string>
     <string name="translation_status_error">失敗</string>
+    <string name="translation_epub_unsupported">EPUB 章節暫不支援翻譯——請改用資料夾或 CBZ/CBR/7z。</string>
     <string name="translation_status_queued">排隊中</string>
     <string name="translation_status_translating">翻譯中</string>
     <string name="pref_translation_lang_english">英文</string>

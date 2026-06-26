@@ -701,15 +701,21 @@ class PageTranslator(private val context: Context) {
     }
 
     /**
-     * 覆寫 [dir]/[name]：用 ContentResolver 的 "wt"（write + truncate）模式開流。
-     * 繞過 SAF DocumentFile「w」模式不截斷的老問題——否則寫入比舊檔短的內容會留下舊尾，
-     * 對 json 尤其致命：去字法字串 boxfill(7) / auto_whole(10) 長度不同，
-     * 由 auto_whole 改回 boxfill 時 json 變短、舊尾 3 byte 殘留 → 下次 decodeMaterials 整個解析失敗（顯示「無素材」）。
-     * File-backed UniFile 也吃 "wt"（FileOutputStream 本就截斷）。best-effort：回傳是否成功。
+     * 開「截斷寫」串流（覆寫 [f]、不留舊尾）。
+     *  - **SAF** DocumentFile 用 ContentResolver "wt"：繞過 DocumentFile「w」不截斷的老問題——寫比舊檔短的內容會留舊尾，
+     *    對 json 尤其致命（去字法字串 boxfill(7)/auto_whole(10) 長度不同，由 auto_whole 改回 boxfill 時 json 變短、
+     *    舊尾殘留 → decodeMaterials 解析失敗顯示「無素材」）。
+     *  - **file-backed** UniFile（如壓縮檔解壓到 cacheDir 的暫存）用 [UniFile.openOutputStream]（FileOutputStream 本就截斷）：
+     *    實測 ContentResolver "wt" 對 file:// uri **不落地** → marker(.yakuyomi_translated)/素材寫不進暫存 →
+     *    重壓的 zip 沒 marker → isChapterTranslated=false → 整章誤判失敗（翻好卻變紅）。
+     * best-effort：開不了回 null。
      */
+    private fun openTruncating(f: UniFile): java.io.OutputStream? =
+        if (f.uri.scheme == "file") f.openOutputStream() else context.contentResolver.openOutputStream(f.uri, "wt")
+
     private fun overwriteBytes(dir: UniFile, name: String, bytes: ByteArray): Boolean = runCatching {
         val f = dir.findFile(name) ?: dir.createFile(name) ?: return@runCatching false
-        val os = context.contentResolver.openOutputStream(f.uri, "wt") ?: return@runCatching false
+        val os = openTruncating(f) ?: return@runCatching false
         os.use { it.write(bytes) }
         true
     }.getOrDefault(false)
@@ -723,7 +729,7 @@ class PageTranslator(private val context: Context) {
         quality: Int,
     ): Boolean = runCatching {
         val f = dir.findFile(name) ?: dir.createFile(name) ?: return@runCatching false
-        val os = context.contentResolver.openOutputStream(f.uri, "wt") ?: return@runCatching false
+        val os = openTruncating(f) ?: return@runCatching false
         os.use { bmp.compress(format, quality, it) }
         true
     }.getOrDefault(false)

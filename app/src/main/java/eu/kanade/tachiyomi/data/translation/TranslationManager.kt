@@ -1,9 +1,12 @@
 package eu.kanade.tachiyomi.data.translation
 
 import android.content.Context
+import android.os.PowerManager
 import com.hippo.unifile.UniFile
+import eu.kanade.domain.chapter.model.toSChapter
 import eu.kanade.tachiyomi.data.download.DownloadProvider
 import eu.kanade.tachiyomi.data.translation.model.TranslationItem
+import eu.kanade.tachiyomi.util.system.powerManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -28,6 +31,8 @@ import tachiyomi.domain.manga.interactor.GetFavorites
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.domain.translation.service.TranslationPreferences
+import tachiyomi.source.local.LocalSource
+import tachiyomi.source.local.io.Format
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.io.File
@@ -497,55 +502,66 @@ class TranslationManager(private val context: Context) {
     }
 
     private suspend fun drainLoop() = drainMutex.withLock {
-        // 硬總開關：master 關時一律不取新章（一道 gate 收掉所有 drain 來源——還原/下載/手動/重繪）。
-        while (!_isPaused.value && masterEnabled()) {
-            val entry = synchronized(lock) {
-                entries.firstOrNull { it.status == TranslationItem.Status.QUEUE }
-            } ?: break
-            synchronized(lock) {
-                entry.status = TranslationItem.Status.TRANSLATING
-                entry.done = 0
-                entry.total = 0
-                stopActive = false // 開始新章前清旗標
-            }
-            publish()
-            val translated = try {
-                translateOne(entry)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Throwable) {
-                logcat(LogPriority.ERROR, e) { "翻譯章失敗 ${entry.chapter.name}（原檔保留）" }
-                synchronized(lock) { entry.status = TranslationItem.Status.ERROR } // 失敗 → 留佇列可重試
-                publish()
-                persist()
-                continue
-            }
-            if (stopActive) {
-                // 被暫停/取消/清空打斷：還在佇列(暫停)→回 QUEUE 等續傳；已被移除(取消/清空)→不動
+        // 翻譯是 CPU 密集（OCR/去字 ONNX 推論）：螢幕關閉時若不持 WakeLock，CPU 會休眠 → 推論暫停（前景服務只保
+        // 「行程不被回收」、不保「CPU 不睡」）。整個 drain 期間持 partial WakeLock、結束（佇列空/暫停/總開關關）即放，
+        // 修「前景但關螢幕就停」。acquire 逾時只是洩漏保險、正常由 finally 放。
+        val wakeLock = context.powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKELOCK_TAG).apply {
+            setReferenceCounted(false)
+            acquire(WAKELOCK_TIMEOUT_MS)
+        }
+        try {
+            // 硬總開關：master 關時一律不取新章（一道 gate 收掉所有 drain 來源——還原/下載/手動/重繪）。
+            while (!_isPaused.value && masterEnabled()) {
+                val entry = synchronized(lock) {
+                    entries.firstOrNull { it.status == TranslationItem.Status.QUEUE }
+                } ?: break
                 synchronized(lock) {
-                    if (entries.contains(entry)) entry.status = TranslationItem.Status.QUEUE
+                    entry.status = TranslationItem.Status.TRANSLATING
+                    entry.done = 0
+                    entry.total = 0
+                    stopActive = false // 開始新章前清旗標
+                }
+                publish()
+                val translated = try {
+                    translateOne(entry)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    logcat(LogPriority.ERROR, e) { "翻譯章失敗 ${entry.chapter.name}（原檔保留）" }
+                    synchronized(lock) { entry.status = TranslationItem.Status.ERROR } // 失敗 → 留佇列可重試
+                    publish()
+                    persist()
+                    continue
+                }
+                if (stopActive) {
+                    // 被暫停/取消/清空打斷：還在佇列(暫停)→回 QUEUE 等續傳；已被移除(取消/清空)→不動
+                    synchronized(lock) {
+                        if (entries.contains(entry)) entry.status = TranslationItem.Status.QUEUE
+                    }
+                    publish()
+                    persist()
+                    if (_isPaused.value) break else continue
+                }
+                if (translated) {
+                    synchronized(lock) { entries.remove(entry) } // 真的翻成 → 離開佇列
+                    _translatedIds.value = _translatedIds.value + entry.chapter.id
+                    translationCache.invalidate(entry.manga.id) // 已翻章數變 → 失效該本、刷新書庫徽章
+                } else {
+                    // 沒下載 / 沒翻成（部分失敗）→ 標 ERROR 留佇列可重試，不誤標「已翻」
+                    synchronized(lock) { entry.status = TranslationItem.Status.ERROR }
                 }
                 publish()
                 persist()
-                if (_isPaused.value) break else continue
             }
-            if (translated) {
-                synchronized(lock) { entries.remove(entry) } // 真的翻成 → 離開佇列
-                _translatedIds.value = _translatedIds.value + entry.chapter.id
-                translationCache.invalidate(entry.manga.id) // 已翻章數變 → 失效該本、刷新書庫徽章
-            } else {
-                // 沒下載 / 沒翻成（部分失敗）→ 標 ERROR 留佇列可重試，不誤標「已翻」
-                synchronized(lock) { entry.status = TranslationItem.Status.ERROR }
+            // 迴圈退出（因「無 QUEUE 項」自然翻完，或「總開關關」使 while 條件 false 退出；暫停則走另一分支不到這）：
+            // 即時翻**關著**時釋放 warm 引擎，別讓 ~450MB 閒置；即時翻**開著**時保 warm（reader 隨時要讀下一章）。
+            // 引擎之後會在下次 translatePage lazy 重建。shutdown 走服務自己的 Mutex（與 drainMutex 不同鎖、不死鎖）。
+            // 釋放 warm 引擎：只有「總開關開 + 即時翻開」才保 warm（reader 要讀下一章）；總開關關或即時翻關 → 釋放 ~450MB。
+            if (!_isPaused.value && !(masterEnabled() && translationPreferences.liveTranslate.get())) {
+                engineService.shutdown()
             }
-            publish()
-            persist()
-        }
-        // 迴圈退出（因「無 QUEUE 項」自然翻完，或「總開關關」使 while 條件 false 退出；暫停則走另一分支不到這）：
-        // 即時翻**關著**時釋放 warm 引擎，別讓 ~450MB 閒置；即時翻**開著**時保 warm（reader 隨時要讀下一章）。
-        // 引擎之後會在下次 translatePage lazy 重建。shutdown 走服務自己的 Mutex（與 drainMutex 不同鎖、不死鎖）。
-        // 釋放 warm 引擎：只有「總開關開 + 即時翻開」才保 warm（reader 要讀下一章）；總開關關或即時翻關 → 釋放 ~450MB。
-        if (!_isPaused.value && !(masterEnabled() && translationPreferences.liveTranslate.get())) {
-            engineService.shutdown()
+        } finally {
+            if (wakeLock.isHeld) wakeLock.release()
         }
     }
 
@@ -608,6 +624,20 @@ class TranslationManager(private val context: Context) {
 
     private fun chapterDir(manga: Manga, chapter: Chapter): UniFile? {
         val source = sourceManager.getOrStub(manga.source)
+        // local 來源：章節不在下載夾，改用 LocalSource 的解析器定位 local/<manga>/<章> 的實際檔案/資料夾。
+        //  - Directory＝鬆散夾 → 原地覆蓋頁圖（同已下載鬆散章）。
+        //  - Archive＝cbz/cbr/7z/tar… → processArchiveInPlace 解壓→翻→重壓回**同名**（非 zip 者內部轉成 zip-content、
+        //    副檔名不變、libarchive 仍可讀）；換言之 rar/7z 透明地就地翻、檔名不變。
+        //  - Epub＝結構化（OPF/xhtml）→ 攤平重壓會破壞它 → v1 不支援、回 null。
+        if (source is LocalSource) {
+            return runCatching { source.getFormat(chapter.toSChapter()) }.getOrNull()?.let { fmt ->
+                when (fmt) {
+                    is Format.Directory -> fmt.file
+                    is Format.Archive -> fmt.file
+                    is Format.Epub -> null
+                }
+            }
+        }
         return downloadProvider.findChapterDir(chapter.name, chapter.scanlator, chapter.url, manga.title, source)
     }
 
@@ -641,13 +671,23 @@ class TranslationManager(private val context: Context) {
             val result = process(tmpU)
             if (shouldStop()) return false // 被暫停/取消中止 → 丟棄暫存、原檔不動（不壓回半成品）
             if (!result.swap) return false // 全失敗（沒翻成/沒重繪到）→ 不動原檔、可重試
-            // 3. 重壓到暫存 zip（原檔此時完好）
+            // 3. 重壓到暫存 zip（原檔此時完好）。先清掉上次打包失敗殘留的孤兒暫存。
+            parent.findFile("$cbzName$TMP_SUFFIX")?.delete()
             val newZip = parent.createFile("$cbzName$TMP_SUFFIX") ?: return false
-            ZipWriter(context, newZip).use { w -> tmpU.listFiles()?.forEach { w.write(it) } }
-            // 4. 換檔
-            cbz.delete()
-            newZip.renameTo(cbzName)
-            return result.success // 部分成功（swap 了但未全覆蓋）回 false → drain 標 ERROR 留佇列補剩頁
+            // 只壓「檔案」、跳過目錄：ZipWriter.write() 把目錄當檔案讀會丟 EISDIR（素材子夾 .yakuyomi 觸發、
+            // = local 壓縮檔翻完打包失敗的真因）。壓縮檔不支援素材重繪 → 素材子夾不必進壓縮檔；
+            // marker(.yakuyomi_translated) 與譯圖都是檔案、照壓。
+            ZipWriter(context, newZip).use { w -> tmpU.listFiles()?.forEach { if (it.isFile) w.write(it) } }
+            // 4. 換檔。優先 §11-safe 的 delete+rename（一般裝置儲存可行、原子）；某些 SAF provider delete/rename
+            //    不可靠 → 退回「就地把暫存 zip 位元組覆寫回原檔」(overwriteFrom、"wt" 截斷、不靠 rename)。
+            if (cbz.delete() && newZip.renameTo(cbzName)) {
+                return result.success
+            }
+            val target = parent.findFile(cbzName) ?: parent.createFile(cbzName) ?: return false
+            val overwritten = overwriteFrom(target, newZip)
+            if (overwritten) newZip.delete()
+            // 覆寫失敗 → 保留 .yakutmp（翻譯結果不丟、可重試）、回 false → drain 標 ERROR 留佇列可重試。
+            return overwritten && result.success
         } catch (e: Throwable) {
             logcat(LogPriority.ERROR, e) { "processArchiveInPlace 失敗（原檔保留）" }
             return false
@@ -655,6 +695,16 @@ class TranslationManager(private val context: Context) {
             tmp.deleteRecursively()
         }
     }
+
+    /** 把 [src] 的位元組就地覆寫進 [dst]（ContentResolver "wt" 截斷；繞過不可靠的 SAF delete/rename）。best-effort。 */
+    private fun overwriteFrom(dst: UniFile, src: UniFile): Boolean = runCatching {
+        val input = context.contentResolver.openInputStream(src.uri) ?: return false
+        input.use { i ->
+            val out = context.contentResolver.openOutputStream(dst.uri, "wt") ?: return false
+            out.use { i.copyTo(it) }
+        }
+        true
+    }.getOrDefault(false)
 
     /** CBZ 內是否有 marker entry（已翻指標；逐頁 coverage 細查留後續）。 */
     private fun archiveHasMarker(cbz: UniFile): Boolean = runCatching {
@@ -666,6 +716,10 @@ class TranslationManager(private val context: Context) {
     companion object {
         private const val MARKER_NAME = ".yakuyomi_translated"
         private const val TMP_SUFFIX = ".yakutmp"
+
+        /** drain 期間持有的 partial WakeLock 標籤 + 逾時上限（洩漏保險；正常由 finally 釋放）。見 [drainLoop]。 */
+        private const val WAKELOCK_TAG = "yakuyomi:translation"
+        private const val WAKELOCK_TIMEOUT_MS = 6L * 60 * 60 * 1000
 
         /**
          * 即時翻/reader 情境固定用的去字法＝快速 boxfill（不管使用者設定的去字模式）。讀到時求低延遲，

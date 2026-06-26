@@ -779,7 +779,19 @@ class MangaScreenModel(
     fun runChapterTranslateAction(items: List<ChapterList.Item>) {
         val manga = successState?.manga ?: return
         // 只翻已下載的章（翻譯對象是下載好的頁圖；未下載的略過，與單列指示器一致）
-        val downloaded = items.filter { it.isDownloaded }.map { it.chapter }
+        var downloaded = items.filter { it.isDownloaded }.map { it.chapter }
+        if (downloaded.isEmpty()) return
+        // local EPUB：結構化（OPF/xhtml），重壓會破壞 → v1 不支援；過濾並提示，避免排入後翻失敗變紅。
+        // （local 資料夾 / cbz / cbr / 7z 皆可就地翻，唯 epub 例外。）
+        if (manga.isLocal()) {
+            val (epub, rest) = downloaded.partition { it.url.substringAfterLast('.', "").equals("epub", true) }
+            if (epub.isNotEmpty()) {
+                screenModelScope.launch {
+                    snackbarHostState.showSnackbar(context.stringResource(MR.strings.translation_epub_unsupported))
+                }
+            }
+            downloaded = rest
+        }
         if (downloaded.isEmpty()) return
         translationManager.translate(manga, downloaded)
     }

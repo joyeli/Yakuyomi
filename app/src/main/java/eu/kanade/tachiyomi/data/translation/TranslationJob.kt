@@ -5,11 +5,9 @@ import android.content.Context
 import android.content.pm.ServiceInfo
 import android.os.Build
 import androidx.lifecycle.asFlow
-import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
 import androidx.work.ForegroundInfo
-import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
@@ -69,7 +67,16 @@ class TranslationJob(context: Context, workerParams: WorkerParameters) : Corouti
             .takeWhile { (items, paused) -> !isStopped && hasActiveWork(items, paused) }
             .collect { setForegroundSafely() }
 
-        return Result.success()
+        // 被系統中途停掉（isStopped）但仍有活 → retry：讓 WorkManager 重排、重建前景服務，避免「worker 退場但
+        // 翻譯仍在 TranslationManager.scope 背景跑、失去保活而被凍」。正常結束（佇列空 / 暫停 / 總開關關 →
+        // hasActiveWork=false）→ success（不重排）。
+        return if (isStopped &&
+            hasActiveWork(translationManager.queueState.value, translationManager.isPaused.value)
+        ) {
+            Result.retry()
+        } else {
+            Result.success()
+        }
     }
 
     private fun hasActiveWork(items: List<TranslationItem>, paused: Boolean): Boolean {
@@ -100,11 +107,10 @@ class TranslationJob(context: Context, workerParams: WorkerParameters) : Corouti
 
         /** 啟動前景服務。已在跑就沿用（KEEP，不打斷正在跑的 Job；新加的章由 live queueState 帶進去）。 */
         fun start(context: Context) {
+            // 不掛網路 constraint（對照 DownloadJob）：constraint 在網路抖動時會讓 WorkManager 停掉 worker →
+            // 前景服務被拆 → 跑在 TranslationManager.scope 的翻譯失去保活、背景被凍。網路只在 LLM 那步要、本就有重試。
             val request = OneTimeWorkRequestBuilder<TranslationJob>()
                 .addTag(TAG)
-                .setConstraints(
-                    Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build(),
-                )
                 .build()
             WorkManager.getInstance(context)
                 .enqueueUniqueWork(TAG, ExistingWorkPolicy.KEEP, request)

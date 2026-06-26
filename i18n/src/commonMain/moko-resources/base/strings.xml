@@ -29,6 +29,7 @@
     <string name="translation_status_queued">Queued</string>
     <string name="translation_status_translating">Translating</string>
     <string name="translation_status_error">Failed</string>
+    <string name="translation_epub_unsupported">EPUB chapters can\'t be translated yet — use a folder or CBZ/CBR/7z.</string>
     <string name="action_filter_translated">Translated</string>
     <string name="action_global_filter">Filter (all sources)</string>
     <string name="action_open_entry">Open</string>
@@ -48,6 +49,10 @@
     <string name="action_browse_filter_favorite">In your library</string>
     <string name="action_browse_filter_read">Started reading</string>
     <string name="action_browse_filter_fetched">Details fetched</string>
+    <string name="action_fetch_details">Fetch details</string>
+    <string name="fetch_details_empty">Nothing to fetch in this list</string>
+    <string name="fetch_details_summary">Fetched %1$d, %2$d failed</string>
+    <string name="fetch_details_failed_title">Failed to fetch</string>
     <string name="action_source_filters">Source filters</string>
     <string name="action_clear_filters">Clear filters</string>
     <string name="label_library">Library</string>
