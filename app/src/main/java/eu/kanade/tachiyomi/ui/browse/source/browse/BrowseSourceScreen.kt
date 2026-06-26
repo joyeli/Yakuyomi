@@ -11,6 +11,8 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.Favorite
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.History
@@ -21,6 +23,7 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SmallExtendedFloatingActionButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -114,6 +117,9 @@ data class BrowseSourceScreen(
         val mangaList = screenModel.mangaPagerFlowFlow.collectAsLazyPagingItems()
         val gridState = rememberLazyGridState()
         val listState = rememberLazyListState()
+
+        // Yakuyomi：探索批次擷取詳情＋章節的狀態（進度 / 失敗清單）。
+        val batchFetch by screenModel.batchFetch.collectAsState()
 
         // Yakuyomi：快照（離線清單）狀態 + 自動載入到錨點 + 相關對話框旗標。
         val snapshotRaw by screenModel.browseSnapshot.prefCollectAsState()
@@ -213,6 +219,14 @@ data class BrowseSourceScreen(
                 showLeaveSnapshotClearConfirm = true
             }
             prevSnapshotListing = isSnapshotListing
+        }
+
+        // Yakuyomi：批次擷取結束且有失敗 → 推「失敗清單」畫面（逐一檢查、點進詳情頁手動更新），並消費旗標。
+        LaunchedEffect(batchFetch.showResults) {
+            if (batchFetch.showResults) {
+                navigator.push(SourceFetchResultsScreen(batchFetch.failedIds))
+                screenModel.dismissBatchResults()
+            }
         }
 
         Scaffold(
@@ -354,6 +368,47 @@ data class BrowseSourceScreen(
                 }
             },
             snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+            floatingActionButton = {
+                // Yakuyomi：批次擷取詳情＋章節。**只在快照模式顯示**——快照是凍結的有界清單、擷取有明確終點；
+                // 熱門/最新/搜尋是無限分頁，批次擷取會無止盡，故不提供。對清單全部逐一抓、節流防 ban；
+                // 進行中顯示 X/N + 停止鈕。
+                if (isSnapshotListing) {
+                    val running = batchFetch.running
+                    SmallExtendedFloatingActionButton(
+                        text = {
+                            Text(
+                                text = if (running) {
+                                    "${batchFetch.done}/${batchFetch.total}"
+                                } else {
+                                    stringResource(MR.strings.action_fetch_details)
+                                },
+                            )
+                        },
+                        icon = {
+                            Icon(
+                                imageVector = if (running) Icons.Filled.Stop else Icons.Outlined.CloudDownload,
+                                contentDescription = null,
+                            )
+                        },
+                        onClick = {
+                            if (running) {
+                                screenModel.cancelBatchFetch()
+                            } else {
+                                val list = mangaList.itemSnapshotList.items.map { it.value }
+                                if (list.isEmpty()) {
+                                    scope.launchIO {
+                                        snackbarHostState.showSnackbar(
+                                            context.contextStringResource(MR.strings.fetch_details_empty),
+                                        )
+                                    }
+                                } else {
+                                    screenModel.startBatchFetch(list)
+                                }
+                            }
+                        },
+                    )
+                }
+            },
         ) { paddingValues ->
             BrowseSourceContent(
                 source = screenModel.source,

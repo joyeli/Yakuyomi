@@ -14,7 +14,9 @@ import androidx.paging.map
 import cafe.adriel.voyager.core.model.StateScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import eu.kanade.core.preference.asState
+import eu.kanade.domain.chapter.interactor.SyncChaptersWithSource
 import eu.kanade.domain.manga.interactor.UpdateManga
+import eu.kanade.domain.manga.model.toSManga
 import eu.kanade.domain.source.interactor.GetIncognitoState
 import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.domain.track.interactor.AddTracks
@@ -25,6 +27,8 @@ import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.util.removeCovers
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.toImmutableList
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -38,6 +42,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
@@ -63,6 +68,7 @@ import tachiyomi.domain.source.service.SourceManager
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.time.Instant
+import kotlin.random.Random
 import eu.kanade.tachiyomi.source.model.Filter as SourceModelFilter
 
 class BrowseSourceScreenModel(
@@ -80,6 +86,7 @@ class BrowseSourceScreenModel(
     private val getManga: GetManga = Injekt.get(),
     private val getChaptersByMangaId: GetChaptersByMangaId = Injekt.get(),
     private val updateManga: UpdateManga = Injekt.get(),
+    private val syncChaptersWithSource: SyncChaptersWithSource = Injekt.get(),
     private val addTracks: AddTracks = Injekt.get(),
     private val getIncognitoState: GetIncognitoState = Injekt.get(),
 ) : StateScreenModel<BrowseSourceScreenModel.State>(State(Listing.valueOf(listingQuery))) {
@@ -128,6 +135,60 @@ class BrowseSourceScreenModel(
     // 錨點是否已在「已載入」範圍出現（在過濾前的串流偵測 → 篩選把它濾掉也算數）。自動載入到錨點用此停止。
     private val _anchorReached = MutableStateFlow(false)
     val anchorReached: StateFlow<Boolean> = _anchorReached.asStateFlow()
+
+    // Yakuyomi：探索批次擷取詳情＋章節。對「filter 後留在清單的全部書目」逐一抓詳情 + 同步章節
+    // （未擷取→首次擷取、已擷取→更新新章），每筆節流 ~0.8–1.3s + jitter 防被來源限流；失敗收進 [BatchFetch.failedIds]、
+    // 結束時 showResults 給 UI 開結果清單逐一檢查（點進詳情頁手動處理、返回保留）。
+    @Immutable
+    data class BatchFetch(
+        val running: Boolean = false,
+        val done: Int = 0,
+        val total: Int = 0,
+        val failedIds: List<Long> = emptyList(),
+        val showResults: Boolean = false,
+    )
+
+    private val _batchFetch = MutableStateFlow(BatchFetch())
+    val batchFetch: StateFlow<BatchFetch> = _batchFetch.asStateFlow()
+    private var batchFetchJob: Job? = null
+
+    /** 開始批次擷取。[mangaList]＝呼叫端傳入的「filter 後留在清單的全部書目」（含已擷取＝更新章節）。 */
+    fun startBatchFetch(mangaList: List<Manga>) {
+        if (_batchFetch.value.running || mangaList.isEmpty()) return
+        batchFetchJob = screenModelScope.launchIO {
+            val failed = mutableListOf<Long>()
+            _batchFetch.value = BatchFetch(running = true, done = 0, total = mangaList.size)
+            try {
+                mangaList.forEachIndexed { i, manga ->
+                    if (!isActive) return@forEachIndexed
+                    val ok = runCatching { fetchOneFromSource(manga) }.isSuccess
+                    if (!ok) failed.add(manga.id)
+                    _batchFetch.update { it.copy(done = i + 1, failedIds = failed.toList()) }
+                    // 節流防 ban：每筆間隔 0.4–0.75s + 隨機抖動（避免規律被偵測）。最後一筆不等。
+                    if (i < mangaList.lastIndex && isActive) delay(400L + Random.nextLong(350L))
+                }
+            } finally {
+                _batchFetch.update { it.copy(running = false, showResults = it.failedIds.isNotEmpty()) }
+            }
+        }
+    }
+
+    fun cancelBatchFetch() {
+        batchFetchJob?.cancel()
+        _batchFetch.update { it.copy(running = false) }
+    }
+
+    fun dismissBatchResults() {
+        _batchFetch.update { it.copy(showResults = false) }
+    }
+
+    /** 抓一本：詳情（[UpdateManga] 設 initialized=true）+ 同步章節（[SyncChaptersWithSource] diff 加新章）。重用 mihon 既有路徑。 */
+    private suspend fun fetchOneFromSource(manga: Manga) {
+        val networkManga = source.getMangaDetails(manga.toSManga())
+        updateManga.awaitUpdateFromSource(manga, networkManga, manualFetch = false)
+        val chapters = source.getChapterList(manga.toSManga())
+        syncChaptersWithSource.await(chapters, manga, source, manualFetch = false)
+    }
 
     val mangaPagerFlowFlow = state.map { it.listing }
         .distinctUntilChanged()
