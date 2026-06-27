@@ -319,17 +319,8 @@ object SettingsTranslationScreen : SearchableSettings {
                         title = stringResource(MR.strings.pref_translation_master),
                         subtitle = stringResource(MR.strings.pref_translation_master_summary),
                         onValueChanged = { enabled ->
-                            if (enabled) {
-                                // 總開關開：續跑佇列 + 若即時翻也開且引擎就緒則預暖。
-                                translationManager.resumeForMasterOn()
-                                if (prefs.liveTranslate.get() && engineService.isReady()) {
-                                    engineService.warmUpAsync()
-                                }
-                            } else {
-                                // 總開關關：中止當前章 + 釋放 warm 引擎（~450MB）。
-                                translationManager.haltForMasterOff()
-                                engineService.shutdownAsync()
-                            }
+                            // 副作用抽進 manager（與 More 頁快捷開關共用、連動）。
+                            translationManager.onMasterEnabledChanged(enabled)
                             true
                         },
                     ),

@@ -36,6 +36,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import mihon.feature.support.SupportUsScreen
 import tachiyomi.core.common.util.lang.launchIO
+import tachiyomi.domain.translation.service.TranslationPreferences
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
 import uy.kohesive.injekt.Injekt
@@ -71,6 +72,8 @@ data object MoreTab : Tab {
             onDownloadedOnlyChange = { screenModel.downloadedOnly = it },
             incognitoMode = screenModel.incognitoMode,
             onIncognitoModeChange = { screenModel.incognitoMode = it },
+            translationMasterEnabled = screenModel.translationMasterEnabled,
+            onTranslationMasterChange = { screenModel.setTranslationMaster(it) },
             onClickDownloadQueue = { navigator.push(DownloadQueueScreen) },
             // Yakuyomi：「更新」分頁已從導覽列移除 → 從這裡切換過去（翻譯佇列改成導覽列分頁）。
             onClickUpdates = { scope.launch { HomeScreen.openTab(HomeScreen.Tab.Updates) } },
@@ -88,10 +91,18 @@ private class MoreScreenModel(
     private val downloadManager: DownloadManager = Injekt.get(),
     private val translationManager: TranslationManager = Injekt.get(),
     preferences: BasePreferences = Injekt.get(),
+    translationPreferences: TranslationPreferences = Injekt.get(),
 ) : ScreenModel {
 
     var downloadedOnly by preferences.downloadedOnly.asState(screenModelScope)
     var incognitoMode by preferences.incognitoMode.asState(screenModelScope)
+
+    // Yakuyomi：翻譯總開關快捷切換（與翻譯設定頁綁同一 pref、連動）；set 後觸發 manager 副作用（停/續 + 引擎）。
+    var translationMasterEnabled by translationPreferences.translationMasterEnabled.asState(screenModelScope)
+    fun setTranslationMaster(enabled: Boolean) {
+        translationMasterEnabled = enabled
+        translationManager.onMasterEnabledChanged(enabled)
+    }
 
     private var _downloadQueueState: MutableStateFlow<DownloadQueueState> = MutableStateFlow(DownloadQueueState.Stopped)
     val downloadQueueState: StateFlow<DownloadQueueState> = _downloadQueueState.asStateFlow()

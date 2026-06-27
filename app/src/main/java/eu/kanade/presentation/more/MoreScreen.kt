@@ -12,6 +12,7 @@ import androidx.compose.material.icons.outlined.NewReleases
 import androidx.compose.material.icons.outlined.QueryStats
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -36,6 +37,8 @@ fun MoreScreen(
     onDownloadedOnlyChange: (Boolean) -> Unit,
     incognitoMode: Boolean,
     onIncognitoModeChange: (Boolean) -> Unit,
+    translationMasterEnabled: Boolean,
+    onTranslationMasterChange: (Boolean) -> Unit,
     onClickDownloadQueue: () -> Unit,
     onClickUpdates: () -> Unit,
     onClickCategories: () -> Unit,
@@ -70,6 +73,16 @@ fun MoreScreen(
                     icon = ImageVector.vectorResource(R.drawable.ic_glasses_24dp),
                     checked = incognitoMode,
                     onCheckedChanged = onIncognitoModeChange,
+                )
+            }
+            item {
+                // Yakuyomi：翻譯總開關快捷（與翻譯設定頁綁同一 pref、連動）。
+                SwitchPreferenceWidget(
+                    title = stringResource(MR.strings.pref_translation_master),
+                    subtitle = stringResource(MR.strings.pref_translation_master_summary),
+                    icon = Icons.Outlined.Translate,
+                    checked = translationMasterEnabled,
+                    onCheckedChanged = onTranslationMasterChange,
                 )
             }
 
