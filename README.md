@@ -34,10 +34,11 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 - **Quality knobs** — three text-removal modes (flat-fill / whole-image LaMa / per-region LaMa), vertical/horizontal typesetting, ~20 tunable parameters. No telemetry.
 
 <div align="center">
-<img src="./.github/assets/yakuyomi-live-translate.gif" alt="Live translation: speech bubbles turn from Japanese into your language as you read" width="240"/>
-<img src="./.github/assets/yakuyomi-rerender.gif" alt="Re-render: switch a page's text-removal method in place" width="240"/>
+<img src="./.github/assets/yakuyomi-live-translate.gif" alt="Live translation: speech bubbles turn from Japanese into your language as you read" width="220"/>
+<img src="./.github/assets/yakuyomi-rerender.gif" alt="Re-render: switch a page's text-removal method in place" width="220"/>
+<img src="./.github/assets/yakuyomi-queue-manage.gif" alt="Translation queue grouped by manga: expand chapters, jump a title to the front, pause it" width="220"/>
 <br>
-<sub><b>Live translation as you read</b> (left), and <b>one-tap re-render</b> to switch the text-removal method — fast box-fill ⇄ LaMa (right). Both update the page in place.</sub>
+<sub><b>Live translation as you read</b>, <b>one-tap re-render</b> of the text-removal method, and a <b>per-manga translation queue</b> — expand chapters, jump a title to the front, pause it.</sub>
 </div>
 
 **Browse & catch-up** *(new in 0.3.0)*
@@ -58,9 +59,10 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 **Large screens & foldables** *(new in 0.4.0)*
 
 <div align="center">
-<img src="./.github/assets/yakuyomi-foldable.gif" alt="Foldable: single page when folded, double-page spread when unfolded" width="420"/>
+<img src="./.github/assets/yakuyomi-foldable.gif" alt="Foldable: single page when folded, double-page spread when unfolded" width="330"/>
+<img src="./.github/assets/yakuyomi-queue-tablet.gif" alt="Translation queue on a tablet: two-pane master-detail — manga list left, selected manga's chapters right" width="330"/>
 <br>
-<sub><b>Fold → single page; unfold → double-page spread, automatically.</b> Both pages translated on-device.</sub>
+<sub><b>Fold → single page; unfold → double-page spread.</b> And the <b>translation queue</b> turns into a two-pane master-detail layout on tablets / unfolded foldables. Both pages translated on-device.</sub>
 </div>
 
 - **Adaptive grid cover size** — library and browse columns auto-fit the actual screen width (phone, tablet, folded/unfolded foldable, split-screen). Pick a size by how many fit per row and it scales to every width.

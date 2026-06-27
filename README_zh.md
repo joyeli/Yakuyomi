@@ -34,10 +34,11 @@ Yakuyomi 是 [mihon](https://github.com/mihonapp/mihon) 的 fork，邊下載 / �
 - **品質旋鈕** — 三種去字模式（平塗 / 整頁 LaMa / 逐區 LaMa）、直 / 橫排版、約 20 個可調參數。無 telemetry。
 
 <div align="center">
-<img src="./.github/assets/yakuyomi-live-translate.gif" alt="即時翻譯：對話框邊讀邊從日文變成你的語言" width="240"/>
-<img src="./.github/assets/yakuyomi-rerender.gif" alt="重繪：就地換頁面的去字方法" width="240"/>
+<img src="./.github/assets/yakuyomi-live-translate.gif" alt="即時翻譯：對話框邊讀邊從日文變成你的語言" width="220"/>
+<img src="./.github/assets/yakuyomi-rerender.gif" alt="重繪：就地換頁面的去字方法" width="220"/>
+<img src="./.github/assets/yakuyomi-queue-manage.gif" alt="翻譯佇列以漫畫分組：展開章節、搶翻、整本暫停" width="220"/>
 <br>
-<sub><b>邊讀邊翻</b>（左）＋ <b>一鍵重繪</b>換去字方法、快速平塗 ⇄ LaMa（右）——都就地更新頁面。</sub>
+<sub><b>邊讀邊翻</b>、<b>一鍵重繪</b>換去字方法，加上<b>以漫畫分組的翻譯佇列</b>——展開章節、搶翻、整本暫停。</sub>
 </div>
 
 **瀏覽與追進度** *(0.3.0 新增)*
@@ -58,9 +59,10 @@ Yakuyomi 是 [mihon](https://github.com/mihonapp/mihon) 的 fork，邊下載 / �
 **大螢幕與折疊機** *(0.4.0 新增)*
 
 <div align="center">
-<img src="./.github/assets/yakuyomi-foldable.gif" alt="折疊機：合起來單頁、打開來自動雙開" width="420"/>
+<img src="./.github/assets/yakuyomi-foldable.gif" alt="折疊機：合起來單頁、打開來自動雙開" width="330"/>
+<img src="./.github/assets/yakuyomi-queue-tablet.gif" alt="平板上的翻譯佇列：主從雙欄（左漫畫清單、右選中本章節）" width="330"/>
 <br>
-<sub><b>合起來 → 單頁；打開來 → 自動切雙開。</b>兩頁都在裝置上翻好。</sub>
+<sub><b>合起來 → 單頁；打開來 → 自動雙開。</b>翻譯佇列在平板／折疊機展開時也變成<b>主從雙欄</b>（左清單、右章節）。兩頁都在裝置上翻好。</sub>
 </div>
 
 - **自適應網格封面大小** — 書庫與探索的欄數依實際螢幕寬度自動調整（手機、平板、折疊機折/展、分割畫面）。用「每行幾個」挑大小，會對所有寬度自動換算。
