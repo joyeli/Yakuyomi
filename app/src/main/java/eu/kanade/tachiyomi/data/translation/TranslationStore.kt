@@ -41,7 +41,15 @@ class TranslationStore(
             clear()
             putBoolean(KEY_PAUSED, paused)
             items.forEachIndexed { index, it ->
-                val obj = TranslationObject(it.mangaId, it.chapterId, index, it.method, it.reRenderMethod, it.errored)
+                val obj = TranslationObject(
+                    it.mangaId,
+                    it.chapterId,
+                    index,
+                    it.method,
+                    it.reRenderMethod,
+                    it.errored,
+                    it.mangaPaused,
+                )
                 putString(index.toString(), json.encodeToString(obj))
             }
         }
@@ -60,7 +68,7 @@ class TranslationStore(
         for (o in objs) {
             val manga = cachedManga.getOrPut(o.mangaId) { getManga.await(o.mangaId) } ?: continue
             val chapter = getChapter.await(o.chapterId) ?: continue
-            out.add(Restored(manga, chapter, o.method, o.reRenderMethod, o.errored))
+            out.add(Restored(manga, chapter, o.method, o.reRenderMethod, o.errored, o.mangaPaused))
         }
         return out
     }
@@ -82,6 +90,7 @@ class TranslationStore(
         val method: String,
         val reRenderMethod: String?,
         val errored: Boolean,
+        val mangaPaused: Boolean = false,
     )
 
     /** [restore] 的輸出：已把 id 解析回 domain 物件，交給 [TranslationManager] 重建 Entry。 */
@@ -91,6 +100,7 @@ class TranslationStore(
         val method: String,
         val reRenderMethod: String?,
         val errored: Boolean,
+        val mangaPaused: Boolean = false,
     )
 
     companion object {
@@ -107,4 +117,5 @@ private data class TranslationObject(
     val method: String = "",
     val reRenderMethod: String? = null,
     val errored: Boolean = false,
+    val mangaPaused: Boolean = false,
 )

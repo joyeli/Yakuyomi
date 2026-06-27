@@ -30,6 +30,12 @@
     <string name="translation_status_translating">Translating</string>
     <string name="translation_status_error">Failed</string>
     <string name="translation_epub_unsupported">EPUB chapters can\'t be translated yet — use a folder or CBZ/CBR/7z.</string>
+    <string name="queue_remaining_chapters">%1$d chapters left</string>
+    <string name="queue_chapters_failed">%1$d failed</string>
+    <string name="queue_manga_paused">Paused</string>
+    <string name="action_priority_translate">Translate next</string>
+    <string name="action_expand_all">Expand all</string>
+    <string name="action_collapse_all">Collapse all</string>
     <string name="action_filter_translated">Translated</string>
     <string name="action_global_filter">Filter (all sources)</string>
     <string name="action_open_entry">Open</string>

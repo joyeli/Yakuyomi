@@ -1114,6 +1114,12 @@
     <string name="information_no_translations">佇列中沒有翻譯</string>
     <string name="translation_status_error">失敗</string>
     <string name="translation_epub_unsupported">EPUB 章節暫不支援翻譯——請改用資料夾或 CBZ/CBR/7z。</string>
+    <string name="queue_remaining_chapters">剩 %1$d 話</string>
+    <string name="queue_chapters_failed">%1$d 失敗</string>
+    <string name="queue_manga_paused">已暫停</string>
+    <string name="action_priority_translate">搶先翻譯</string>
+    <string name="action_expand_all">全部展開</string>
+    <string name="action_collapse_all">全部收合</string>
     <string name="translation_status_queued">排隊中</string>
     <string name="translation_status_translating">翻譯中</string>
     <string name="pref_translation_lang_english">英文</string>

@@ -110,6 +110,9 @@ class TranslationManager(private val context: Context) {
     private val lock = Any()
     private val entries = mutableListOf<Entry>()
 
+    /** Yakuyomi（佇列分組）：被「整本暫停」的漫畫 id 集合。drain 跳過這些本的章、做下一本；在 [lock] 下存取。 */
+    private val pausedMangaIds = mutableSetOf<Long>()
+
     /**
      * 「待翻譯」標記集合（章 id）：線上即時翻 / reader 控制鈕觸發下載時先標記，
      * 由 [eu.kanade.tachiyomi.data.download.Downloader] 在該章下載完成（章目錄 + cache 都就緒）後查此集合、
@@ -138,6 +141,10 @@ class TranslationManager(private val context: Context) {
 
     private val _isPaused = MutableStateFlow(false)
     val isPaused: StateFlow<Boolean> = _isPaused.asStateFlow()
+
+    /** Yakuyomi（佇列分組）：被整本暫停的漫畫 id 快照，給佇列 UI 顯示每本的暫停/繼續狀態。 */
+    private val _pausedMangas = MutableStateFlow<Set<Long>>(emptySet())
+    val pausedMangas: StateFlow<Set<Long>> = _pausedMangas.asStateFlow()
 
     private val _translatedIds = MutableStateFlow<Set<Long>>(emptySet())
 
@@ -177,6 +184,27 @@ class TranslationManager(private val context: Context) {
         }
     }
 
+    /** 發佈「整本暫停」集合快照（與 [publish] 分開：暫停集合變動才發）。 */
+    private fun publishPaused() {
+        _pausedMangas.value = synchronized(lock) { pausedMangaIds.toSet() }
+    }
+
+    /**
+     * 挑下一個要翻的章（在 [lock] 下呼叫）。以漫畫為單位：跳過「整本暫停」的漫畫，按**漫畫在佇列的順序**、
+     * 再按**話號小→大**取（同一本接續翻；搶翻/拖曳改變漫畫順序即生效）。無可翻章回 null。
+     */
+    private fun pickNextQueuedLocked(): Entry? {
+        val active = entries.filter {
+            it.status == TranslationItem.Status.QUEUE && it.manga.id !in pausedMangaIds
+        }
+        if (active.isEmpty()) return null
+        val order = HashMap<Long, Int>()
+        entries.forEach { if (it.manga.id !in order) order[it.manga.id] = order.size }
+        return active.minWithOrNull(
+            compareBy({ order[it.manga.id] ?: Int.MAX_VALUE }, { it.chapter.chapterNumber }),
+        )
+    }
+
     /**
      * 把目前佇列＋暫停狀態寫回磁碟（[translationStore]）。只在**結構性變動**（排入 / 移除 / 狀態 / 方法 / 暫停）後呼叫，
      * **不**放進 [publish]（那會被逐頁進度更新打爆 I/O）。還原完成前（[restored]=false）跳過，避免覆蓋掉持久佇列。
@@ -191,6 +219,7 @@ class TranslationManager(private val context: Context) {
                     method = it.method,
                     reRenderMethod = it.reRenderMethod,
                     errored = it.status == TranslationItem.Status.ERROR,
+                    mangaPaused = it.manga.id in pausedMangaIds,
                 )
             }
         }
@@ -234,9 +263,12 @@ class TranslationManager(private val context: Context) {
                                     )
                                 }
                             }
+                            // 還原「整本暫停」：收集 mangaPaused 的 mangaId（向後相容：舊資料無此欄→不暫停）。
+                            recovered.filter { it.mangaPaused }.forEach { pausedMangaIds.add(it.manga.id) }
                         }
                         _isPaused.value = translationStore.restorePaused()
                         publish()
+                        publishPaused()
                     }
                     restored = true
                     persist() // 回寫合併後佇列（含還原前 race 進來的新項）
@@ -436,6 +468,120 @@ class TranslationManager(private val context: Context) {
         persist()
     }
 
+    // ── Yakuyomi 佇列分組：以「整本漫畫」為單位的操作（佇列頁用；queueState 仍是扁平章快照、UI 自行 group）。 ──
+
+    /** 搶翻：把該漫畫所有章移到佇列最前、解除其暫停；若正在翻別本則停在頁邊界回 QUEUE，drain 重挑此本。 */
+    fun startMangaNow(mangaId: Long) {
+        if (!masterEnabled()) return
+        synchronized(lock) {
+            pausedMangaIds.remove(mangaId)
+            val (mine, rest) = entries.partition { it.manga.id == mangaId }
+            if (mine.isEmpty()) return
+            entries.clear()
+            entries.addAll(mine)
+            entries.addAll(rest)
+            // 正在翻的是別本 → 停它回 QUEUE（頁邊界），drain 重挑最前的搶翻本。
+            if (entries.any { it.status == TranslationItem.Status.TRANSLATING && it.manga.id != mangaId }) {
+                stopActive = true
+            }
+        }
+        _isPaused.value = false
+        publishPaused()
+        publish()
+        ensureDrain()
+        TranslationJob.start(context)
+        persist()
+    }
+
+    /** 整本暫停：drain 輪到時跳過、做下一本；若正在翻此本則停在頁邊界回 QUEUE。 */
+    fun pauseManga(mangaId: Long) {
+        synchronized(lock) {
+            pausedMangaIds.add(mangaId)
+            if (entries.any { it.status == TranslationItem.Status.TRANSLATING && it.manga.id == mangaId }) {
+                stopActive = true
+            }
+        }
+        publishPaused()
+        publish()
+        ensureDrain() // 重挑下一本（當前若被停會回 QUEUE）
+        persist()
+    }
+
+    /** 解除整本暫停 → 重新納入 drain。 */
+    fun resumeManga(mangaId: Long) {
+        if (!masterEnabled()) return
+        synchronized(lock) { pausedMangaIds.remove(mangaId) }
+        _isPaused.value = false
+        publishPaused()
+        ensureDrain()
+        TranslationJob.start(context)
+        persist()
+    }
+
+    /** 整本改去字方法（翻譯項；QUEUE 立即生效、TRANSLATING 停頁邊界以新法續傳）。重繪項不動。 */
+    fun setMangaMethod(mangaId: Long, method: String) {
+        synchronized(lock) {
+            entries.filter {
+                it.manga.id == mangaId && it.reRenderMethod == null &&
+                    (it.status == TranslationItem.Status.QUEUE || it.status == TranslationItem.Status.TRANSLATING)
+            }.forEach {
+                it.method = method
+                if (it.status == TranslationItem.Status.TRANSLATING) stopActive = true
+            }
+        }
+        publish()
+        persist()
+    }
+
+    /** 整本取消：移除該漫畫所有章（含正在翻的：停頁邊界後移除）、清其暫停旗標。 */
+    fun cancelManga(mangaId: Long) {
+        synchronized(lock) {
+            if (entries.any { it.status == TranslationItem.Status.TRANSLATING && it.manga.id == mangaId }) {
+                stopActive = true
+            }
+            entries.removeAll { it.manga.id == mangaId }
+            pausedMangaIds.remove(mangaId)
+        }
+        publishPaused()
+        publish()
+        ensureDrain()
+        persist()
+    }
+
+    /** 整本重試：該漫畫所有 ERROR 章回 QUEUE。 */
+    fun retryManga(mangaId: Long) {
+        if (!masterEnabled()) return
+        synchronized(lock) {
+            entries.filter { it.manga.id == mangaId && it.status == TranslationItem.Status.ERROR }
+                .forEach { it.status = TranslationItem.Status.QUEUE }
+        }
+        publish()
+        _isPaused.value = false
+        ensureDrain()
+        TranslationJob.start(context)
+        persist()
+    }
+
+    /** 以漫畫為單位拖曳重排：依 UI 給的新漫畫順序重排 entries（每本章保持內部順序）。 */
+    fun reorderMangas(orderedMangaIds: List<Long>) {
+        synchronized(lock) {
+            val byManga = entries.groupBy { it.manga.id }
+            val seen = LinkedHashSet<Long>()
+            val reordered = mutableListOf<Entry>()
+            orderedMangaIds.forEach { id ->
+                byManga[id]?.let {
+                    reordered.addAll(it)
+                    seen.add(id)
+                }
+            }
+            entries.forEach { if (it.manga.id !in seen) reordered.add(it) } // 沒被列到的（保險）接後面
+            entries.clear()
+            entries.addAll(reordered)
+        }
+        publish()
+        persist()
+    }
+
     /** 重試失敗的章（重新排隊）。 */
     fun retry(chapterIds: List<Long>) {
         if (!masterEnabled()) return // 硬總開關：關閉時不重試
@@ -496,6 +642,23 @@ class TranslationManager(private val context: Context) {
         }
     }
 
+    /**
+     * 翻譯總開關切換的副作用，供「翻譯設定頁」與「More 頁快捷開關」**共用**（兩處綁同一 pref、自動連動）：
+     * 開→續跑佇列 + 即時翻開且引擎就緒則預暖；關→中止當前章 + 釋放 warm 引擎（~450MB）。
+     * **不**負責 set pref（呼叫端各自由 widget / asState 寫入）。
+     */
+    fun onMasterEnabledChanged(enabled: Boolean) {
+        if (enabled) {
+            resumeForMasterOn()
+            if (translationPreferences.liveTranslate.get() && engineService.isReady()) {
+                engineService.warmUpAsync()
+            }
+        } else {
+            haltForMasterOff()
+            engineService.shutdownAsync()
+        }
+    }
+
     /** 確保有一條 drain 在跑（drainMutex 保證單一消費者；重複呼叫會排隊後再掃一遍）。 */
     private fun ensureDrain() {
         scope.launch { drainLoop() }
@@ -512,9 +675,7 @@ class TranslationManager(private val context: Context) {
         try {
             // 硬總開關：master 關時一律不取新章（一道 gate 收掉所有 drain 來源——還原/下載/手動/重繪）。
             while (!_isPaused.value && masterEnabled()) {
-                val entry = synchronized(lock) {
-                    entries.firstOrNull { it.status == TranslationItem.Status.QUEUE }
-                } ?: break
+                val entry = synchronized(lock) { pickNextQueuedLocked() } ?: break
                 synchronized(lock) {
                     entry.status = TranslationItem.Status.TRANSLATING
                     entry.done = 0
