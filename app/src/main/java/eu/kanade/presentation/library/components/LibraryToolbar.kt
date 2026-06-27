@@ -32,11 +32,6 @@ import androidx.compose.ui.unit.sp
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.AppBarActions
 import eu.kanade.presentation.components.SearchToolbar
-import eu.kanade.tachiyomi.data.translation.TranslationEngineService
-import eu.kanade.tachiyomi.util.system.toast
-import kotlinx.collections.immutable.persistentListOf
-import kotlinx.collections.immutable.toImmutableList
-import tachiyomi.domain.translation.service.TranslationPreferences
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.Pill
 import tachiyomi.presentation.core.i18n.stringResource
@@ -117,7 +112,7 @@ private fun LibraryRegularToolbar(
             val filterTint = if (hasFilters) MaterialTheme.colorScheme.active else LocalContentColor.current
             // Yakuyomi：翻譯引擎狀態（預載/卸下）已移到導覽列「翻譯」分頁（點分頁頂面板或長按分頁），不再放書庫工具列。
             AppBarActions(
-                persistentListOf(
+                listOf(
                     AppBar.Action(
                         title = stringResource(MR.strings.action_filter),
                         icon = Icons.Outlined.FilterList,
@@ -154,7 +149,7 @@ private fun LibrarySelectionToolbar(
         titleContent = { Text(text = "$selectedCount") },
         actions = {
             AppBarActions(
-                persistentListOf(
+                listOf(
                     AppBar.Action(
                         title = stringResource(MR.strings.action_select_all),
                         icon = Icons.Outlined.SelectAll,

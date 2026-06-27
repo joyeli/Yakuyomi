@@ -11,6 +11,7 @@ plugins {
     alias(mihonx.plugins.spotless)
 
     alias(libs.plugins.aboutLibraries)
+    alias(libs.plugins.androidx.baselineProfile)
     alias(libs.plugins.kotlin.serialization)
 }
 
@@ -65,12 +66,12 @@ android {
     }
 
     buildTypes {
-        val debug by getting {
+        val debug = getByName("debug") {
             applicationIdSuffix = ".dev"
             versionNameSuffix = "-${getLatestCommitCount()}"
             isPseudoLocalesEnabled = true
         }
-        val release by getting {
+        val release = getByName("release") {
             isMinifyEnabled = Config.enableCodeShrink
             isShrinkResources = Config.enableCodeShrink
 
@@ -97,7 +98,6 @@ android {
             applicationIdSuffix = ".debug"
 
             versionNameSuffix = debug.versionNameSuffix
-            signingConfig = debug.signingConfig
 
             matchingFallbacks.addAll(commonMatchingFallbacks)
 
@@ -106,12 +106,8 @@ android {
         create("benchmark") {
             initWith(release)
 
-            isDebuggable = false
-            isProfileable = true
             versionNameSuffix = "-benchmark"
             applicationIdSuffix = ".benchmark"
-
-            signingConfig = debug.signingConfig
 
             matchingFallbacks.addAll(commonMatchingFallbacks)
         }
@@ -191,9 +187,13 @@ kotlin {
             "-opt-in=kotlinx.coroutines.FlowPreview",
             "-opt-in=kotlinx.coroutines.InternalCoroutinesApi",
             "-opt-in=kotlinx.serialization.ExperimentalSerializationApi",
-            "-Xannotation-default-target=param-property",
         )
     }
+}
+
+baselineProfile {
+    baselineProfileOutputDir = "baselineProfiles"
+    mergeIntoMain = true
 }
 
 dependencies {
@@ -230,7 +230,6 @@ dependencies {
     implementation(libs.androidx.sqlite.bundled)
 
     implementation(libs.kotlin.reflect)
-    implementation(libs.kotlinx.collections.immutable)
 
     implementation(libs.bundles.kotlinx.coroutines)
 

@@ -8,9 +8,6 @@ import eu.kanade.domain.source.interactor.ToggleSource
 import eu.kanade.domain.source.interactor.ToggleSourcePin
 import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.presentation.browse.SourceUiModel
-import kotlinx.collections.immutable.ImmutableList
-import kotlinx.collections.immutable.persistentListOf
-import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
@@ -78,8 +75,7 @@ class SourcesScreenModel(
                                 SourceUiModel.Item(source)
                             }.toTypedArray(),
                         )
-                    }
-                    .toImmutableList(),
+                    },
                 snapshotSourceIds = sources.filter { hasSnapshot(it.id) }.map { it.id }.toSet(),
             )
         }
@@ -144,7 +140,7 @@ class SourcesScreenModel(
     data class State(
         val dialog: Dialog? = null,
         val isLoading: Boolean = true,
-        val items: ImmutableList<SourceUiModel> = persistentListOf(),
+        val items: List<SourceUiModel> = listOf(),
         // Yakuyomi：有快照的來源 id 集合（決定來源列是否顯示「快照」按鈕）。
         val snapshotSourceIds: Set<Long> = emptySet(),
         // Yakuyomi：長按快照按鈕後待確認清除的來源。

@@ -44,14 +44,14 @@ internal fun LibraryComfortableGrid(
                     lastModified = manga.coverLastModified,
                 ),
                 coverBadgeStart = {
-                    DownloadsBadge(count = libraryItem.downloadCount)
-                    TranslatedBadge(count = libraryItem.translatedCount)
-                    UnreadBadge(count = libraryItem.unreadCount)
+                    DownloadsBadge(count = libraryItem.badges.downloadCount)
+                    TranslatedBadge(count = libraryItem.badges.translatedCount)
+                    UnreadBadge(count = libraryItem.badges.unreadCount)
                 },
                 coverBadgeEnd = {
                     LanguageBadge(
-                        isLocal = libraryItem.isLocal,
-                        sourceLanguage = libraryItem.sourceLanguage,
+                        isLocal = libraryItem.badges.isLocal,
+                        sourceLanguage = libraryItem.badges.sourceLanguage,
                     )
                 },
                 onLongClick = { onLongClick(libraryItem.libraryManga) },

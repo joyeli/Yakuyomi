@@ -2,4 +2,7 @@
 <resources>
     <!-- Yakuyomi 啟動畫面背景：品牌藍，配白圈藍や 前景（= launcher 外觀） -->
     <color name="splash">#5B92C9</color>
+
+    <color name="accent_blue">#0058A0</color>
+    <color name="icon_background">#FAFAFA</color>
 </resources>

@@ -14,19 +14,14 @@ import androidx.paging.map
 import cafe.adriel.voyager.core.model.StateScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import eu.kanade.core.preference.asState
-import eu.kanade.domain.chapter.interactor.SyncChaptersWithSource
 import eu.kanade.domain.manga.interactor.UpdateManga
-import eu.kanade.domain.manga.model.toSManga
 import eu.kanade.domain.source.interactor.GetIncognitoState
 import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.domain.track.interactor.AddTracks
 import eu.kanade.presentation.util.ioCoroutineScope
 import eu.kanade.tachiyomi.data.cache.CoverCache
-import eu.kanade.tachiyomi.source.CatalogueSource
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.util.removeCovers
-import kotlinx.collections.immutable.ImmutableList
-import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -48,6 +43,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import mihon.domain.source.interactor.UpdateMangaFromRemote
 import tachiyomi.core.common.preference.CheckboxState
 import tachiyomi.core.common.preference.TriState
 import tachiyomi.core.common.preference.mapAsCheckboxState
@@ -86,9 +82,9 @@ class BrowseSourceScreenModel(
     private val getManga: GetManga = Injekt.get(),
     private val getChaptersByMangaId: GetChaptersByMangaId = Injekt.get(),
     private val updateManga: UpdateManga = Injekt.get(),
-    private val syncChaptersWithSource: SyncChaptersWithSource = Injekt.get(),
+    private val updateMangaFromRemote: UpdateMangaFromRemote = Injekt.get(),
     private val addTracks: AddTracks = Injekt.get(),
-    private val getIncognitoState: GetIncognitoState = Injekt.get(),
+    getIncognitoState: GetIncognitoState = Injekt.get(),
 ) : StateScreenModel<BrowseSourceScreenModel.State>(State(Listing.valueOf(listingQuery))) {
 
     var displayMode by sourcePreferences.sourceDisplayMode.asState(screenModelScope)
@@ -96,22 +92,20 @@ class BrowseSourceScreenModel(
     val source = sourceManager.getOrStub(sourceId)
 
     init {
-        if (source is CatalogueSource) {
-            mutableState.update {
-                var query: String? = null
-                var listing = it.listing
+        mutableState.update {
+            var query: String? = null
+            var listing = it.listing
 
-                if (listing is Listing.Search) {
-                    query = listing.query
-                    listing = Listing.Search(query, source.getFilterList())
-                }
-
-                it.copy(
-                    listing = listing,
-                    filters = source.getFilterList(),
-                    toolbarQuery = query,
-                )
+            if (listing is Listing.Search) {
+                query = listing.query
+                listing = Listing.Search(query, source.getFilterList())
             }
+
+            it.copy(
+                listing = listing,
+                filters = source.getFilterList(),
+                toolbarQuery = query,
+            )
         }
 
         if (!getIncognitoState.await(source.id)) {
@@ -182,12 +176,9 @@ class BrowseSourceScreenModel(
         _batchFetch.update { it.copy(showResults = false) }
     }
 
-    /** 抓一本：詳情（[UpdateManga] 設 initialized=true）+ 同步章節（[SyncChaptersWithSource] diff 加新章）。重用 mihon 既有路徑。 */
+    /** 抓一本：詳情 + 同步章節，重用上游 [UpdateMangaFromRemote]（抓詳情→更新 DB→diff 加新章整套）。 */
     private suspend fun fetchOneFromSource(manga: Manga) {
-        val networkManga = source.getMangaDetails(manga.toSManga())
-        updateManga.awaitUpdateFromSource(manga, networkManga, manualFetch = false)
-        val chapters = source.getChapterList(manga.toSManga())
-        syncChaptersWithSource.await(chapters, manga, source, manualFetch = false)
+        updateMangaFromRemote(manga, fetchDetails = true, fetchChapters = true, manualFetch = false)
     }
 
     val mangaPagerFlowFlow = state.map { it.listing }
@@ -302,8 +293,6 @@ class BrowseSourceScreenModel(
     }
 
     fun resetFilters() {
-        if (source !is CatalogueSource) return
-
         mutableState.update { it.copy(filters = source.getFilterList()) }
     }
 
@@ -312,8 +301,6 @@ class BrowseSourceScreenModel(
     }
 
     fun setFilters(filters: FilterList) {
-        if (source !is CatalogueSource) return
-
         mutableState.update {
             it.copy(
                 filters = filters,
@@ -322,8 +309,6 @@ class BrowseSourceScreenModel(
     }
 
     fun search(query: String? = null, filters: FilterList? = null) {
-        if (source !is CatalogueSource) return
-
         val input = state.value.listing as? Listing.Search
             ?: Listing.Search(query = null, filters = source.getFilterList())
 
@@ -339,8 +324,6 @@ class BrowseSourceScreenModel(
     }
 
     fun searchGenre(genreName: String) {
-        if (source !is CatalogueSource) return
-
         val defaultFilters = source.getFilterList()
         var genreExists = false
 
@@ -436,7 +419,7 @@ class BrowseSourceScreenModel(
                     setDialog(
                         Dialog.ChangeMangaCategory(
                             manga,
-                            categories.mapAsCheckboxState { it.id in preselectedIds }.toImmutableList(),
+                            categories.mapAsCheckboxState { it.id in preselectedIds },
                         ),
                     )
                 }
@@ -520,7 +503,7 @@ class BrowseSourceScreenModel(
         data class AddDuplicateManga(val manga: Manga, val duplicates: List<MangaWithChapterCount>) : Dialog
         data class ChangeMangaCategory(
             val manga: Manga,
-            val initialSelection: ImmutableList<CheckboxState.State<Category>>,
+            val initialSelection: List<CheckboxState.State<Category>>,
         ) : Dialog
         data class Migrate(val target: Manga, val current: Manga) : Dialog
     }

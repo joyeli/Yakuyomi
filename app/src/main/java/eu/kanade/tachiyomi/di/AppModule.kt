@@ -30,12 +30,12 @@ import nl.adaptivity.xmlutil.XmlDeclMode
 import nl.adaptivity.xmlutil.core.XmlVersion
 import nl.adaptivity.xmlutil.serialization.XML
 import tachiyomi.core.common.storage.AndroidStorageFolderProvider
-import tachiyomi.data.AndroidDatabaseHandler
+import tachiyomi.data.Chapters
 import tachiyomi.data.Database
-import tachiyomi.data.DatabaseHandler
 import tachiyomi.data.DateColumnAdapter
 import tachiyomi.data.History
 import tachiyomi.data.Mangas
+import tachiyomi.data.MemoColumnAdapter
 import tachiyomi.data.StringListColumnAdapter
 import tachiyomi.data.UpdateStrategyColumnAdapter
 import tachiyomi.domain.source.service.SourceManager
@@ -82,10 +82,13 @@ class AppModule(val app: Application) : InjektModule {
                 mangasAdapter = Mangas.Adapter(
                     genreAdapter = StringListColumnAdapter,
                     update_strategyAdapter = UpdateStrategyColumnAdapter,
+                    memoAdapter = MemoColumnAdapter,
+                ),
+                chaptersAdapter = Chapters.Adapter(
+                    memoAdapter = MemoColumnAdapter,
                 ),
             )
         }
-        addSingletonFactory<DatabaseHandler> { AndroidDatabaseHandler(get(), get()) }
 
         addSingletonFactory {
             Json {
@@ -120,10 +123,11 @@ class AppModule(val app: Application) : InjektModule {
         addSingletonFactory { DownloadProvider(app) }
         addSingletonFactory { DownloadManager(app) }
         addSingletonFactory { DownloadCache(app) }
+
+        // Yakuyomi：翻譯相關單例（引擎服務/佇列管理/已翻快取/模型下載）。
         addSingletonFactory { TranslationManager(app) }
         addSingletonFactory { ModelDownloadManager(app) }
         addSingletonFactory { TranslationCache(app) }
-        // 即時翻譯常駐引擎（reader 邊讀邊翻；process singleton，跨頁/章復用 ~450MB 引擎）。
         addSingletonFactory { TranslationEngineService(app) }
 
         addSingletonFactory { TrackerManager() }
