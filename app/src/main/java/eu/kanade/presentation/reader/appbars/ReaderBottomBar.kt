@@ -3,6 +3,7 @@ package eu.kanade.presentation.reader.appbars
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.List
 import androidx.compose.material.icons.outlined.ImportContacts
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
@@ -27,6 +28,8 @@ fun ReaderBottomBar(
     cropEnabled: Boolean,
     onClickCropBorder: () -> Unit,
     onClickSettings: () -> Unit,
+    // Yakuyomi：reader 內章節清單鈕。
+    onClickChapterList: () -> Unit,
     modifier: Modifier = Modifier,
     // Yakuyomi：對開模式才有的「位移」鈕（非空才顯示）。
     onClickShiftDoublePage: (() -> Unit)? = null,
@@ -64,6 +67,13 @@ fun ReaderBottomBar(
             Icon(
                 painter = painterResource(if (cropEnabled) R.drawable.ic_crop_24dp else R.drawable.ic_crop_off_24dp),
                 contentDescription = stringResource(MR.strings.pref_crop_borders),
+            )
+        }
+
+        IconButton(onClick = onClickChapterList) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Outlined.List,
+                contentDescription = stringResource(MR.strings.reader_chapter_list),
             )
         }
 

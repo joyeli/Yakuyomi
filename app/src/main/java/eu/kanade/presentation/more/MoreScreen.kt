@@ -6,6 +6,7 @@ import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.automirrored.outlined.Label
 import androidx.compose.material.icons.filled.VolunteerActivism
 import androidx.compose.material.icons.outlined.CloudOff
+import androidx.compose.material.icons.outlined.Contrast
 import androidx.compose.material.icons.outlined.GetApp
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.NewReleases
@@ -33,6 +34,8 @@ import tachiyomi.presentation.core.i18n.stringResource
 @Composable
 fun MoreScreen(
     downloadQueueStateProvider: () -> DownloadQueueState,
+    einkMode: Boolean,
+    onEinkModeChange: (Boolean) -> Unit,
     downloadedOnly: Boolean,
     onDownloadedOnlyChange: (Boolean) -> Unit,
     incognitoMode: Boolean,
@@ -55,6 +58,16 @@ fun MoreScreen(
             item {
                 LogoHeader(
                     iconPadding = PaddingValues(vertical = 32.dp),
+                )
+            }
+            item {
+                // Yakuyomi：墨水屏一鍵（灰階＋白底＋換頁閃白＋關動畫）。放離線模式上面。
+                SwitchPreferenceWidget(
+                    title = stringResource(MR.strings.pref_eink_mode),
+                    subtitle = stringResource(MR.strings.pref_eink_mode_summary),
+                    icon = Icons.Outlined.Contrast,
+                    checked = einkMode,
+                    onCheckedChanged = onEinkModeChange,
                 )
             }
             item {

@@ -64,6 +64,8 @@ fun ReaderAppBars(
     cropEnabled: Boolean,
     onClickCropBorder: () -> Unit,
     onClickSettings: () -> Unit,
+    // Yakuyomi：reader 內章節清單鈕。
+    onClickChapterList: () -> Unit,
     // Yakuyomi：對開模式才有的「位移」鈕（非空才顯示）。
     onClickShiftDoublePage: (() -> Unit)? = null,
 ) {
@@ -128,6 +130,7 @@ fun ReaderAppBars(
                     cropEnabled = cropEnabled,
                     onClickCropBorder = onClickCropBorder,
                     onClickSettings = onClickSettings,
+                    onClickChapterList = onClickChapterList,
                     onClickShiftDoublePage = onClickShiftDoublePage,
                 )
             }

@@ -532,6 +532,8 @@
     <string name="pref_viewer_type">Default reading mode</string>
     <string name="pref_tablet_reading_mode">Tablet reading mode</string>
     <string name="pref_tablet_reading_mode_summary">Reading mode used while in tablet UI — large screens, split-screen/windowed, or an unfolded foldable. Controlled by Appearance &gt; Tablet UI mode.</string>
+    <string name="pref_auto_detect_webtoon">Auto-detect webtoon</string>
+    <string name="pref_auto_detect_webtoon_summary">When a series with no set reading mode has long-strip pages, switch to continuous vertical automatically.</string>
     <string name="tablet_reading_mode_follow_phone">Follow phone</string>
     <string name="l_nav">L shaped</string>
     <string name="kindlish_nav">Kindle-ish</string>
@@ -758,6 +760,8 @@
     <string name="pref_incognito_mode_extension_summary">Pause reading history for extension</string>
     <string name="notification_incognito_text">Disable incognito mode</string>
     <string name="downloaded_only_summary">Filters all entries in your library</string>
+    <string name="pref_eink_mode">E-ink mode</string>
+    <string name="pref_eink_mode_summary">Grayscale, white background, flash on page turn, animations off</string>
 
 
     <!-- Login dialog -->
@@ -1274,6 +1278,7 @@
     <string name="reader_translating">Translating</string>
     <string name="reader_translating_queued">Translation queued</string>
     <string name="reader_translate_this_page">Translate this page</string>
+    <string name="reader_chapter_list">Chapters</string>
     <string name="reader_translate_this_chapter">Translate this chapter</string>
     <string name="reader_stop_chapter_translate">Stop translating this chapter</string>
     <string name="reader_change_removal">Text removal</string>

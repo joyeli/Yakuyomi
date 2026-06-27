@@ -53,6 +53,12 @@ object SettingsReaderScreen : SearchableSettings {
                 // 外面的列顯示當下值（沿用 ListPreference 預設 "%s"）；說明放進選擇對話框內。
                 description = stringResource(MR.strings.pref_tablet_reading_mode_summary),
             ),
+            // Yakuyomi：自動偵測 webtoon（長條圖 → 連續直捲）。只覆寫「跟隨預設」的本，per-manga 指定者不動。
+            Preference.PreferenceItem.SwitchPreference(
+                preference = readerPref.autoDetectWebtoon,
+                title = stringResource(MR.strings.pref_auto_detect_webtoon),
+                subtitle = stringResource(MR.strings.pref_auto_detect_webtoon_summary),
+            ),
             Preference.PreferenceItem.ListPreference(
                 preference = readerPref.doubleTapAnimSpeed,
                 entries = persistentMapOf(

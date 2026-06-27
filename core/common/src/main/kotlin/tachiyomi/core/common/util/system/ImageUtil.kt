@@ -124,6 +124,19 @@ object ImageUtil {
     }
 
     /**
+     * Check whether the image is a tall strip (long vertical image, typical of webtoon/manhwa).
+     * Used by Yakuyomi auto-detect-webtoon to switch reading mode to continuous-vertical.
+     *
+     * @return true if the height is more than 3× the width (same threshold as tall-image splitting)
+     */
+    fun isStripImage(imageSource: BufferedSource): Boolean {
+        val options = extractImageOptions(imageSource)
+        val width = options.outWidth
+        val height = options.outHeight
+        return width > 0 && height > width * 3
+    }
+
+    /**
      * Extract the 'side' part from [BufferedSource] and return it as [BufferedSource].
      */
     fun splitInHalf(imageSource: BufferedSource, side: Side): BufferedSource {

@@ -26,6 +26,7 @@ import eu.kanade.tachiyomi.data.translation.TranslationManager
 import eu.kanade.tachiyomi.ui.category.CategoryScreen
 import eu.kanade.tachiyomi.ui.download.DownloadQueueScreen
 import eu.kanade.tachiyomi.ui.home.HomeScreen
+import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.setting.SettingsScreen
 import eu.kanade.tachiyomi.ui.stats.StatsScreen
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -68,6 +69,8 @@ data object MoreTab : Tab {
         val downloadQueueState by screenModel.downloadQueueState.collectAsState()
         MoreScreen(
             downloadQueueStateProvider = { downloadQueueState },
+            einkMode = screenModel.einkMode,
+            onEinkModeChange = { screenModel.applyEinkMode(it) },
             downloadedOnly = screenModel.downloadedOnly,
             onDownloadedOnlyChange = { screenModel.downloadedOnly = it },
             incognitoMode = screenModel.incognitoMode,
@@ -92,10 +95,24 @@ private class MoreScreenModel(
     private val translationManager: TranslationManager = Injekt.get(),
     preferences: BasePreferences = Injekt.get(),
     translationPreferences: TranslationPreferences = Injekt.get(),
+    private val readerPreferences: ReaderPreferences = Injekt.get(),
 ) : ScreenModel {
 
     var downloadedOnly by preferences.downloadedOnly.asState(screenModelScope)
     var incognitoMode by preferences.incognitoMode.asState(screenModelScope)
+
+    // Yakuyomi：墨水屏一鍵——切換時把一組 reader 設定一次套上/還原（灰階／白底／換頁閃白／關動畫）。
+    var einkMode by preferences.einkMode.asState(screenModelScope)
+    fun applyEinkMode(enabled: Boolean) {
+        einkMode = enabled
+        readerPreferences.grayscale.set(enabled)
+        readerPreferences.readerTheme.set(if (enabled) 0 else 1)
+        readerPreferences.flashOnPageChange.set(enabled)
+        readerPreferences.flashColor.set(
+            if (enabled) ReaderPreferences.FlashColor.WHITE else ReaderPreferences.FlashColor.BLACK,
+        )
+        readerPreferences.pageTransitions.set(!enabled)
+    }
 
     // Yakuyomi：翻譯總開關快捷切換（與翻譯設定頁綁同一 pref、連動）；set 後觸發 manager 副作用（停/續 + 引擎）。
     var translationMasterEnabled by translationPreferences.translationMasterEnabled.asState(screenModelScope)

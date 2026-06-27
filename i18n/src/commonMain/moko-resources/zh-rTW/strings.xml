@@ -169,6 +169,8 @@
     <string name="pref_viewer_type">預設閱讀模式</string>
     <string name="pref_tablet_reading_mode">平板閱讀模式</string>
     <string name="pref_tablet_reading_mode_summary">處於平板介面時使用的閱讀模式（大螢幕、分割畫面 / 視窗化、或展開的折疊機都會觸發）。由「外觀 &gt; 平板介面」控制何時算平板。</string>
+    <string name="pref_auto_detect_webtoon">自動偵測 webtoon</string>
+    <string name="pref_auto_detect_webtoon_summary">未指定閱讀模式的作品，若頁面是長條圖，自動改用連續直捲。</string>
     <string name="tablet_reading_mode_follow_phone">跟隨手機</string>
     <string name="left_to_right_viewer">單頁(左至右)</string>
     <string name="right_to_left_viewer">單頁(右至左)</string>
@@ -293,6 +295,8 @@
     <string name="pref_date_format">日期格式</string>
     <string name="downloaded_only_summary">將套用至你書櫃中的作品</string>
     <string name="label_downloaded_only">僅限下載內容</string>
+    <string name="pref_eink_mode">墨水屏模式</string>
+    <string name="pref_eink_mode_summary">灰階、白底、換頁閃白、關閉動畫</string>
     <string name="licenses">開放原始碼授權</string>
     <string name="website">網站</string>
     <string name="check_for_updates">檢查更新</string>
@@ -1088,6 +1092,7 @@
     <string name="reader_translating">翻譯中</string>
     <string name="reader_translating_queued">翻譯排隊中</string>
     <string name="reader_translate_this_page">翻譯這頁</string>
+    <string name="reader_chapter_list">章節</string>
     <string name="reader_translate_this_chapter">開始翻譯這話</string>
     <string name="reader_stop_chapter_translate">中止這話翻譯</string>
     <string name="reader_change_removal">換去字法</string>

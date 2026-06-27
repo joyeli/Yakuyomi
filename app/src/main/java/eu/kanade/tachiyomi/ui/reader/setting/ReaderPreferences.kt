@@ -48,6 +48,13 @@ class ReaderPreferences(
         ReadingMode.DEFAULT.flagValue,
     )
 
+    // Yakuyomi：自動偵測 webtoon——該本未指定閱讀模式時，若頁面是長條圖（高 > 寬*3，typical manhwa/webtoon）
+    // → 自動改用連續直捲；只覆寫「跟隨預設」的本（per-manga 明確指定者不動）。預設關（開關優先）。
+    val autoDetectWebtoon: Preference<Boolean> = preferenceStore.getBoolean(
+        "pref_auto_detect_webtoon_key",
+        false,
+    )
+
     val defaultOrientationType: Preference<Int> = preferenceStore.getInt(
         "pref_default_orientation_type_key",
         ReaderOrientation.FREE.flagValue,

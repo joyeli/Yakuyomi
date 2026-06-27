@@ -903,6 +903,25 @@ class ReaderViewModel @JvmOverloads constructor(
     }
 
     /**
+     * Yakuyomi：reader 內章節清單給 UI 顯示用的快照（已過濾/排序，與 reader 的章序一致）。
+     * [chapterList] 早在開章時於背景初始化過，這裡是 lazy 命中的純記憶體存取。
+     */
+    fun getReaderChapters(): List<ReaderChapter> = chapterList
+
+    /** Yakuyomi：當前正在讀的章 id（章節清單對話框用來標示「目前」）。 */
+    val currentChapterId: Long?
+        get() = state.value.currentChapter?.chapter?.id
+
+    /** Yakuyomi：從章節清單對話框點選任一章 → 載入並設為當前章（背景跑、含載入狀態）。 */
+    fun loadChapterFromList(chapterId: Long) {
+        if (chapterId == currentChapterId) return
+        val chapter = chapterList.firstOrNull { it.chapter.id == chapterId } ?: return
+        viewModelScope.launchIO {
+            loadAdjacent(chapter)
+        }
+    }
+
+    /**
      * Returns the currently active chapter.
      */
     private fun getCurrentChapter(): ReaderChapter? {
@@ -970,6 +989,12 @@ class ReaderViewModel @JvmOverloads constructor(
     }
 
     /**
+     * Yakuyomi：自動偵測 webtoon 切到的閱讀模式（transient、不持久化）。偵測到長條圖時設成 CONTINUOUS_VERTICAL，
+     * 只在該本未明確指定模式（readingMode==DEFAULT）時由 [getMangaReadingMode] 採用；換 reader session 即重置。
+     */
+    private var autoDetectedReadingMode: Int? = null
+
+    /**
      * Returns the viewer position used by this manga or the default one.
      */
     fun getMangaReadingMode(resolveDefault: Boolean = true): Int {
@@ -982,9 +1007,34 @@ class ReaderViewModel @JvmOverloads constructor(
         }
         val readingMode = ReadingMode.fromPreference(manga?.readingMode?.toInt())
         return when {
-            resolveDefault && readingMode == ReadingMode.DEFAULT -> default
+            // Yakuyomi：該本未指定模式時，自動偵測到長條圖 → 連續直捲（覆寫預設，含對開預設）。
+            resolveDefault && readingMode == ReadingMode.DEFAULT -> autoDetectedReadingMode ?: default
             else -> manga?.readingMode?.toInt() ?: default
         }
+    }
+
+    /**
+     * Yakuyomi：本頁是否該嘗試自動偵測 webtoon（快速布林、給 [PagerPageHolder] 在解析長寬比前先 gate，省不必要的 bounds decode）。
+     * 條件：總開關開 + 尚未切過 + 該本未明確指定模式 + 目前解析出的模式非 webtoon 系。
+     */
+    fun isAutoWebtoonEligible(): Boolean {
+        if (!readerPreferences.autoDetectWebtoon.get()) return false
+        if (autoDetectedReadingMode != null) return false
+        if (ReadingMode.fromPreference(manga?.readingMode?.toInt()) != ReadingMode.DEFAULT) return false
+        val current = ReadingMode.fromPreference(getMangaReadingMode())
+        return current != ReadingMode.WEBTOON && current != ReadingMode.CONTINUOUS_VERTICAL
+    }
+
+    /**
+     * Yakuyomi：[PagerPageHolder] 偵測到當前頁是長條圖時呼叫——切連續直捲並重建 viewer（存當前頁、不持久化）。
+     * 二次防護（重複呼叫 / 已切過 / 該本已指定模式）由 [isAutoWebtoonEligible] 擋掉。
+     */
+    fun onAutoWebtoonDetected() {
+        if (!isAutoWebtoonEligible()) return
+        autoDetectedReadingMode = ReadingMode.CONTINUOUS_VERTICAL.flagValue
+        val currChapters = state.value.viewerChapters ?: return
+        currChapters.currChapter.requestedPage = currChapters.currChapter.chapter.last_page_read
+        eventChannel.trySend(Event.RebuildViewer)
     }
 
     /**
@@ -1099,6 +1149,11 @@ class ReaderViewModel @JvmOverloads constructor(
 
     fun openSettingsDialog() {
         mutableState.update { it.copy(dialog = Dialog.Settings) }
+    }
+
+    /** Yakuyomi：開 reader 內章節清單對話框。 */
+    fun openChapterListDialog() {
+        mutableState.update { it.copy(dialog = Dialog.ChapterList) }
     }
 
     fun closeDialog() {
@@ -1520,10 +1575,16 @@ class ReaderViewModel @JvmOverloads constructor(
 
         /** 重繪當頁去字法選擇對話框（帶著要重繪的頁）。 */
         data class ReRenderMethod(val page: ReaderPage) : Dialog
+
+        /** Yakuyomi：reader 內章節清單（點章跳轉，不離開 reader）。 */
+        data object ChapterList : Dialog
     }
 
     sealed interface Event {
         data object ReloadViewerChapters : Event
+
+        /** Yakuyomi：自動偵測 webtoon 切閱讀模式後，重建 viewer（updateViewer + setChapters）。 */
+        data object RebuildViewer : Event
         data object PageChanged : Event
         data class SetOrientation(val orientation: Int) : Event
         data class SetCoverResult(val result: SetAsCoverResult) : Event

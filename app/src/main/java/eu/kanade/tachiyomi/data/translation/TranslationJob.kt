@@ -3,7 +3,9 @@ package eu.kanade.tachiyomi.data.translation
 import android.app.Notification
 import android.content.Context
 import android.content.pm.ServiceInfo
+import android.graphics.Bitmap
 import android.os.Build
+import androidx.core.app.NotificationCompat
 import androidx.lifecycle.asFlow
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
@@ -12,8 +14,13 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import coil3.asDrawable
+import coil3.imageLoader
+import coil3.request.ImageRequest
+import coil3.request.allowHardware
 import eu.kanade.tachiyomi.data.notification.Notifications
 import eu.kanade.tachiyomi.data.translation.model.TranslationItem
+import eu.kanade.tachiyomi.util.system.getBitmapOrNull
 import eu.kanade.tachiyomi.util.system.notificationBuilder
 import eu.kanade.tachiyomi.util.system.setForegroundSafely
 import kotlinx.coroutines.flow.Flow
@@ -21,6 +28,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.takeWhile
 import tachiyomi.core.common.i18n.stringResource
+import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.translation.service.TranslationPreferences
 import tachiyomi.i18n.MR
 import uy.kohesive.injekt.Injekt
@@ -88,13 +96,20 @@ class TranslationJob(context: Context, workerParams: WorkerParameters) : Corouti
         }
     }
 
-    private fun buildNotification(items: List<TranslationItem>): Notification {
+    private suspend fun buildNotification(items: List<TranslationItem>): Notification {
         val active = items.firstOrNull { it.status == TranslationItem.Status.TRANSLATING }
+        val cover = active?.let { getMangaIcon(it.manga) }
         return applicationContext.notificationBuilder(Notifications.CHANNEL_TRANSLATOR_PROGRESS) {
             setContentTitle(applicationContext.stringResource(MR.strings.translation_status_translating))
             if (active != null) {
                 setContentText(active.manga.title)
                 if (active.total > 0) setProgress(active.total, active.done, false)
+            }
+            if (cover != null) {
+                // 收合時右側小縮圖；展開時整張完整封面大圖（BigPictureStyle）。bigLargeIcon(null)＝展開時收掉
+                // 右上重複的小縮圖。封面是直幅、未裁切 → 大圖區置中顯示完整封面（兩側留白，不裁切）。
+                setLargeIcon(cover)
+                setStyle(NotificationCompat.BigPictureStyle().bigPicture(cover).bigLargeIcon(null as Bitmap?))
             }
             setSmallIcon(android.R.drawable.stat_sys_download)
             setOngoing(true)
@@ -102,8 +117,29 @@ class TranslationJob(context: Context, workerParams: WorkerParameters) : Corouti
         }.build()
     }
 
+    /**
+     * 載入該本封面（Coil；快取命中很快）：不加 CircleCrop → 保留完整封面比例；尺寸放大到 [COVER_SIZE]
+     * 讓 BigPictureStyle 展開時夠清晰。失敗回 null、不擋通知。
+     */
+    private suspend fun getMangaIcon(manga: Manga): Bitmap? = runCatching {
+        val request = ImageRequest.Builder(applicationContext)
+            .data(manga)
+            .size(COVER_SIZE)
+            // 通知 bitmap 必須是 software bitmap（hardware bitmap 無法 parcel 進通知 → 整則被系統拒收）。
+            // 沒了 CircleCropTransformation（會強制 software），這裡得自己關 hardware。
+            .allowHardware(false)
+            .build()
+        applicationContext.imageLoader.execute(request).image
+            ?.asDrawable(applicationContext.resources)
+            ?.getBitmapOrNull()
+    }.getOrNull()
+
     companion object {
         private const val TAG = "Translator"
+
+        // 通知封面載入尺寸（長邊 px）。largeIcon + bigPicture 共用同一張、各 parcel 一份，
+        // 兩份合計須壓在 Binder transaction ~1MB 內，否則系統拒收整則通知 → 256（直幅 ~256×366×4≈375KB×2≈750KB）。
+        private const val COVER_SIZE = 256
 
         /** 啟動前景服務。已在跑就沿用（KEEP，不打斷正在跑的 Job；新加的章由 live queueState 帶進去）。 */
         fun start(context: Context) {

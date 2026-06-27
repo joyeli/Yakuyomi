@@ -54,6 +54,7 @@ import eu.kanade.domain.base.BasePreferences
 import eu.kanade.presentation.reader.DisplayRefreshHost
 import eu.kanade.presentation.reader.OrientationSelectDialog
 import eu.kanade.presentation.reader.ReRenderMethodDialog
+import eu.kanade.presentation.reader.ReaderChapterListDialog
 import eu.kanade.presentation.reader.ReaderContentOverlay
 import eu.kanade.presentation.reader.ReaderLiveTranslateIndicator
 import eu.kanade.presentation.reader.ReaderPageActionsDialog
@@ -234,6 +235,12 @@ class ReaderActivity : BaseActivity() {
                     ReaderViewModel.Event.ReloadViewerChapters -> {
                         viewModel.state.value.viewerChapters?.let(::setChapters)
                     }
+                    ReaderViewModel.Event.RebuildViewer -> {
+                        // Yakuyomi：自動偵測 webtoon 切模式後重建 viewer——updateViewer 依新模式換 viewer、
+                        // setChapters 把章節頁重新塞進去（停在 requestedPage）。
+                        updateViewer()
+                        viewModel.state.value.viewerChapters?.let(::setChapters)
+                    }
                     ReaderViewModel.Event.PageChanged -> {
                         displayRefreshHost.flash()
                     }
@@ -408,6 +415,14 @@ class ReaderActivity : BaseActivity() {
                     onSelect = { method -> viewModel.reRenderPage(method) },
                 )
             }
+            is ReaderViewModel.Dialog.ChapterList -> {
+                ReaderChapterListDialog(
+                    onDismissRequest = onDismissRequest,
+                    chapters = viewModel.getReaderChapters(),
+                    currentChapterId = viewModel.currentChapterId,
+                    onSelectChapter = viewModel::loadChapterFromList,
+                )
+            }
             null -> {}
         }
     }
@@ -580,6 +595,7 @@ class ReaderActivity : BaseActivity() {
                 menuToggleToast = toast(if (enabled) MR.strings.on else MR.strings.off)
             },
             onClickSettings = viewModel::openSettingsDialog,
+            onClickChapterList = viewModel::openChapterListDialog,
             onClickShiftDoublePage = doublePageViewer?.let { { it.shiftCurrentChapter() } },
         )
     }

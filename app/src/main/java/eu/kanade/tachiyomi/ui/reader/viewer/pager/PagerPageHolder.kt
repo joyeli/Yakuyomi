@@ -157,6 +157,11 @@ class PagerPageHolder(
         try {
             val (source, isAnimated, background) = withIOContext {
                 val source = streamFn().use { process(item, Buffer().readFrom(it)) }
+                // Yakuyomi：自動偵測 webtoon——先用快速 gate（總開關開 + 未切過 + 該本未指定模式）避免每頁多做 bounds decode；
+                // 過 gate 才量長寬比，長條圖（高 > 寬*3）→ 通知 viewModel 切連續直捲並重建 viewer。
+                if (viewer.activity.viewModel.isAutoWebtoonEligible() && ImageUtil.isStripImage(source)) {
+                    withUIContext { viewer.activity.viewModel.onAutoWebtoonDetected() }
+                }
                 val isAnimated = ImageUtil.isAnimatedAndSupported(source)
                 val background = if (!isAnimated && viewer.config.automaticBackground) {
                     ImageUtil.chooseBackground(context, source.peek().inputStream())
