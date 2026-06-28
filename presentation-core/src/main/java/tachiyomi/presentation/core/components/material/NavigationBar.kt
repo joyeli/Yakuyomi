@@ -28,6 +28,8 @@ fun NavigationBar(
     contentColor: Color = MaterialTheme.colorScheme.contentColorFor(containerColor),
     tonalElevation: Dp = NavigationBarDefaults.Elevation,
     windowInsets: WindowInsets = NavigationBarDefaults.windowInsets,
+    // Yakuyomi：可變列高——精簡模式（僅圖示）縮成 ~56dp，標準 80dp。
+    barHeight: Dp = 80.dp,
     content: @Composable RowScope.() -> Unit,
 ) {
     androidx.compose.material3.Surface(
@@ -40,7 +42,7 @@ fun NavigationBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .windowInsetsPadding(windowInsets)
-                .height(80.dp)
+                .height(barHeight)
                 .selectableGroup(),
             content = content,
         )

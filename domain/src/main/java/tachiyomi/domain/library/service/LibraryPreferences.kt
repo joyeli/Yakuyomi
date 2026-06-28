@@ -64,6 +64,12 @@ class LibraryPreferences(
         false,
     )
 
+    // Yakuyomi：書庫浮動搜尋列（借鏡 J2K/Yokai 單手 UX）。開啟＝搜尋入口從頂部 app bar 移到底部浮動 pill。
+    val floatingSearchBar: Preference<Boolean> = preferenceStore.getBoolean(
+        "pref_floating_search_bar",
+        false,
+    )
+
     val markDuplicateReadChapterAsRead: Preference<Set<String>> = preferenceStore.getStringSet(
         "mark_duplicate_read_chapter_read",
         emptySet(),

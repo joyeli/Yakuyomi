@@ -658,6 +658,7 @@
     <string name="information_no_entries_found">類別沒有作品</string>
     <string name="fdroid_warning">F-Droid 的組建未被正式支援\n輕觸以瞭解詳情</string>
     <string name="action_display_show_continue_reading_button">繼續閱讀按鈕</string>
+    <string name="action_display_floating_search_bar">浮動搜尋列</string>
     <string name="track_remove_date_conf_title">移除日期？</string>
     <string name="track_remove_finish_date_conf_text">從「%s」移除你先前輸入的閱讀完畢日期</string>
     <string name="track_remove_start_date_conf_text">從「%s」移除你先前輸入的開始閱讀日期</string>
@@ -901,6 +902,8 @@
     <string name="pref_display_images_description">在漫畫描述中顯示圖片</string>
     <string name="pref_expand_manga_summary">預設展開簡介</string>
     <string name="pref_expand_manga_summary_summary">開啟書本時直接展開完整簡介，而非摺疊。</string>
+    <string name="pref_bottom_nav_compact">精簡導覽列</string>
+    <string name="pref_bottom_nav_compact_summary">僅圖示、無文字，更小更緊緻。</string>
     <string name="pref_disallow_non_ascii_filenames">禁止使用非 ASCII 檔名</string>
     <string name="pref_disallow_non_ascii_filenames_details">確保與不支援 Unicode 的某些儲存媒體相容，啟用此選項後，你需要手動將來源與漫畫資料夾中的非 ASCII 字元改成對應的小寫 UTF-8 十六進位表示方式，章節檔案則不需要重新命名。</string>
     <string name="pref_download_concurrent_sources">同時下載的來源數目</string>

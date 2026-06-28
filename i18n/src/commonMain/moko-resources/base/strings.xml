@@ -168,6 +168,7 @@
     <string name="action_display_show_tabs">Show category tabs</string>
     <string name="action_display_show_number_of_items">Show number of items</string>
     <string name="action_display_show_continue_reading_button">Continue reading button</string>
+    <string name="action_display_floating_search_bar">Floating search bar</string>
     <string name="action_disable">Disable</string>
     <string name="action_pin">Pin</string>
     <string name="action_unpin">Unpin</string>
@@ -326,6 +327,8 @@
     <string name="pref_display_images_description">Render images in manga descriptions</string>
     <string name="pref_expand_manga_summary">Expand description by default</string>
     <string name="pref_expand_manga_summary_summary">Show the full description when opening an entry instead of collapsing it.</string>
+    <string name="pref_bottom_nav_compact">Compact navigation bar</string>
+    <string name="pref_bottom_nav_compact_summary">Icons only, no labels — smaller and tighter.</string>
 
     <string name="pref_manage_notifications">Manage notifications</string>
     <string name="pref_app_language">App language</string>

@@ -40,6 +40,9 @@ class UiPreferences(
     // Yakuyomi：漫畫詳情頁的簡介區塊預設是否展開（預設摺疊）。
     val expandMangaSummary: Preference<Boolean> = preferenceStore.getBoolean("pref_expand_manga_summary", false)
 
+    // Yakuyomi：底部導覽列精簡模式（僅圖示、無文字、縮高度與留白）。
+    val bottomNavCompact: Preference<Boolean> = preferenceStore.getBoolean("pref_bottom_nav_compact", false)
+
     companion object {
         fun dateFormat(format: String): DateTimeFormatter = when (format) {
             "" -> DateTimeFormatter.ofLocalizedDate(FormatStyle.SHORT)

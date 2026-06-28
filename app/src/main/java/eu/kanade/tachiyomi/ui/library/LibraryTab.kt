@@ -4,7 +4,16 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.graphics.res.animatedVectorResource
 import androidx.compose.animation.graphics.res.rememberAnimatedVectorPainter
 import androidx.compose.animation.graphics.vector.AnimatedImageVector
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material3.SnackbarHost
@@ -13,13 +22,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastAll
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
@@ -30,6 +47,7 @@ import cafe.adriel.voyager.navigator.tab.TabOptions
 import eu.kanade.presentation.category.components.ChangeCategoryDialog
 import eu.kanade.presentation.library.DeleteLibraryMangaDialog
 import eu.kanade.presentation.library.LibrarySettingsDialog
+import eu.kanade.presentation.library.components.FloatingSearchBar
 import eu.kanade.presentation.library.components.LibraryContent
 import eu.kanade.presentation.library.components.LibraryToolbar
 import eu.kanade.presentation.manga.components.LibraryBottomActionMenu
@@ -44,6 +62,7 @@ import eu.kanade.tachiyomi.ui.main.MainActivity
 import eu.kanade.tachiyomi.ui.manga.MangaScreen
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
@@ -108,56 +127,117 @@ data object LibraryTab : Tab {
             started
         }
 
+        // Yakuyomi：頂部與底部浮動列共用的「隨機開啟一本」動作。
+        val onClickOpenRandomManga: () -> Unit = {
+            scope.launch {
+                val randomItem = screenModel.getRandomLibraryItemForCurrentCategory()
+                if (randomItem != null) {
+                    navigator.push(MangaScreen(randomItem.libraryManga.manga.id))
+                } else {
+                    snackbarHostState.showSnackbar(
+                        context.stringResource(MR.strings.information_no_entries_found),
+                    )
+                }
+            }
+            Unit
+        }
+
+        // Yakuyomi：浮動搜尋列展開/收合——初始展開、閒置 3 秒或捲動時收成右下小球、點球展開並聚焦。
+        var searchBarExpanded by remember { mutableStateOf(true) }
+        var pendingSearchFocus by remember { mutableStateOf(false) }
+        val searchFocusRequester = remember { FocusRequester() }
+        LaunchedEffect(searchBarExpanded, state.searchQuery, state.floatingSearchBar) {
+            if (state.floatingSearchBar && searchBarExpanded && state.searchQuery.isNullOrEmpty()) {
+                delay(3_000)
+                searchBarExpanded = false
+            }
+        }
+        LaunchedEffect(searchBarExpanded) {
+            if (searchBarExpanded && pendingSearchFocus) {
+                searchFocusRequester.requestFocus()
+                pendingSearchFocus = false
+            }
+        }
+        // 捲動書庫時收成球（讓位看書）；搜尋字保留，球可再展開。
+        val collapseOnScroll = remember {
+            object : NestedScrollConnection {
+                override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                    if (available.y != 0f) searchBarExpanded = false
+                    return Offset.Zero
+                }
+            }
+        }
+
         Scaffold(
+            modifier = Modifier.nestedScroll(collapseOnScroll),
             topBar = { scrollBehavior ->
-                val title = state.getToolbarTitle(
-                    defaultTitle = stringResource(MR.strings.label_library),
-                    defaultCategoryTitle = stringResource(MR.strings.label_default),
-                    page = state.coercedActiveCategoryIndex,
-                )
-                LibraryToolbar(
-                    hasActiveFilters = state.hasActiveFilters,
-                    selectedCount = state.selection.size,
-                    title = title,
-                    onClickUnselectAll = screenModel::clearSelection,
-                    onClickSelectAll = screenModel::selectAll,
-                    onClickInvertSelection = screenModel::invertSelection,
-                    onClickFilter = screenModel::showSettingsDialog,
-                    onClickRefresh = { onClickRefresh(state.activeCategory) },
-                    onClickGlobalUpdate = { onClickRefresh(null) },
-                    onClickOpenRandomManga = {
-                        scope.launch {
-                            val randomItem = screenModel.getRandomLibraryItemForCurrentCategory()
-                            if (randomItem != null) {
-                                navigator.push(MangaScreen(randomItem.libraryManga.manga.id))
-                            } else {
-                                snackbarHostState.showSnackbar(
-                                    context.stringResource(MR.strings.information_no_entries_found),
-                                )
-                            }
-                        }
-                    },
-                    searchQuery = state.searchQuery,
-                    onSearchQueryChange = screenModel::search,
-                    // For scroll overlay when no tab
-                    scrollBehavior = scrollBehavior.takeIf { !state.showCategoryTabs },
-                )
+                // Yakuyomi：浮動搜尋列開啟（非選取模式）→ 整條頂部工具列隱藏、書目全螢幕；
+                // 只留狀態列高度避免內容被狀態列遮。搜尋/篩選/overflow 全移到底部浮動列。
+                if (state.floatingSearchBar && !state.selectionMode) {
+                    Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
+                } else {
+                    val title = state.getToolbarTitle(
+                        defaultTitle = stringResource(MR.strings.label_library),
+                        defaultCategoryTitle = stringResource(MR.strings.label_default),
+                        page = state.coercedActiveCategoryIndex,
+                    )
+                    LibraryToolbar(
+                        hasActiveFilters = state.hasActiveFilters,
+                        selectedCount = state.selection.size,
+                        title = title,
+                        onClickUnselectAll = screenModel::clearSelection,
+                        onClickSelectAll = screenModel::selectAll,
+                        onClickInvertSelection = screenModel::invertSelection,
+                        onClickFilter = screenModel::showSettingsDialog,
+                        onClickRefresh = { onClickRefresh(state.activeCategory) },
+                        onClickGlobalUpdate = { onClickRefresh(null) },
+                        onClickOpenRandomManga = onClickOpenRandomManga,
+                        searchQuery = state.searchQuery,
+                        onSearchQueryChange = screenModel::search,
+                        // For scroll overlay when no tab
+                        scrollBehavior = scrollBehavior.takeIf { !state.showCategoryTabs },
+                    )
+                }
             },
             bottomBar = {
-                LibraryBottomActionMenu(
-                    visible = state.selectionMode,
-                    onChangeCategoryClicked = screenModel::openChangeCategoryDialog,
-                    onMarkAsReadClicked = { screenModel.markReadSelection(true) },
-                    onMarkAsUnreadClicked = { screenModel.markReadSelection(false) },
-                    onDownloadClicked = screenModel::performDownloadAction
-                        .takeIf { state.selectedManga.fastAll { !it.isLocal() } },
-                    onDeleteClicked = screenModel::openDeleteMangaDialog,
-                    onMigrateClicked = {
-                        val selection = state.selection
-                        screenModel.clearSelection()
-                        navigator.push(MigrationConfigScreen(selection))
-                    },
-                )
+                // Yakuyomi：浮動搜尋列放 Scaffold bottomBar——content 自動扣其高度（不擋最後一排書），
+                // bottomBar 不自動避鍵盤故自己加 ime∪navbar（取較大者：鍵盤開=ime、關=navbar，不雙倍位移）。
+                if (state.floatingSearchBar && !state.selectionMode) {
+                    FloatingSearchBar(
+                        expanded = searchBarExpanded,
+                        onBallClick = {
+                            searchBarExpanded = true
+                            pendingSearchFocus = true
+                        },
+                        focusRequester = searchFocusRequester,
+                        searchQuery = state.searchQuery,
+                        onSearchQueryChange = screenModel::search,
+                        hasActiveFilters = state.hasActiveFilters,
+                        onClickFilter = screenModel::showSettingsDialog,
+                        onClickGlobalUpdate = { onClickRefresh(null) },
+                        onClickRefresh = { onClickRefresh(state.activeCategory) },
+                        onClickOpenRandomManga = onClickOpenRandomManga,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                    )
+                } else {
+                    LibraryBottomActionMenu(
+                        visible = state.selectionMode,
+                        onChangeCategoryClicked = screenModel::openChangeCategoryDialog,
+                        onMarkAsReadClicked = { screenModel.markReadSelection(true) },
+                        onMarkAsUnreadClicked = { screenModel.markReadSelection(false) },
+                        onDownloadClicked = screenModel::performDownloadAction
+                            .takeIf { state.selectedManga.fastAll { !it.isLocal() } },
+                        onDeleteClicked = screenModel::openDeleteMangaDialog,
+                        onMigrateClicked = {
+                            val selection = state.selection
+                            screenModel.clearSelection()
+                            navigator.push(MigrationConfigScreen(selection))
+                        },
+                    )
+                }
             },
             snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         ) { contentPadding ->
@@ -198,7 +278,9 @@ data object LibraryTab : Tab {
                                         ReaderActivity.newIntent(context, chapter.mangaId, chapter.id),
                                     )
                                 } else {
-                                    snackbarHostState.showSnackbar(context.stringResource(MR.strings.no_next_chapter))
+                                    snackbarHostState.showSnackbar(
+                                        context.stringResource(MR.strings.no_next_chapter),
+                                    )
                                 }
                             }
                             Unit

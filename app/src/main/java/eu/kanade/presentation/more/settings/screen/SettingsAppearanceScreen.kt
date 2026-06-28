@@ -151,6 +151,12 @@ object SettingsAppearanceScreen : SearchableSettings {
                     title = stringResource(MR.strings.pref_expand_manga_summary),
                     subtitle = stringResource(MR.strings.pref_expand_manga_summary_summary),
                 ),
+                // Yakuyomi：底部導覽列精簡模式（僅圖示、無文字、緊緻）。
+                Preference.PreferenceItem.SwitchPreference(
+                    preference = uiPreferences.bottomNavCompact,
+                    title = stringResource(MR.strings.pref_bottom_nav_compact),
+                    subtitle = stringResource(MR.strings.pref_bottom_nav_compact_summary),
+                ),
             ),
         )
     }

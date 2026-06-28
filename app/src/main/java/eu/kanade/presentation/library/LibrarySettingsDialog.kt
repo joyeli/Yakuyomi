@@ -329,6 +329,11 @@ private fun ColumnScope.DisplayPage(
         label = stringResource(MR.strings.action_display_show_continue_reading_button),
         pref = screenModel.libraryPreferences.showContinueReadingButton,
     )
+    // Yakuyomi：底部浮動搜尋列（單手）。
+    CheckboxItem(
+        label = stringResource(MR.strings.action_display_floating_search_bar),
+        pref = screenModel.libraryPreferences.floatingSearchBar,
+    )
 
     HeadingItem(MR.strings.tabs_header)
     CheckboxItem(

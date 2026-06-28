@@ -145,13 +145,15 @@ class LibraryScreenModel(
             libraryPreferences.categoryTabs.changes(),
             libraryPreferences.categoryNumberOfItems.changes(),
             libraryPreferences.showContinueReadingButton.changes(),
-        ) { a, b, c -> arrayOf(a, b, c) }
-            .onEach { (showCategoryTabs, showMangaCount, showMangaContinueButton) ->
+            libraryPreferences.floatingSearchBar.changes(),
+        ) { a, b, c, d -> arrayOf(a, b, c, d) }
+            .onEach { (showCategoryTabs, showMangaCount, showMangaContinueButton, floatingSearchBar) ->
                 mutableState.update { state ->
                     state.copy(
                         showCategoryTabs = showCategoryTabs,
                         showMangaCount = showMangaCount,
                         showMangaContinueButton = showMangaContinueButton,
+                        floatingSearchBar = floatingSearchBar,
                     )
                 }
             }
@@ -791,6 +793,8 @@ class LibraryScreenModel(
         val showCategoryTabs: Boolean = false,
         val showMangaCount: Boolean = false,
         val showMangaContinueButton: Boolean = false,
+        // Yakuyomi：書庫浮動搜尋列開關（開＝搜尋移到底部浮動 pill、頂部隱藏放大鏡）。
+        val floatingSearchBar: Boolean = false,
         val dialog: Dialog? = null,
         val libraryData: LibraryData = LibraryData(),
         private val activeCategoryIndex: Int = 0,
