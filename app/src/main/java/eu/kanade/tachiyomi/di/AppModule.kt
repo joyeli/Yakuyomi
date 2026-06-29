@@ -9,6 +9,7 @@ import com.eygraber.sqldelight.androidx.driver.AndroidxSqliteDatabaseType
 import com.eygraber.sqldelight.androidx.driver.AndroidxSqliteDriver
 import com.eygraber.sqldelight.androidx.driver.FileProvider
 import eu.kanade.domain.track.store.DelayedTrackingStore
+import eu.kanade.tachiyomi.data.browse.BrowseFetchManager
 import eu.kanade.tachiyomi.data.cache.ChapterCache
 import eu.kanade.tachiyomi.data.cache.CoverCache
 import eu.kanade.tachiyomi.data.download.DownloadCache
@@ -123,6 +124,9 @@ class AppModule(val app: Application) : InjektModule {
         addSingletonFactory { DownloadProvider(app) }
         addSingletonFactory { DownloadManager(app) }
         addSingletonFactory { DownloadCache(app) }
+
+        // Yakuyomi：探索批次擷取背景管理器（單一全域槽、不持久化）。
+        addSingletonFactory { BrowseFetchManager(app) }
 
         // Yakuyomi：翻譯相關單例（引擎服務/佇列管理/已翻快取/模型下載）。
         addSingletonFactory { TranslationManager(app) }

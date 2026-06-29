@@ -119,8 +119,9 @@ data class BrowseSourceScreen(
         val gridState = rememberLazyGridState()
         val listState = rememberLazyListState()
 
-        // Yakuyomi：探索批次擷取詳情＋章節的狀態（進度 / 失敗清單）。
-        val batchFetch by screenModel.batchFetch.collectAsState()
+        // Yakuyomi：探索批次擷取的全域狀態（背景單一槽）+ 完成結果（含失敗清單）。
+        val fetchState by screenModel.browseFetchState.collectAsState()
+        val fetchResult by screenModel.browseFetchResult.collectAsState()
 
         // Yakuyomi：快照（離線清單）狀態 + 自動載入到錨點 + 相關對話框旗標。
         val snapshotRaw by screenModel.browseSnapshot.prefCollectAsState()
@@ -222,11 +223,13 @@ data class BrowseSourceScreen(
             prevSnapshotListing = isSnapshotListing
         }
 
-        // Yakuyomi：批次擷取結束且有失敗 → 推「失敗清單」畫面（逐一檢查、點進詳情頁手動更新），並消費旗標。
-        LaunchedEffect(batchFetch.showResults) {
-            if (batchFetch.showResults) {
-                navigator.push(SourceFetchResultsScreen(batchFetch.failedIds))
-                screenModel.dismissBatchResults()
+        // Yakuyomi：背景擷取完成且有失敗 → 只在「對應來源」的畫面推「失敗清單」（逐一檢查），並消費結果。
+        // 背景單一全域槽 → 結果帶 sourceId，非本來源不彈（背景跑時你可能在別的來源畫面）。
+        LaunchedEffect(fetchResult) {
+            val result = fetchResult
+            if (result != null && result.sourceId == screenModel.source.id) {
+                navigator.push(SourceFetchResultsScreen(result.failedIds))
+                screenModel.consumeFetchResult()
             }
         }
 
@@ -374,12 +377,14 @@ data class BrowseSourceScreen(
                 // 熱門/最新/搜尋是無限分頁，批次擷取會無止盡，故不提供。對清單全部逐一抓、節流防 ban；
                 // 進行中顯示 X/N + 停止鈕。
                 if (isSnapshotListing) {
-                    val running = batchFetch.running
+                    // 背景單一全域槽：Running 時按鈕變身成「進度＋中止」（顯示的是背景那份、非當前 filter），
+                    // 所以按不到第二次送出＝天然防多重送；按下＝中止背景那份（不論哪個來源在跑）。
+                    val running = fetchState.running
                     SmallExtendedFloatingActionButton(
                         text = {
                             Text(
                                 text = if (running) {
-                                    "${batchFetch.done}/${batchFetch.total}"
+                                    "${fetchState.done}/${fetchState.total}"
                                 } else {
                                     stringResource(MR.strings.action_fetch_details)
                                 },
@@ -402,8 +407,13 @@ data class BrowseSourceScreen(
                                             context.contextStringResource(MR.strings.fetch_details_empty),
                                         )
                                     }
-                                } else {
-                                    screenModel.startBatchFetch(list)
+                                } else if (!screenModel.startBatchFetch(list)) {
+                                    // 後端忙線硬拒（理論上 UI 已擋，作後援）。
+                                    scope.launchIO {
+                                        snackbarHostState.showSnackbar(
+                                            context.contextStringResource(MR.strings.browse_fetch_busy),
+                                        )
+                                    }
                                 }
                             }
                         },

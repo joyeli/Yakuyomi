@@ -57,6 +57,11 @@
     <string name="action_browse_filter_fetched">Details fetched</string>
     <string name="action_fetch_details">Fetch details</string>
     <string name="fetch_details_empty">Nothing to fetch in this list</string>
+    <string name="browse_fetch_running_title">Fetching details</string>
+    <string name="browse_fetch_complete_title">Fetch complete</string>
+    <string name="browse_fetch_complete_failed">%1$d of %2$d failed</string>
+    <string name="browse_fetch_complete_ok">Fetched %1$d titles</string>
+    <string name="browse_fetch_busy">A fetch is already running in the background</string>
     <string name="fetch_details_summary">Fetched %1$d, %2$d failed</string>
     <string name="fetch_details_failed_title">Failed to fetch</string>
     <string name="action_source_filters">Source filters</string>

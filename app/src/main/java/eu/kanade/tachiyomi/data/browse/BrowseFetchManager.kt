@@ -1,0 +1,131 @@
+package eu.kanade.tachiyomi.data.browse
+
+import android.content.Context
+import eu.kanade.tachiyomi.data.notification.Notifications
+import eu.kanade.tachiyomi.util.system.notify
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import mihon.domain.source.interactor.UpdateMangaFromRemote
+import tachiyomi.core.common.i18n.stringResource
+import tachiyomi.domain.manga.model.Manga
+import tachiyomi.domain.source.service.SourceManager
+import tachiyomi.i18n.MR
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
+import kotlin.random.Random
+
+/**
+ * Yakuyomi：探索批次擷取的常駐管理器（單一全域槽、不持久化）。
+ *
+ * 解決原本 `startBatchFetch` 跑在 `screenModelScope`、一離開探索畫面就被取消的問題：擷取改在本單例的
+ * process-level scope 跑 → 送出後可離開畫面、前景繼續操作；[BrowseFetchJob] 前景服務保活（背景不被回收）。
+ *
+ * **單一全域槽 + 忙線硬拒**：同時只跑一份。[start] 在已有任務時回 false（UI 的送出按鈕在 Running 時本就
+ * 變身成「進度＋中止」、按不到第二次送出；此為後端保險）。中止＝[cancel]（畫面按鈕 / 通知取消鈕都接這）。
+ * 不做跨行程續傳：行程被殺就沒了、重送即可（擷取便宜、可重送）。
+ */
+class BrowseFetchManager(private val context: Context) {
+
+    private val updateMangaFromRemote: UpdateMangaFromRemote = Injekt.get()
+    private val sourceManager: SourceManager = Injekt.get()
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    data class State(
+        val running: Boolean = false,
+        val sourceId: Long = -1L,
+        val done: Int = 0,
+        val total: Int = 0,
+    )
+
+    /** 完成且有失敗時的結果（供對應來源的畫面回看；非該來源不彈）。 */
+    data class Result(
+        val sourceId: Long,
+        val failedIds: List<Long>,
+    )
+
+    private val _state = MutableStateFlow(State())
+    val state: StateFlow<State> = _state.asStateFlow()
+
+    private val _result = MutableStateFlow<Result?>(null)
+    val result: StateFlow<Result?> = _result.asStateFlow()
+
+    private var job: Job? = null
+
+    fun sourceName(sourceId: Long): String = sourceManager.getOrStub(sourceId).name
+
+    /** 送出一份清單到背景擷取。已有任務在跑 → 回 false（忙線，不取代）。 */
+    @Synchronized
+    fun start(sourceId: Long, mangaList: List<Manga>): Boolean {
+        if (_state.value.running || mangaList.isEmpty()) return false
+
+        _state.value = State(running = true, sourceId = sourceId, done = 0, total = mangaList.size)
+        job = scope.launch {
+            val failed = mutableListOf<Long>()
+            try {
+                mangaList.forEachIndexed { i, manga ->
+                    if (!isActive) return@forEachIndexed
+                    val ok = runCatching {
+                        updateMangaFromRemote(manga, fetchDetails = true, fetchChapters = true, manualFetch = false)
+                            .isSuccess
+                    }.getOrDefault(false)
+                    if (!ok) failed.add(manga.id)
+                    _state.update { it.copy(done = i + 1) }
+                    // 節流防 ban：每筆 0.4–0.75s + 抖動。最後一筆不等。
+                    if (i < mangaList.lastIndex && isActive) delay(400L + Random.nextLong(350L))
+                }
+            } finally {
+                val cancelled = !isActive
+                val doneCount = _state.value.done
+                val totalCount = _state.value.total
+                _state.value = State()
+                if (!cancelled) {
+                    if (failed.isNotEmpty()) {
+                        _result.value = Result(sourceId, failed.toList())
+                    }
+                    notifyComplete(doneCount, totalCount, failed.size)
+                }
+                BrowseFetchJob.stop(context)
+            }
+        }
+        BrowseFetchJob.start(context)
+        return true
+    }
+
+    /** 中止背景擷取（畫面按鈕 / 通知取消鈕 / 換送新清單前）。 */
+    fun cancel() {
+        job?.cancel()
+        job = null
+        _state.value = State()
+        BrowseFetchJob.stop(context)
+    }
+
+    /** 對應來源的畫面消費完結果後清掉，避免重複彈出。 */
+    fun consumeResult() {
+        _result.value = null
+    }
+
+    private fun notifyComplete(done: Int, total: Int, failedCount: Int) {
+        context.notify(Notifications.ID_BROWSE_FETCH_COMPLETE, Notifications.CHANNEL_BROWSE_FETCH) {
+            setContentTitle(context.stringResource(MR.strings.browse_fetch_complete_title))
+            setContentText(
+                if (failedCount > 0) {
+                    context.stringResource(MR.strings.browse_fetch_complete_failed, failedCount, total)
+                } else {
+                    context.stringResource(MR.strings.browse_fetch_complete_ok, total)
+                },
+            )
+            setSmallIcon(android.R.drawable.stat_sys_download_done)
+            setAutoCancel(true)
+        }
+    }
+}

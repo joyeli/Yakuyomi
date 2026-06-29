@@ -43,6 +43,11 @@ object Notifications {
     const val ID_TRANSLATION_PROGRESS = -210
     const val ID_MODEL_DOWNLOAD = -211
 
+    // Yakuyomi：探索批次擷取背景任務。
+    const val CHANNEL_BROWSE_FETCH = "browse_fetch_channel"
+    const val ID_BROWSE_FETCH_PROGRESS = -212
+    const val ID_BROWSE_FETCH_COMPLETE = -213
+
     /**
      * Notification channel and ids used by the library updater.
      */
@@ -144,6 +149,11 @@ object Notifications {
                     setShowBadge(false)
                 },
                 buildNotificationChannel(CHANNEL_TRANSLATOR_PROGRESS, IMPORTANCE_LOW) {
+                    setName(context.stringResource(MR.strings.channel_progress))
+                    setGroup(GROUP_DOWNLOADER)
+                    setShowBadge(false)
+                },
+                buildNotificationChannel(CHANNEL_BROWSE_FETCH, IMPORTANCE_LOW) {
                     setName(context.stringResource(MR.strings.channel_progress))
                     setGroup(GROUP_DOWNLOADER)
                     setShowBadge(false)

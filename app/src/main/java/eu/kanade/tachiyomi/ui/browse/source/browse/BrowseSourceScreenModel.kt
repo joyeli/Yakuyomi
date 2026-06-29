@@ -19,6 +19,7 @@ import eu.kanade.domain.source.interactor.GetIncognitoState
 import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.domain.track.interactor.AddTracks
 import eu.kanade.presentation.util.ioCoroutineScope
+import eu.kanade.tachiyomi.data.browse.BrowseFetchManager
 import eu.kanade.tachiyomi.data.cache.CoverCache
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.util.removeCovers
@@ -43,7 +44,6 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import mihon.domain.source.interactor.UpdateMangaFromRemote
 import tachiyomi.core.common.preference.CheckboxState
 import tachiyomi.core.common.preference.TriState
 import tachiyomi.core.common.preference.mapAsCheckboxState
@@ -82,8 +82,8 @@ class BrowseSourceScreenModel(
     private val getManga: GetManga = Injekt.get(),
     private val getChaptersByMangaId: GetChaptersByMangaId = Injekt.get(),
     private val updateManga: UpdateManga = Injekt.get(),
-    private val updateMangaFromRemote: UpdateMangaFromRemote = Injekt.get(),
     private val addTracks: AddTracks = Injekt.get(),
+    private val browseFetchManager: BrowseFetchManager = Injekt.get(),
     getIncognitoState: GetIncognitoState = Injekt.get(),
 ) : StateScreenModel<BrowseSourceScreenModel.State>(State(Listing.valueOf(listingQuery))) {
 
@@ -134,56 +134,17 @@ class BrowseSourceScreenModel(
     private val _anchorFilteredOut = MutableStateFlow(false)
     val anchorFilteredOut: StateFlow<Boolean> = _anchorFilteredOut.asStateFlow()
 
-    // Yakuyomi：探索批次擷取詳情＋章節。對「filter 後留在清單的全部書目」逐一抓詳情 + 同步章節
-    // （未擷取→首次擷取、已擷取→更新新章），每筆節流 ~0.8–1.3s + jitter 防被來源限流；失敗收進 [BatchFetch.failedIds]、
-    // 結束時 showResults 給 UI 開結果清單逐一檢查（點進詳情頁手動處理、返回保留）。
-    @Immutable
-    data class BatchFetch(
-        val running: Boolean = false,
-        val done: Int = 0,
-        val total: Int = 0,
-        val failedIds: List<Long> = emptyList(),
-        val showResults: Boolean = false,
-    )
+    // Yakuyomi：探索批次擷取詳情＋章節，委派給常駐的 [BrowseFetchManager]（單一全域槽、前景服務保活）：
+    // 送出後可離開畫面、前景繼續操作；中止/重送由 manager 管。節流/逐本抓的細節在 manager。
+    val browseFetchState: StateFlow<BrowseFetchManager.State> = browseFetchManager.state
+    val browseFetchResult: StateFlow<BrowseFetchManager.Result?> = browseFetchManager.result
 
-    private val _batchFetch = MutableStateFlow(BatchFetch())
-    val batchFetch: StateFlow<BatchFetch> = _batchFetch.asStateFlow()
-    private var batchFetchJob: Job? = null
+    /** 送一份清單到背景擷取。回 false＝已有任務在跑（忙線，UI 提示）。 */
+    fun startBatchFetch(mangaList: List<Manga>): Boolean = browseFetchManager.start(sourceId, mangaList)
 
-    /** 開始批次擷取。[mangaList]＝呼叫端傳入的「filter 後留在清單的全部書目」（含已擷取＝更新章節）。 */
-    fun startBatchFetch(mangaList: List<Manga>) {
-        if (_batchFetch.value.running || mangaList.isEmpty()) return
-        batchFetchJob = screenModelScope.launchIO {
-            val failed = mutableListOf<Long>()
-            _batchFetch.value = BatchFetch(running = true, done = 0, total = mangaList.size)
-            try {
-                mangaList.forEachIndexed { i, manga ->
-                    if (!isActive) return@forEachIndexed
-                    val ok = runCatching { fetchOneFromSource(manga) }.isSuccess
-                    if (!ok) failed.add(manga.id)
-                    _batchFetch.update { it.copy(done = i + 1, failedIds = failed.toList()) }
-                    // 節流防 ban：每筆間隔 0.4–0.75s + 隨機抖動（避免規律被偵測）。最後一筆不等。
-                    if (i < mangaList.lastIndex && isActive) delay(400L + Random.nextLong(350L))
-                }
-            } finally {
-                _batchFetch.update { it.copy(running = false, showResults = it.failedIds.isNotEmpty()) }
-            }
-        }
-    }
+    fun cancelBatchFetch() = browseFetchManager.cancel()
 
-    fun cancelBatchFetch() {
-        batchFetchJob?.cancel()
-        _batchFetch.update { it.copy(running = false) }
-    }
-
-    fun dismissBatchResults() {
-        _batchFetch.update { it.copy(showResults = false) }
-    }
-
-    /** 抓一本：詳情 + 同步章節，重用上游 [UpdateMangaFromRemote]（抓詳情→更新 DB→diff 加新章整套）。 */
-    private suspend fun fetchOneFromSource(manga: Manga) {
-        updateMangaFromRemote(manga, fetchDetails = true, fetchChapters = true, manualFetch = false)
-    }
+    fun consumeFetchResult() = browseFetchManager.consumeResult()
 
     val mangaPagerFlowFlow = state.map { it.listing }
         .distinctUntilChanged()
