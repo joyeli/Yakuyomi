@@ -48,6 +48,10 @@ fun LibraryContent(
     // Yakuyomi：手動排序拖放。
     getIsManualSort: (Category) -> Boolean,
     onMoveManga: (Category, List<Long>) -> Unit,
+    // Yakuyomi：單一可摺疊清單模式。
+    singleListMode: Boolean,
+    collapsedCategoryIds: Set<Long>,
+    onToggleCategoryCollapsed: (Long) -> Unit,
 ) {
     Column(
         modifier = Modifier.padding(
@@ -61,7 +65,11 @@ fun LibraryContent(
         val scope = rememberCoroutineScope()
         var isRefreshing by remember(pagerState.currentPage) { mutableStateOf(false) }
 
-        if (showPageTabs && categories.isNotEmpty() && (categories.size > 1 || !categories.first().isSystemCategory)) {
+        if (!singleListMode &&
+            showPageTabs &&
+            categories.isNotEmpty() &&
+            (categories.size > 1 || !categories.first().isSystemCategory)
+        ) {
             LaunchedEffect(categories) {
                 if (categories.size <= pagerState.currentPage) {
                     pagerState.scrollToPage(categories.size - 1)
@@ -93,33 +101,61 @@ fun LibraryContent(
                 }
             },
         ) {
-            LibraryPager(
-                state = pagerState,
-                contentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding()),
-                hasActiveFilters = hasActiveFilters,
-                selection = selection,
-                searchQuery = searchQuery,
-                onGlobalSearchClicked = onGlobalSearchClicked,
-                getCategoryForPage = { page -> categories[page] },
-                getDisplayMode = getDisplayMode,
-                coverMinWidth = coverMinWidth,
-                getItemsForCategory = getItemsForCategory,
-                onClickManga = { category, manga ->
-                    if (selection.isNotEmpty()) {
-                        onToggleSelection(category, manga)
-                    } else {
-                        onClickManga(manga.manga.id)
-                    }
-                },
-                onLongClickManga = onToggleRangeSelection,
-                onClickContinueReading = onContinueReadingClicked,
-                getIsManualSort = getIsManualSort,
-                onMoveManga = onMoveManga,
-            )
+            if (singleListMode) {
+                val displayMode by getDisplayMode(0) // getDisplayMode 忽略 index → 全域顯示模式
+                LibraryAllCategories(
+                    categories = categories,
+                    getItemsForCategory = getItemsForCategory,
+                    displayMode = displayMode,
+                    coverMinWidth = coverMinWidth,
+                    contentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding()),
+                    selection = selection,
+                    searchQuery = searchQuery,
+                    hasActiveFilters = hasActiveFilters,
+                    collapsedCategoryIds = collapsedCategoryIds,
+                    onToggleCategoryCollapsed = onToggleCategoryCollapsed,
+                    onClickManga = { category, manga ->
+                        if (selection.isNotEmpty()) {
+                            onToggleSelection(category, manga)
+                        } else {
+                            onClickManga(manga.manga.id)
+                        }
+                    },
+                    onLongClickManga = onToggleRangeSelection,
+                    onClickContinueReading = onContinueReadingClicked,
+                    onGlobalSearchClicked = onGlobalSearchClicked,
+                )
+            } else {
+                LibraryPager(
+                    state = pagerState,
+                    contentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding()),
+                    hasActiveFilters = hasActiveFilters,
+                    selection = selection,
+                    searchQuery = searchQuery,
+                    onGlobalSearchClicked = onGlobalSearchClicked,
+                    getCategoryForPage = { page -> categories[page] },
+                    getDisplayMode = getDisplayMode,
+                    coverMinWidth = coverMinWidth,
+                    getItemsForCategory = getItemsForCategory,
+                    onClickManga = { category, manga ->
+                        if (selection.isNotEmpty()) {
+                            onToggleSelection(category, manga)
+                        } else {
+                            onClickManga(manga.manga.id)
+                        }
+                    },
+                    onLongClickManga = onToggleRangeSelection,
+                    onClickContinueReading = onContinueReadingClicked,
+                    getIsManualSort = getIsManualSort,
+                    onMoveManga = onMoveManga,
+                )
+            }
         }
 
-        LaunchedEffect(pagerState.currentPage) {
-            onChangeCurrentPage(pagerState.currentPage)
+        if (!singleListMode) {
+            LaunchedEffect(pagerState.currentPage) {
+                onChangeCurrentPage(pagerState.currentPage)
+            }
         }
     }
 }

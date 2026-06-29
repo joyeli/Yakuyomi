@@ -160,6 +160,18 @@ class LibraryPreferences(
 
     val categorizedDisplaySettings: Preference<Boolean> = preferenceStore.getBoolean("categorized_display", false)
 
+    // Yakuyomi：把所有分類顯示為單一可摺疊清單（取代頁籤/分頁），預設關＝維持原頁籤行為。
+    val singleListCollapsibleCategories: Preference<Boolean> = preferenceStore.getBoolean(
+        "pref_library_single_list_collapsible_categories",
+        false,
+    )
+
+    // Yakuyomi：單一清單模式下已摺疊的分類 id（存成字串集合，零 DB 改動）。
+    val collapsedCategoryIds: Preference<Set<String>> = preferenceStore.getStringSet(
+        "library_collapsed_category_ids",
+        emptySet(),
+    )
+
     val updateCategories: Preference<Set<String>> = preferenceStore.getStringSet(
         LIBRARY_UPDATE_CATEGORIES_PREF_KEY,
         emptySet(),

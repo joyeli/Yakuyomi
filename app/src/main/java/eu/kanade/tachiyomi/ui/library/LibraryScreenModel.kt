@@ -185,6 +185,21 @@ class LibraryScreenModel(
                 }
             }
             .launchIn(screenModelScope)
+
+        // Yakuyomi：單一可摺疊清單模式 + 已摺疊分類 id（純 UI 狀態，不觸發分組/排序管線）。
+        combine(
+            libraryPreferences.singleListCollapsibleCategories.changes(),
+            libraryPreferences.collapsedCategoryIds.changes(),
+        ) { singleList, collapsedIds -> singleList to collapsedIds }
+            .onEach { (singleList, collapsedIds) ->
+                mutableState.update { state ->
+                    state.copy(
+                        singleListMode = singleList,
+                        collapsedCategoryIds = collapsedIds.mapNotNull { it.toLongOrNull() }.toSet(),
+                    )
+                }
+            }
+            .launchIn(screenModelScope)
     }
 
     private fun List<LibraryItem>.applyFilters(
@@ -801,6 +816,15 @@ class LibraryScreenModel(
         libraryPreferences.manualOrderForCategory(categoryId).set(orderedIds)
     }
 
+    /** Yakuyomi：單一清單模式下摺疊/展開某分類（持久化跨重啟）。 */
+    fun toggleCategoryCollapsed(categoryId: Long) {
+        val key = categoryId.toString()
+        val current = libraryPreferences.collapsedCategoryIds.get()
+        libraryPreferences.collapsedCategoryIds.set(
+            if (key in current) current - key else current + key,
+        )
+    }
+
     sealed interface Dialog {
         data object SettingsSheet : Dialog
         data class ChangeCategory(
@@ -856,6 +880,9 @@ class LibraryScreenModel(
         val showMangaContinueButton: Boolean = false,
         // Yakuyomi：書庫浮動搜尋列開關（開＝搜尋移到底部浮動 pill、頂部隱藏放大鏡）。
         val floatingSearchBar: Boolean = false,
+        // Yakuyomi：單一可摺疊清單模式 + 已摺疊分類 id。
+        val singleListMode: Boolean = false,
+        val collapsedCategoryIds: Set<Long> = emptySet(),
         val dialog: Dialog? = null,
         val libraryData: LibraryData = LibraryData(),
         private val activeCategoryIndex: Int = 0,
@@ -899,10 +926,11 @@ class LibraryScreenModel(
             val categoryName = category.let {
                 if (it.isSystemCategory) defaultCategoryTitle else it.name
             }
-            val title = if (showCategoryTabs) defaultTitle else categoryName
+            // Yakuyomi：單一清單模式＝整庫標題 + 整庫數（無單一「當前分類」概念）。
+            val title = if (showCategoryTabs || singleListMode) defaultTitle else categoryName
             val count = when {
                 !showMangaCount -> null
-                !showCategoryTabs -> getItemCountForCategory(category)
+                !showCategoryTabs && !singleListMode -> getItemCountForCategory(category)
                 // Whole library count
                 else -> libraryData.favorites.size
             }

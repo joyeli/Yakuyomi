@@ -313,6 +313,9 @@ data object LibraryTab : Tab {
                         // Yakuyomi：手動排序拖放——該分類排序為 Manual 即可拖；放下後存新順序。
                         getIsManualSort = { it.sort.type == LibrarySort.Type.Manual },
                         onMoveManga = { category, ids -> screenModel.setMangaManualOrder(category.id, ids) },
+                        singleListMode = state.singleListMode,
+                        collapsedCategoryIds = state.collapsedCategoryIds,
+                        onToggleCategoryCollapsed = screenModel::toggleCategoryCollapsed,
                     )
                 }
             }

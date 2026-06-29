@@ -350,4 +350,9 @@ private fun ColumnScope.DisplayPage(
         label = stringResource(MR.strings.action_display_show_number_of_items),
         pref = screenModel.libraryPreferences.categoryNumberOfItems,
     )
+    // Yakuyomi：把所有分類顯示為單一可摺疊清單（取代頁籤/分頁）。
+    CheckboxItem(
+        label = stringResource(MR.strings.action_display_single_list_collapsible),
+        pref = screenModel.libraryPreferences.singleListCollapsibleCategories,
+    )
 }
