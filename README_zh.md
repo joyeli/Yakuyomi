@@ -48,11 +48,10 @@ Yakuyomi 是 [mihon](https://github.com/mihonapp/mihon) 的 fork，邊下載 / �
 - **進度通知帶封面** — 背景翻譯的通知顯示該章完整封面，不只是個小圖示。
 
 <div align="center">
-<img src="./.github/assets/yakuyomi-auto-webtoon.gif" alt="自動 webtoon 偵測：長條直幅自動切成垂直連貫閱讀" width="230"/>
 <img src="./.github/assets/yakuyomi-reader-chapters.gif" alt="閱讀器內章節清單：不離開閱讀器就跳到別章" width="230"/>
 <img src="./.github/assets/yakuyomi-eink.gif" alt="墨水屏模式：灰階、白底主題、翻頁白閃刷新" width="230"/>
 <br>
-<sub><b>自動 webtoon 偵測</b>、<b>閱讀器內章節清單</b>、與<b>一鍵墨水屏模式</b>。</sub>
+<sub><b>閱讀器內章節清單</b>與<b>一鍵墨水屏模式</b>。</sub>
 </div>
 
 **書庫**
@@ -73,7 +72,7 @@ Yakuyomi 是 [mihon](https://github.com/mihonapp/mihon) 的 fork，邊下載 / �
 - **全域瀏覽篩選** — 把任一來源的結果依「已收藏 / 已開卷」就地過濾，不重抓、即時生效。
 - **每來源錨點** — 把一本書標成「上次處理到這」；一鍵持續載入並自動往下捲「最新」清單直到抵達錨點，不再迷失進度。即使全域篩選會把錨點濾掉，它仍保留顯示、以變暗的灰色旗標標出來。
 - **離線快照** — 把某來源當下載入的清單存起來，之後**零連線**離線重看（對來源更輕、不怕被 ban）。
-- **背景擷取** — 對篩選後的清單按「擷取詳情」後可繼續用 app；擷取在背景跑、進度通知可隨時取消，不再被釘在瀏覽畫面。一次只跑一份。
+- **背景擷取** — 對一份很大的篩選清單擷取詳情與章節（好讓書目正確顯示、取得更新資訊、可下載）以前會把你**釘在瀏覽畫面**乾等到跑完。現在：用上面的篩選把清單縮小、按「**擷取詳情**」、走人——擷取在背景跑，進度通知可在任何地方取消。一次只擷取一本（有節流防 ban）；跑的時候按鈕顯示進度、不讓你再送第二份。
 - **翻頁節流** — 可設定的翻頁最小間隔，避免被來源限流。
 - **開啟即刷新** — 可選每次打開漫畫就刷新章節。
 
@@ -84,9 +83,8 @@ Yakuyomi 是 [mihon](https://github.com/mihonapp/mihon) 的 fork，邊下載 / �
 
 <div align="center">
 <img src="./.github/assets/yakuyomi-floating-search.gif" alt="浮動搜尋：底部單手搜尋膠囊，閒置縮成球；長壓彈出快捷選單" width="230"/>
-<img src="./.github/assets/yakuyomi-browse-bgfetch.gif" alt="背景擷取：把篩選後的清單送背景擷取、繼續用 app" width="230"/>
 <br>
-<sub><b>單手浮動搜尋</b>閒置縮成球，與一個按了就能走人的<b>背景擷取</b>。</sub>
+<sub><b>單手浮動搜尋</b>，閒置時縮成球。</sub>
 </div>
 
 <div align="center">

@@ -48,11 +48,10 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 - **Cover in progress notifications** — the background-translation notification shows the chapter's full cover, not just an icon.
 
 <div align="center">
-<img src="./.github/assets/yakuyomi-auto-webtoon.gif" alt="Auto webtoon detection: a long vertical strip switches to continuous-vertical reading automatically" width="230"/>
 <img src="./.github/assets/yakuyomi-reader-chapters.gif" alt="In-reader chapter list: jump to another chapter without leaving the reader" width="230"/>
 <img src="./.github/assets/yakuyomi-eink.gif" alt="E-ink mode: grayscale, white theme, white-flash page refresh" width="230"/>
 <br>
-<sub><b>Auto webtoon detection</b>, an <b>in-reader chapter list</b>, and a <b>one-tap e-ink mode</b>.</sub>
+<sub>An <b>in-reader chapter list</b> and a <b>one-tap e-ink mode</b>.</sub>
 </div>
 
 **Library**
@@ -73,7 +72,7 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 - **Global browse filter** — filter any source's results by *in your library* / *started reading*, applied instantly to the loaded list without re-fetching.
 - **Per-source anchor** — mark a title as your "last processed point"; a one-tap action keeps loading and auto-scrolls the Latest feed until it reaches the anchor, so you never lose your place. The anchor stays visible even when the global filter would hide it, dimmed with a grey flag so you can tell it apart.
 - **Offline snapshot** — save a source's currently-loaded list and browse it later with **zero network** (lighter on the source, ban-safe).
-- **Background fetch** — fire "Fetch details" on a filtered list and keep using the app; it runs in the background with a progress notification you can cancel, instead of pinning you to the browse screen. One task at a time.
+- **Background fetch** — fetching details and chapters for a large filtered list (so they show up correctly, get update info, and can be downloaded) used to pin you to the browse screen until it finished. Now: narrow the list with the filters above, tap **Fetch details**, and walk away — it runs in the background with a progress notification you can cancel from anywhere. One title is fetched at a time (throttled to stay ban-safe); while it runs, the button shows progress instead of letting you start a second one.
 - **Page-load throttle** — a configurable minimum interval between page loads to keep sources from rate-limiting you.
 - **Auto-refresh on open** — optionally refresh a manga's chapters every time you open it.
 
@@ -84,9 +83,8 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 
 <div align="center">
 <img src="./.github/assets/yakuyomi-floating-search.gif" alt="Floating search: a one-handed search pill that collapses to a ball; long-press for a quick menu" width="230"/>
-<img src="./.github/assets/yakuyomi-browse-bgfetch.gif" alt="Background fetch: send a filtered list to fetch in the background and keep using the app" width="230"/>
 <br>
-<sub><b>One-handed floating search</b> that idles into a ball, and a <b>background fetch</b> you can fire and walk away from.</sub>
+<sub>A <b>one-handed floating search</b> that idles into a ball.</sub>
 </div>
 
 <div align="center">
