@@ -333,6 +333,8 @@
     <string name="pref_expand_manga_summary_summary">Show the full description when opening an entry instead of collapsing it.</string>
     <string name="pref_bottom_nav_compact">Compact navigation bar</string>
     <string name="pref_bottom_nav_compact_summary">Icons only, no labels — smaller and tighter.</string>
+    <string name="pref_cover_based_theme">Theme from cover</string>
+    <string name="pref_cover_based_theme_summary">Tint the entry screen using colors from each manga\'s cover.</string>
 
     <string name="pref_manage_notifications">Manage notifications</string>
     <string name="pref_app_language">App language</string>

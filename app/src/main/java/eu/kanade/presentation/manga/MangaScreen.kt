@@ -51,6 +51,7 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.util.fastAll
 import androidx.compose.ui.util.fastAny
 import androidx.compose.ui.util.fastMap
+import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.presentation.components.relativeDateText
 import eu.kanade.presentation.manga.components.ChapterDownloadAction
 import eu.kanade.presentation.manga.components.ChapterHeader
@@ -62,6 +63,8 @@ import eu.kanade.presentation.manga.components.MangaChapterListItem
 import eu.kanade.presentation.manga.components.MangaInfoBox
 import eu.kanade.presentation.manga.components.MangaToolbar
 import eu.kanade.presentation.manga.components.MissingChapterCountListItem
+import eu.kanade.presentation.theme.TachiyomiCoverTheme
+import eu.kanade.presentation.theme.rememberCoverSeedColor
 import eu.kanade.presentation.util.formatChapterNumber
 import eu.kanade.tachiyomi.data.download.model.Download
 import eu.kanade.tachiyomi.data.translation.model.TranslationItem
@@ -80,8 +83,11 @@ import tachiyomi.presentation.core.components.VerticalFastScroller
 import tachiyomi.presentation.core.components.material.PullRefresh
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.i18n.stringResource
+import tachiyomi.presentation.core.util.collectAsState
 import tachiyomi.presentation.core.util.shouldExpandFAB
 import tachiyomi.source.local.isLocal
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 import java.time.Instant
 
 @Composable
@@ -144,86 +150,93 @@ fun MangaScreen(
         }
     }
 
-    if (!isTabletUi) {
-        MangaScreenSmallImpl(
-            state = state,
-            snackbarHostState = snackbarHostState,
-            nextUpdate = nextUpdate,
-            chapterSwipeStartAction = chapterSwipeStartAction,
-            chapterSwipeEndAction = chapterSwipeEndAction,
-            navigateUp = navigateUp,
-            onChapterClicked = onChapterClicked,
-            onDownloadChapter = onDownloadChapter,
-            onTranslateChapter = onTranslateChapter,
-            onReRenderChapter = onReRenderChapter,
-            onAddToLibraryClicked = onAddToLibraryClicked,
-            onWebViewClicked = onWebViewClicked,
-            onWebViewLongClicked = onWebViewLongClicked,
-            onTrackingClicked = onTrackingClicked,
-            onTagSearch = onTagSearch,
-            onCopyTagToClipboard = onCopyTagToClipboard,
-            onFilterClicked = onFilterButtonClicked,
-            onRefresh = onRefresh,
-            onContinueReading = onContinueReading,
-            onSearch = onSearch,
-            onCoverClicked = onCoverClicked,
-            onShareClicked = onShareClicked,
-            onDownloadActionClicked = onDownloadActionClicked,
-            onEditCategoryClicked = onEditCategoryClicked,
-            onEditIntervalClicked = onEditFetchIntervalClicked,
-            onSetAnchorClicked = onSetAnchorClicked,
-            onMigrateClicked = onMigrateClicked,
-            onReRenderAllClicked = onReRenderAllClicked,
-            onEditNotesClicked = onEditNotesClicked,
-            onMultiBookmarkClicked = onMultiBookmarkClicked,
-            onMultiMarkAsReadClicked = onMultiMarkAsReadClicked,
-            onMarkPreviousAsReadClicked = onMarkPreviousAsReadClicked,
-            onMultiDeleteClicked = onMultiDeleteClicked,
-            onChapterSwipe = onChapterSwipe,
-            onChapterSelected = onChapterSelected,
-            onAllChapterSelected = onAllChapterSelected,
-            onInvertSelection = onInvertSelection,
-        )
-    } else {
-        MangaScreenLargeImpl(
-            state = state,
-            snackbarHostState = snackbarHostState,
-            chapterSwipeStartAction = chapterSwipeStartAction,
-            chapterSwipeEndAction = chapterSwipeEndAction,
-            nextUpdate = nextUpdate,
-            navigateUp = navigateUp,
-            onChapterClicked = onChapterClicked,
-            onDownloadChapter = onDownloadChapter,
-            onTranslateChapter = onTranslateChapter,
-            onReRenderChapter = onReRenderChapter,
-            onAddToLibraryClicked = onAddToLibraryClicked,
-            onWebViewClicked = onWebViewClicked,
-            onWebViewLongClicked = onWebViewLongClicked,
-            onTrackingClicked = onTrackingClicked,
-            onTagSearch = onTagSearch,
-            onCopyTagToClipboard = onCopyTagToClipboard,
-            onFilterButtonClicked = onFilterButtonClicked,
-            onRefresh = onRefresh,
-            onContinueReading = onContinueReading,
-            onSearch = onSearch,
-            onCoverClicked = onCoverClicked,
-            onShareClicked = onShareClicked,
-            onDownloadActionClicked = onDownloadActionClicked,
-            onEditCategoryClicked = onEditCategoryClicked,
-            onEditIntervalClicked = onEditFetchIntervalClicked,
-            onSetAnchorClicked = onSetAnchorClicked,
-            onMigrateClicked = onMigrateClicked,
-            onReRenderAllClicked = onReRenderAllClicked,
-            onEditNotesClicked = onEditNotesClicked,
-            onMultiBookmarkClicked = onMultiBookmarkClicked,
-            onMultiMarkAsReadClicked = onMultiMarkAsReadClicked,
-            onMarkPreviousAsReadClicked = onMarkPreviousAsReadClicked,
-            onMultiDeleteClicked = onMultiDeleteClicked,
-            onChapterSwipe = onChapterSwipe,
-            onChapterSelected = onChapterSelected,
-            onAllChapterSelected = onAllChapterSelected,
-            onInvertSelection = onInvertSelection,
-        )
+    // Yakuyomi：動態主題色——啟用時用本書封面取色為詳情頁上色（只包此 if/else，不外溢到其他畫面）。
+    val uiPreferences = remember { Injekt.get<UiPreferences>() }
+    val coverThemeEnabled by uiPreferences.coverBasedTheme.collectAsState()
+    val seedColor = rememberCoverSeedColor(state.manga, enabled = coverThemeEnabled)
+
+    TachiyomiCoverTheme(seedColor = seedColor) {
+        if (!isTabletUi) {
+            MangaScreenSmallImpl(
+                state = state,
+                snackbarHostState = snackbarHostState,
+                nextUpdate = nextUpdate,
+                chapterSwipeStartAction = chapterSwipeStartAction,
+                chapterSwipeEndAction = chapterSwipeEndAction,
+                navigateUp = navigateUp,
+                onChapterClicked = onChapterClicked,
+                onDownloadChapter = onDownloadChapter,
+                onTranslateChapter = onTranslateChapter,
+                onReRenderChapter = onReRenderChapter,
+                onAddToLibraryClicked = onAddToLibraryClicked,
+                onWebViewClicked = onWebViewClicked,
+                onWebViewLongClicked = onWebViewLongClicked,
+                onTrackingClicked = onTrackingClicked,
+                onTagSearch = onTagSearch,
+                onCopyTagToClipboard = onCopyTagToClipboard,
+                onFilterClicked = onFilterButtonClicked,
+                onRefresh = onRefresh,
+                onContinueReading = onContinueReading,
+                onSearch = onSearch,
+                onCoverClicked = onCoverClicked,
+                onShareClicked = onShareClicked,
+                onDownloadActionClicked = onDownloadActionClicked,
+                onEditCategoryClicked = onEditCategoryClicked,
+                onEditIntervalClicked = onEditFetchIntervalClicked,
+                onSetAnchorClicked = onSetAnchorClicked,
+                onMigrateClicked = onMigrateClicked,
+                onReRenderAllClicked = onReRenderAllClicked,
+                onEditNotesClicked = onEditNotesClicked,
+                onMultiBookmarkClicked = onMultiBookmarkClicked,
+                onMultiMarkAsReadClicked = onMultiMarkAsReadClicked,
+                onMarkPreviousAsReadClicked = onMarkPreviousAsReadClicked,
+                onMultiDeleteClicked = onMultiDeleteClicked,
+                onChapterSwipe = onChapterSwipe,
+                onChapterSelected = onChapterSelected,
+                onAllChapterSelected = onAllChapterSelected,
+                onInvertSelection = onInvertSelection,
+            )
+        } else {
+            MangaScreenLargeImpl(
+                state = state,
+                snackbarHostState = snackbarHostState,
+                chapterSwipeStartAction = chapterSwipeStartAction,
+                chapterSwipeEndAction = chapterSwipeEndAction,
+                nextUpdate = nextUpdate,
+                navigateUp = navigateUp,
+                onChapterClicked = onChapterClicked,
+                onDownloadChapter = onDownloadChapter,
+                onTranslateChapter = onTranslateChapter,
+                onReRenderChapter = onReRenderChapter,
+                onAddToLibraryClicked = onAddToLibraryClicked,
+                onWebViewClicked = onWebViewClicked,
+                onWebViewLongClicked = onWebViewLongClicked,
+                onTrackingClicked = onTrackingClicked,
+                onTagSearch = onTagSearch,
+                onCopyTagToClipboard = onCopyTagToClipboard,
+                onFilterButtonClicked = onFilterButtonClicked,
+                onRefresh = onRefresh,
+                onContinueReading = onContinueReading,
+                onSearch = onSearch,
+                onCoverClicked = onCoverClicked,
+                onShareClicked = onShareClicked,
+                onDownloadActionClicked = onDownloadActionClicked,
+                onEditCategoryClicked = onEditCategoryClicked,
+                onEditIntervalClicked = onEditFetchIntervalClicked,
+                onSetAnchorClicked = onSetAnchorClicked,
+                onMigrateClicked = onMigrateClicked,
+                onReRenderAllClicked = onReRenderAllClicked,
+                onEditNotesClicked = onEditNotesClicked,
+                onMultiBookmarkClicked = onMultiBookmarkClicked,
+                onMultiMarkAsReadClicked = onMultiMarkAsReadClicked,
+                onMarkPreviousAsReadClicked = onMarkPreviousAsReadClicked,
+                onMultiDeleteClicked = onMultiDeleteClicked,
+                onChapterSwipe = onChapterSwipe,
+                onChapterSelected = onChapterSelected,
+                onAllChapterSelected = onAllChapterSelected,
+                onInvertSelection = onInvertSelection,
+            )
+        }
     }
 }
 

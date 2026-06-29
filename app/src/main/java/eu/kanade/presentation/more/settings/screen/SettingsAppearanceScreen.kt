@@ -88,6 +88,12 @@ object SettingsAppearanceScreen : SearchableSettings {
                         true
                     },
                 ),
+                // Yakuyomi：漫畫詳情頁依封面取色的動態主題。
+                Preference.PreferenceItem.SwitchPreference(
+                    preference = uiPreferences.coverBasedTheme,
+                    title = stringResource(MR.strings.pref_cover_based_theme),
+                    subtitle = stringResource(MR.strings.pref_cover_based_theme_summary),
+                ),
             ),
         )
     }

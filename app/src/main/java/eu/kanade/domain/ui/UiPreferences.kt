@@ -43,6 +43,9 @@ class UiPreferences(
     // Yakuyomi：底部導覽列精簡模式（僅圖示、無文字、縮高度與留白）。
     val bottomNavCompact: Preference<Boolean> = preferenceStore.getBoolean("pref_bottom_nav_compact", false)
 
+    // Yakuyomi：漫畫詳情頁依封面取色的動態主題（預設關閉，避免影響全 app 觀感）。
+    val coverBasedTheme: Preference<Boolean> = preferenceStore.getBoolean("pref_cover_based_theme", false)
+
     companion object {
         fun dateFormat(format: String): DateTimeFormatter = when (format) {
             "" -> DateTimeFormatter.ofLocalizedDate(FormatStyle.SHORT)
