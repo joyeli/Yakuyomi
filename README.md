@@ -69,7 +69,7 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 <sub><b>Drag covers into your own order</b>, collapse the whole library into <b>one list of tap-to-collapse categories</b>, and tint the detail screen to each <b>cover's colors</b>.</sub>
 </div>
 
-**Browse & catch-up** *(new in 0.3.0)*
+**Browse & catch-up**
 - **Global browse filter** — filter any source's results by *in your library* / *started reading*, applied instantly to the loaded list without re-fetching.
 - **Per-source anchor** — mark a title as your "last processed point"; a one-tap action keeps loading and auto-scrolls the Latest feed until it reaches the anchor, so you never lose your place. The anchor stays visible even when the global filter would hide it, dimmed with a grey flag so you can tell it apart.
 - **Offline snapshot** — save a source's currently-loaded list and browse it later with **zero network** (lighter on the source, ban-safe).
@@ -97,7 +97,7 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 <sub><b>Catch up on any source</b> — filter the loaded list by <i>in library / started reading / details fetched</i>, auto-load down to your anchor, and save it as an offline snapshot.</sub>
 </div>
 
-**Large screens & foldables** *(new in 0.4.0)*
+**Large screens & foldables**
 
 <div align="center">
 <img src="./.github/assets/yakuyomi-foldable.gif" alt="Foldable: single page when folded, double-page spread when unfolded" width="330"/>
@@ -108,7 +108,7 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 
 - **Adaptive grid cover size** — library and browse columns auto-fit the actual screen width (phone, tablet, folded/unfolded foldable, split-screen). Pick a size by how many fit per row and it scales to every width.
 - **Tablet reading mode** — a separate reading mode for when you're on a large screen / unfolded (e.g. continuous-vertical on the phone, right-to-left paged on the tablet), following the system Tablet UI setting.
-- **Double-page spread** *(new in 0.5.0)* — read two pages side by side on tablets/large screens (right-to-left or left-to-right). Wide/spread pages get their own full-width page instead of being squeezed in; a manual shift button aligns spreads split across the pairing. It's a reading mode, so it pairs with the tablet reading-mode setting above. Fill mode (fit width / fit height) and alignment are configurable under Settings → Reader → Double-page *(0.6.0)*.
+- **Double-page spread** — read two pages side by side on tablets/large screens (right-to-left or left-to-right). Wide/spread pages get their own full-width page instead of being squeezed in; a manual shift button aligns spreads split across the pairing. It's a reading mode, so it pairs with the tablet reading-mode setting above. Fill mode (fit width / fit height) and alignment are configurable under Settings → Reader → Double-page.
 - **Collapsible description** — choose whether a manga's description opens expanded or collapsed.
 
 Everything else is mihon — library, sources/extensions, downloads, trackers, backups, the reader.
