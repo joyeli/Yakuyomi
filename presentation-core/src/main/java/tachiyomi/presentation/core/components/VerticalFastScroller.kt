@@ -331,6 +331,8 @@ fun VerticalGridFastScroller(
             LaunchedEffect(thumbOffsetY) {
                 if (layoutInfo.totalItemsCount == 0 || !isThumbDragged) return@LaunchedEffect
                 val visibleItems = state.layoutInfo.visibleItemsInfo
+                // Yakuyomi：無可見項目時不計算（避免 .first() 崩潰）。
+                if (visibleItems.isEmpty()) return@LaunchedEffect
                 val startChild = visibleItems.first()
                 val endChild = visibleItems.last()
                 val laidOutArea = (endChild.offset.y + endChild.size.height) - startChild.offset.y
@@ -431,6 +433,8 @@ fun VerticalGridFastScroller(
 private fun computeGridScrollOffset(state: LazyGridState, columnCount: Int): Int {
     if (state.layoutInfo.totalItemsCount == 0) return 0
     val visibleItems = state.layoutInfo.visibleItemsInfo
+    // Yakuyomi：total>0 但當下無可見項目（如 sticky header 量測過渡態）→ 守備避免 .first() 崩潰。
+    if (visibleItems.isEmpty()) return 0
     val startChild = visibleItems.first()
     val endChild = visibleItems.last()
     val laidOutArea = (endChild.offset.y + endChild.size.height) - startChild.offset.y
@@ -444,6 +448,8 @@ private fun computeGridScrollOffset(state: LazyGridState, columnCount: Int): Int
 private fun computeGridScrollRange(state: LazyGridState, columnCount: Int): Int {
     if (state.layoutInfo.totalItemsCount == 0) return 0
     val visibleItems = state.layoutInfo.visibleItemsInfo
+    // Yakuyomi：total>0 但當下無可見項目（如 sticky header 量測過渡態）→ 守備避免 .first() 崩潰。
+    if (visibleItems.isEmpty()) return 0
     val startChild = visibleItems.first()
     val endChild = visibleItems.last()
     val laidOutArea = (endChild.offset.y + endChild.size.height) - startChild.offset.y
