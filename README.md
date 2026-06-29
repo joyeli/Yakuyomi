@@ -41,12 +41,53 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 <sub><b>Live translation as you read</b>, <b>one-tap re-render</b> of the text-removal method, and a <b>per-manga translation queue</b> — expand chapters, jump a title to the front, pause it.</sub>
 </div>
 
+**Reader**
+- **Auto webtoon detection** — long vertical strips switch to continuous-vertical reading on their own; a per-manga choice always wins.
+- **In-reader chapter list** — jump to any chapter from a list inside the reader, without backing out to the details page.
+- **E-ink mode** — one tap turns on grayscale, a white theme, and white-flash page refresh for e-readers.
+- **Cover in progress notifications** — the background-translation notification shows the chapter's full cover, not just an icon.
+
+<div align="center">
+<img src="./.github/assets/yakuyomi-auto-webtoon.gif" alt="Auto webtoon detection: a long vertical strip switches to continuous-vertical reading automatically" width="230"/>
+<img src="./.github/assets/yakuyomi-reader-chapters.gif" alt="In-reader chapter list: jump to another chapter without leaving the reader" width="230"/>
+<img src="./.github/assets/yakuyomi-eink.gif" alt="E-ink mode: grayscale, white theme, white-flash page refresh" width="230"/>
+<br>
+<sub><b>Auto webtoon detection</b>, an <b>in-reader chapter list</b>, and a <b>one-tap e-ink mode</b>.</sub>
+</div>
+
+**Library**
+- **Drag to reorder** — a "Manual" library sort: long-press a cover and drag to set your own order, saved per category.
+- **Single-list collapsible categories** — show the whole library as one scrolling list with sticky, tap-to-collapse category headers, instead of swipeable tabs.
+- **Cover-based theme** — optionally tint a manga's detail screen with colors pulled from its cover.
+- **Translated badge & filter** — a cover badge counts translated chapters; filter the library by translation state.
+
+<div align="center">
+<img src="./.github/assets/yakuyomi-library-reorder.gif" alt="Drag-to-reorder library: long-press a cover and drag to set a manual order" width="230"/>
+<img src="./.github/assets/yakuyomi-library-collapse.gif" alt="Single-list collapsible categories: all categories in one list with sticky tap-to-collapse headers" width="230"/>
+<img src="./.github/assets/yakuyomi-cover-theme.gif" alt="Cover-based theme: the detail screen tints to each manga's cover colors" width="230"/>
+<br>
+<sub><b>Drag covers into your own order</b>, collapse the whole library into <b>one list of tap-to-collapse categories</b>, and tint the detail screen to each <b>cover's colors</b>.</sub>
+</div>
+
 **Browse & catch-up** *(new in 0.3.0)*
 - **Global browse filter** — filter any source's results by *in your library* / *started reading*, applied instantly to the loaded list without re-fetching.
-- **Per-source anchor** — mark a title as your "last processed point"; a one-tap action keeps loading and auto-scrolls the Latest feed until it reaches the anchor, so you never lose your place.
+- **Per-source anchor** — mark a title as your "last processed point"; a one-tap action keeps loading and auto-scrolls the Latest feed until it reaches the anchor, so you never lose your place. The anchor stays visible even when the global filter would hide it, dimmed with a grey flag so you can tell it apart.
 - **Offline snapshot** — save a source's currently-loaded list and browse it later with **zero network** (lighter on the source, ban-safe).
+- **Background fetch** — fire "Fetch details" on a filtered list and keep using the app; it runs in the background with a progress notification you can cancel, instead of pinning you to the browse screen. One task at a time.
 - **Page-load throttle** — a configurable minimum interval between page loads to keep sources from rate-limiting you.
 - **Auto-refresh on open** — optionally refresh a manga's chapters every time you open it.
+
+**Search**
+- **Floating search** — an optional one-handed search pill at the bottom that collapses to a ball when idle; long-press the ball for a quick menu (with filter nearest your thumb), no need to expand the bar first.
+- **Saved searches & advanced syntax** — save a search to recall later; `,` = AND, `-` = exclude, and `genre:` / `author:` / `artist:` prefixes for precise library queries.
+- **Compact navigation bar** — an icons-only, tighter bottom bar option.
+
+<div align="center">
+<img src="./.github/assets/yakuyomi-floating-search.gif" alt="Floating search: a one-handed search pill that collapses to a ball; long-press for a quick menu" width="230"/>
+<img src="./.github/assets/yakuyomi-browse-bgfetch.gif" alt="Background fetch: send a filtered list to fetch in the background and keep using the app" width="230"/>
+<br>
+<sub><b>One-handed floating search</b> that idles into a ball, and a <b>background fetch</b> you can fire and walk away from.</sub>
+</div>
 
 <div align="center">
 <img src="./.github/assets/yakuyomi-browse-filter.gif" alt="Global browse filter: filter a source's loaded list by in-library / started / fetched" width="230"/>
