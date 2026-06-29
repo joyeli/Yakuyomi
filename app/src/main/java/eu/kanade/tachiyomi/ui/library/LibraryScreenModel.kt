@@ -340,12 +340,21 @@ class LibraryScreenModel(
                 LibrarySort.Type.Random -> {
                     error("Why Are We Still Here? Just To Suffer?")
                 }
+                LibrarySort.Type.Manual -> {
+                    error("Manual sort uses the saved per-category order, not a comparator")
+                }
             }
         }
 
         return mapValues { (key, value) ->
             if (key.sort.type == LibrarySort.Type.Random) {
                 return@mapValues value.shuffled(Random(libraryPreferences.randomSortSeed.get()))
+            }
+            // Yakuyomi：手動排序——依該分類存的順序排，未列入的（新加入的書）落到最後（穩定）。
+            if (key.sort.type == LibrarySort.Type.Manual) {
+                val order = libraryPreferences.manualOrderForCategory(key.id).get()
+                val indexOf = order.withIndex().associate { (i, id) -> id to i }
+                return@mapValues value.sortedBy { indexOf[it] ?: Int.MAX_VALUE }
             }
 
             val manga = value.mapNotNull { favoritesById[it] }
@@ -785,6 +794,11 @@ class LibraryScreenModel(
                 .filterNot { it.substringBefore(savedSearchSep) == name }
                 .toSet(),
         )
+    }
+
+    /** Yakuyomi：手動排序拖放後，存某分類的新順序（manga id 序）。 */
+    fun setMangaManualOrder(categoryId: Long, orderedIds: List<Long>) {
+        libraryPreferences.manualOrderForCategory(categoryId).set(orderedIds)
     }
 
     sealed interface Dialog {

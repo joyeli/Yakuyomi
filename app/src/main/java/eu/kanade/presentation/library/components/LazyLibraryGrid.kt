@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridScope
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
@@ -30,6 +32,7 @@ internal fun LazyLibraryGrid(
     modifier: Modifier = Modifier,
     coverMinWidth: Int,
     contentPadding: PaddingValues,
+    state: LazyGridState = rememberLazyGridState(),
     content: LazyGridScope.() -> Unit,
 ) {
     val density = LocalDensity.current
@@ -40,6 +43,7 @@ internal fun LazyLibraryGrid(
     FastScrollLazyVerticalGrid(
         // Yakuyomi：依封面最小寬度自適應欄數（跨手機/平板/折疊機自動）。
         columns = GridCells.Adaptive(coverMinWidth.dp),
+        state = state,
         modifier = modifier.onSizeChanged { size ->
             val availPx = size.width - with(density) { horizontalPadding.toPx() }
             LibraryGridSize.availWidthDp = with(density) { availPx.toDp().value.toInt() }

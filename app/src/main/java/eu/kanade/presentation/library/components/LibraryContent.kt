@@ -45,6 +45,9 @@ fun LibraryContent(
     getDisplayMode: (Int) -> PreferenceMutableState<LibraryDisplayMode>,
     coverMinWidth: Int,
     getItemsForCategory: (Category) -> List<LibraryItem>,
+    // Yakuyomi：手動排序拖放。
+    getIsManualSort: (Category) -> Boolean,
+    onMoveManga: (Category, List<Long>) -> Unit,
 ) {
     Column(
         modifier = Modifier.padding(
@@ -110,6 +113,8 @@ fun LibraryContent(
                 },
                 onLongClickManga = onToggleRangeSelection,
                 onClickContinueReading = onContinueReadingClicked,
+                getIsManualSort = getIsManualSort,
+                onMoveManga = onMoveManga,
             )
         }
 

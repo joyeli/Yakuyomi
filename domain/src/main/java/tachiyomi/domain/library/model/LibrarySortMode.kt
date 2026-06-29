@@ -33,6 +33,9 @@ data class LibrarySort(
         data object TrackerMean : Type(0b00100000)
         data object Random : Type(0b00111100)
 
+        // Yakuyomi：手動排序（拖放）。順序存 LibraryPreferences.manualOrderForCategory（per-category pref，不動 DB）。
+        data object Manual : Type(0b00100100)
+
         companion object {
             fun valueOf(flag: Long): Type {
                 return types.find { type -> type.flag == flag and type.mask } ?: default.type
@@ -79,6 +82,7 @@ data class LibrarySort(
                 Type.DateAdded,
                 Type.TrackerMean,
                 Type.Random,
+                Type.Manual,
             )
         }
         val directions by lazy { setOf(Direction.Ascending, Direction.Descending) }
@@ -107,6 +111,7 @@ data class LibrarySort(
                     "DATE_ADDED" -> Type.DateAdded
                     "TRACKER_MEAN" -> Type.TrackerMean
                     "RANDOM" -> Type.Random
+                    "MANUAL" -> Type.Manual
                     else -> Type.Alphabetical
                 }
                 val ascending = if (values[1] == "ASCENDING") Direction.Ascending else Direction.Descending
@@ -129,6 +134,7 @@ data class LibrarySort(
             Type.DateAdded -> "DATE_ADDED"
             Type.TrackerMean -> "TRACKER_MEAN"
             Type.Random -> "RANDOM"
+            Type.Manual -> "MANUAL"
         }
         val direction = if (direction == Direction.Ascending) "ASCENDING" else "DESCENDING"
         return "$type,$direction"

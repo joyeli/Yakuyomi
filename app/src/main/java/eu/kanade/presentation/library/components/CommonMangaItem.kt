@@ -73,7 +73,8 @@ private const val GRID_SELECTED_COVER_ALPHA = 0.76f
 fun MangaCompactGridItem(
     coverData: MangaCoverModel,
     onClick: () -> Unit,
-    onLongClick: () -> Unit,
+    // Yakuyomi：null = 不註冊長按（拖放模式讓 longPressDraggableHandle 接手）。
+    onLongClick: (() -> Unit)?,
     isSelected: Boolean = false,
     title: String? = null,
     onClickContinueReading: (() -> Unit)? = null,
@@ -81,8 +82,10 @@ fun MangaCompactGridItem(
     coverBadgeStart: @Composable (RowScope.() -> Unit)? = null,
     coverBadgeEnd: @Composable (RowScope.() -> Unit)? = null,
     isAnchor: Boolean = false,
+    modifier: Modifier = Modifier,
 ) {
     GridItemSelectable(
+        modifier = modifier,
         isSelected = isSelected,
         onClick = onClick,
         onLongClick = onLongClick,
@@ -181,7 +184,8 @@ fun MangaComfortableGridItem(
     coverData: MangaCoverModel,
     title: String,
     onClick: () -> Unit,
-    onLongClick: () -> Unit,
+    // Yakuyomi：null = 不註冊長按（拖放模式讓 longPressDraggableHandle 接手）。
+    onLongClick: (() -> Unit)?,
     isSelected: Boolean = false,
     titleMaxLines: Int = 2,
     coverAlpha: Float = 1f,
@@ -189,8 +193,10 @@ fun MangaComfortableGridItem(
     coverBadgeEnd: (@Composable RowScope.() -> Unit)? = null,
     onClickContinueReading: (() -> Unit)? = null,
     isAnchor: Boolean = false,
+    modifier: Modifier = Modifier,
 ) {
     GridItemSelectable(
+        modifier = modifier,
         isSelected = isSelected,
         onClick = onClick,
         onLongClick = onLongClick,
@@ -297,7 +303,7 @@ private fun GridItemTitle(
 private fun GridItemSelectable(
     isSelected: Boolean,
     onClick: () -> Unit,
-    onLongClick: () -> Unit,
+    onLongClick: (() -> Unit)?,
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {

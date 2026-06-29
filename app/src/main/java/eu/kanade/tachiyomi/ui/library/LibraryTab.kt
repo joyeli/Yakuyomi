@@ -72,6 +72,8 @@ import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.domain.category.model.Category
 import tachiyomi.domain.library.model.LibraryManga
+import tachiyomi.domain.library.model.LibrarySort
+import tachiyomi.domain.library.model.sort
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.material.Scaffold
@@ -308,6 +310,9 @@ data object LibraryTab : Tab {
                         getDisplayMode = { screenModel.getDisplayMode() },
                         coverMinWidth = coverMinWidth,
                         getItemsForCategory = { state.getItemsForCategory(it) },
+                        // Yakuyomi：手動排序拖放——該分類排序為 Manual 即可拖；放下後存新順序。
+                        getIsManualSort = { it.sort.type == LibrarySort.Type.Manual },
+                        onMoveManga = { category, ids -> screenModel.setMangaManualOrder(category.id, ids) },
                     )
                 }
             }

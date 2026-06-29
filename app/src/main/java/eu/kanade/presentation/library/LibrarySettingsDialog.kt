@@ -9,6 +9,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.Devices
+import androidx.compose.material.icons.outlined.DragHandle
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -188,15 +189,20 @@ private fun ColumnScope.SortPage(
             MR.strings.action_sort_date_added to LibrarySort.Type.DateAdded,
             trackerMeanPair,
             MR.strings.action_sort_random to LibrarySort.Type.Random,
+            // Yakuyomi：手動排序（拖放）。像 Random 一樣不切方向；選了之後可在書庫長按拖曳調順序。
+            MR.strings.action_sort_manual to LibrarySort.Type.Manual,
         )
     }
 
     options.map { (titleRes, mode) ->
-        if (mode == LibrarySort.Type.Random) {
+        if (mode == LibrarySort.Type.Random || mode == LibrarySort.Type.Manual) {
             BaseSortItem(
                 label = stringResource(titleRes),
-                icon = Icons.Default.Refresh
-                    .takeIf { sortingMode == LibrarySort.Type.Random },
+                icon = if (mode == LibrarySort.Type.Manual) {
+                    Icons.Outlined.DragHandle.takeIf { sortingMode == LibrarySort.Type.Manual }
+                } else {
+                    Icons.Default.Refresh.takeIf { sortingMode == LibrarySort.Type.Random }
+                },
                 onClick = {
                     screenModel.setSort(category, mode, LibrarySort.Direction.Ascending)
                 },

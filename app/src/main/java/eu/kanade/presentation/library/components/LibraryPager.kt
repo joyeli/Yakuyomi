@@ -38,6 +38,9 @@ fun LibraryPager(
     onClickManga: (Category, LibraryManga) -> Unit,
     onLongClickManga: (Category, LibraryManga) -> Unit,
     onClickContinueReading: ((LibraryManga) -> Unit)?,
+    // Yakuyomi：手動排序拖放。
+    getIsManualSort: (Category) -> Boolean,
+    onMoveManga: (Category, List<Long>) -> Unit,
 ) {
     HorizontalPager(
         modifier = Modifier.fillMaxSize(),
@@ -65,6 +68,9 @@ fun LibraryPager(
 
         val onClickManga: (LibraryManga) -> Unit = { onClickManga(category, it) }
         val onLongClickManga: (LibraryManga) -> Unit = { onLongClickManga(category, it) }
+        // Yakuyomi：手動排序且未搜尋/未篩選時，啟用該分類網格的長按拖曳調順序。
+        val reorderEnabled = searchQuery.isNullOrEmpty() && !hasActiveFilters && getIsManualSort(category)
+        val onMoveOrder: (List<Long>) -> Unit = { onMoveManga(category, it) }
 
         when (displayMode) {
             LibraryDisplayMode.List -> {
@@ -91,6 +97,8 @@ fun LibraryPager(
                     onClickContinueReading = onClickContinueReading,
                     searchQuery = searchQuery,
                     onGlobalSearchClicked = onGlobalSearchClicked,
+                    reorderEnabled = reorderEnabled,
+                    onMoveOrder = onMoveOrder,
                 )
             }
             LibraryDisplayMode.ComfortableGrid -> {
@@ -104,6 +112,8 @@ fun LibraryPager(
                     onClickContinueReading = onClickContinueReading,
                     searchQuery = searchQuery,
                     onGlobalSearchClicked = onGlobalSearchClicked,
+                    reorderEnabled = reorderEnabled,
+                    onMoveOrder = onMoveOrder,
                 )
             }
         }

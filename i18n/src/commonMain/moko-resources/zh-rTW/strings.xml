@@ -820,6 +820,7 @@
     <string name="onboarding_permission_crashlytics_description">向開發人員傳送匿名崩潰日誌</string>
     <string name="firebase_summary">傳送崩潰日誌及資料分析有助於我們識別並解決問題和提升效能，並使未來的更新更貼近您的需求</string>
     <string name="action_sort_random">隨機</string>
+    <string name="action_sort_manual">手動（長按拖曳）</string>
     <string name="ext_remove">解除安裝</string>
     <string name="ext_confirm_remove">解除安裝擴充套件？</string>
     <string name="remove_private_extension_message">您真的要解除安裝「%s」擴充套件嗎？</string>

@@ -4,6 +4,7 @@ import tachiyomi.core.common.preference.Preference
 import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.core.common.preference.TriState
 import tachiyomi.core.common.preference.getEnum
+import tachiyomi.core.common.preference.getLongArray
 import tachiyomi.domain.library.model.LibraryDisplayMode
 import tachiyomi.domain.library.model.LibrarySort
 import tachiyomi.domain.manga.model.Manga
@@ -75,6 +76,10 @@ class LibraryPreferences(
         "library_saved_searches",
         emptySet(),
     )
+
+    // Yakuyomi：書庫手動排序（拖放）——每分類一份有序 manga id 清單（comma-joined）；零 DB 改動。
+    fun manualOrderForCategory(categoryId: Long): Preference<List<Long>> =
+        preferenceStore.getLongArray("library_manual_order_category_$categoryId", emptyList())
 
     val markDuplicateReadChapterAsRead: Preference<Set<String>> = preferenceStore.getStringSet(
         "mark_duplicate_read_chapter_read",
