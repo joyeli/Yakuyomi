@@ -52,6 +52,10 @@ object CommonMangaItemDefaults {
 
     @Suppress("ConstPropertyName")
     const val BrowseFavoriteCoverAlpha = 0.34f
+
+    // Yakuyomi：探索中「錨點被當前篩選濾掉、僅被強制留下」的封面暗化（比收藏更暗以資區別）。
+    @Suppress("ConstPropertyName")
+    const val BrowseFilteredAnchorCoverAlpha = 0.25f
 }
 
 private val ContinueReadingButtonSizeSmall = 28.dp

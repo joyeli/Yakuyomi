@@ -54,6 +54,8 @@ fun BrowseSourceContent(
     onMangaLongClick: (Manga) -> Unit,
     // Yakuyomi：探索錨點 url（只 Latest 清單帶值；該本顯示旗標徽章）。
     anchorUrl: String? = null,
+    // Yakuyomi：錨點不符當前全域篩選、僅被強制留下 → 該本加區別視覺（暗化 + 灰旗）。
+    anchorFilteredOut: Boolean = false,
     // Yakuyomi：外部提供的捲動狀態（自動載入到錨點時用以驅動載入＋捲動）。
     gridState: LazyGridState = rememberLazyGridState(),
     listState: LazyListState = rememberLazyListState(),
@@ -136,6 +138,7 @@ fun BrowseSourceContent(
                 onMangaClick = onMangaClick,
                 onMangaLongClick = onMangaLongClick,
                 anchorUrl = anchorUrl,
+                anchorFilteredOut = anchorFilteredOut,
                 state = gridState,
                 hideLoadingFooter = hideLoadingFooter,
             )
@@ -147,6 +150,7 @@ fun BrowseSourceContent(
                 onMangaClick = onMangaClick,
                 onMangaLongClick = onMangaLongClick,
                 anchorUrl = anchorUrl,
+                anchorFilteredOut = anchorFilteredOut,
                 state = listState,
                 hideLoadingFooter = hideLoadingFooter,
             )
@@ -159,6 +163,7 @@ fun BrowseSourceContent(
                 onMangaClick = onMangaClick,
                 onMangaLongClick = onMangaLongClick,
                 anchorUrl = anchorUrl,
+                anchorFilteredOut = anchorFilteredOut,
                 state = gridState,
                 hideLoadingFooter = hideLoadingFooter,
             )

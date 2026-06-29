@@ -28,6 +28,7 @@ fun BrowseSourceComfortableGrid(
     onMangaClick: (Manga) -> Unit,
     onMangaLongClick: (Manga) -> Unit,
     anchorUrl: String? = null,
+    anchorFilteredOut: Boolean = false,
     state: LazyGridState = rememberLazyGridState(),
     hideLoadingFooter: Boolean = false,
 ) {
@@ -49,6 +50,7 @@ fun BrowseSourceComfortableGrid(
             BrowseSourceComfortableGridItem(
                 manga = manga,
                 isAnchor = anchorUrl != null && manga.url == anchorUrl,
+                anchorFilteredOut = anchorFilteredOut,
                 onClick = { onMangaClick(manga) },
                 onLongClick = { onMangaLongClick(manga) },
             )
@@ -68,9 +70,12 @@ fun BrowseSourceComfortableGrid(
 private fun BrowseSourceComfortableGridItem(
     manga: Manga,
     isAnchor: Boolean = false,
+    anchorFilteredOut: Boolean = false,
     onClick: () -> Unit = {},
     onLongClick: () -> Unit = onClick,
 ) {
+    // 錨點不符當前篩選、僅被強制留下 → 封面暗化以資區別。
+    val filteredOut = isAnchor && anchorFilteredOut
     MangaComfortableGridItem(
         title = manga.title,
         coverData = MangaCover(
@@ -80,10 +85,14 @@ private fun BrowseSourceComfortableGridItem(
             url = manga.thumbnailUrl,
             lastModified = manga.coverLastModified,
         ),
-        coverAlpha = if (manga.favorite) CommonMangaItemDefaults.BrowseFavoriteCoverAlpha else 1f,
+        coverAlpha = when {
+            filteredOut -> CommonMangaItemDefaults.BrowseFilteredAnchorCoverAlpha
+            manga.favorite -> CommonMangaItemDefaults.BrowseFavoriteCoverAlpha
+            else -> 1f
+        },
         coverBadgeStart = {
             // Yakuyomi：錨點旗標移到左上（與收藏徽章同側、置最前＝最角落）。
-            AnchorBadge(enabled = isAnchor)
+            AnchorBadge(enabled = isAnchor, filteredOut = filteredOut)
             InLibraryBadge(enabled = manga.favorite)
         },
         isAnchor = isAnchor,

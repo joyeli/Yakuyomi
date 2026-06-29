@@ -130,6 +130,10 @@ class BrowseSourceScreenModel(
     private val _anchorReached = MutableStateFlow(false)
     val anchorReached: StateFlow<Boolean> = _anchorReached.asStateFlow()
 
+    // Yakuyomi：錨點本符當前全域篩選會被濾掉、但因錨點被強制留在清單 → true（UI 對該本加區別視覺：暗化 + 灰旗）。
+    private val _anchorFilteredOut = MutableStateFlow(false)
+    val anchorFilteredOut: StateFlow<Boolean> = _anchorFilteredOut.asStateFlow()
+
     // Yakuyomi：探索批次擷取詳情＋章節。對「filter 後留在清單的全部書目」逐一抓詳情 + 同步章節
     // （未擷取→首次擷取、已擷取→更新新章），每筆節流 ~0.8–1.3s + jitter 防被來源限流；失敗收進 [BatchFetch.failedIds]、
     // 結束時 showResults 給 UI 開結果清單逐一檢查（點進詳情頁手動處理、返回保留）。
@@ -185,6 +189,7 @@ class BrowseSourceScreenModel(
         .distinctUntilChanged()
         .map { listing ->
             _anchorReached.value = false // 換 listing → 重置錨點偵測
+            _anchorFilteredOut.value = false // 換 listing → 重置「錨點被濾掉」標記
             val cached = if (listing is Listing.Snapshot) {
                 // 快照：離線從 DB 讀存好的 urls 做成靜態 PagingData，零連線（避開 listing 分頁 request＝ban 大頭）。
                 flow { emit(PagingData.from(buildSnapshotItems())) }
@@ -215,24 +220,34 @@ class BrowseSourceScreenModel(
             ) { pagingData, favFilter, readFilter, fetchedFilter ->
                 pagingData.filter { stateFlow ->
                     val m = stateFlow.value
-                    if (hideInLibraryItems && m.favorite) return@filter false
-                    // 收藏（三態）
-                    if (favFilter == TriState.ENABLED_IS && !m.favorite) return@filter false
-                    if (favFilter == TriState.ENABLED_NOT && m.favorite) return@filter false
-                    // 開卷＝該本任一章「已讀 or 有閱讀進度（lastPageRead>0）」：有讀過就算，不限整話讀完。只在啟用時查 DB。
-                    if (readFilter != TriState.DISABLED) {
-                        val started = m.id > 0L &&
-                            getChaptersByMangaId.await(m.id).any { it.read || it.lastPageRead > 0 }
-                        if (readFilter == TriState.ENABLED_IS && !started) return@filter false
-                        if (readFilter == TriState.ENABLED_NOT && started) return@filter false
+                    val passes = run passes@{
+                        if (hideInLibraryItems && m.favorite) return@passes false
+                        // 收藏（三態）
+                        if (favFilter == TriState.ENABLED_IS && !m.favorite) return@passes false
+                        if (favFilter == TriState.ENABLED_NOT && m.favorite) return@passes false
+                        // 開卷＝該本任一章「已讀 or 有閱讀進度（lastPageRead>0）」：有讀過就算，不限整話讀完。只在啟用時查 DB。
+                        if (readFilter != TriState.DISABLED) {
+                            val started = m.id > 0L &&
+                                getChaptersByMangaId.await(m.id).any { it.read || it.lastPageRead > 0 }
+                            if (readFilter == TriState.ENABLED_IS && !started) return@passes false
+                            if (readFilter == TriState.ENABLED_NOT && started) return@passes false
+                        }
+                        // 擷取＝詳情曾被載入過（initialized：曾點進去/載過書目說明）；未擷取＝全新沒點過。
+                        if (fetchedFilter != TriState.DISABLED) {
+                            val fetched = m.initialized
+                            if (fetchedFilter == TriState.ENABLED_IS && !fetched) return@passes false
+                            if (fetchedFilter == TriState.ENABLED_NOT && fetched) return@passes false
+                        }
+                        true
                     }
-                    // 擷取＝詳情曾被載入過（initialized：曾點進去/載過書目說明）；未擷取＝全新沒點過。
-                    if (fetchedFilter != TriState.DISABLED) {
-                        val fetched = m.initialized
-                        if (fetchedFilter == TriState.ENABLED_IS && !fetched) return@filter false
-                        if (fetchedFilter == TriState.ENABLED_NOT && fetched) return@filter false
+                    // Yakuyomi：錨點永遠保留在清單；若不符當前篩選 → 標記讓 UI 加區別視覺（暗化 + 灰旗）。
+                    val isAnchorManga = browseAnchor.get().let { it.isNotEmpty() && it == m.url }
+                    if (isAnchorManga) {
+                        _anchorFilteredOut.value = !passes
+                        true
+                    } else {
+                        passes
                     }
-                    true
                 }
             }
         }

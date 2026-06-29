@@ -24,6 +24,7 @@ fun BrowseSourceList(
     onMangaClick: (Manga) -> Unit,
     onMangaLongClick: (Manga) -> Unit,
     anchorUrl: String? = null,
+    anchorFilteredOut: Boolean = false,
     state: LazyListState = rememberLazyListState(),
     hideLoadingFooter: Boolean = false,
 ) {
@@ -42,6 +43,7 @@ fun BrowseSourceList(
             BrowseSourceListItem(
                 manga = manga,
                 isAnchor = anchorUrl != null && manga.url == anchorUrl,
+                anchorFilteredOut = anchorFilteredOut,
                 onClick = { onMangaClick(manga) },
                 onLongClick = { onMangaLongClick(manga) },
             )
@@ -61,9 +63,12 @@ fun BrowseSourceList(
 private fun BrowseSourceListItem(
     manga: Manga,
     isAnchor: Boolean = false,
+    anchorFilteredOut: Boolean = false,
     onClick: () -> Unit = {},
     onLongClick: () -> Unit = onClick,
 ) {
+    // 錨點不符當前篩選、僅被強制留下 → 封面暗化以資區別。
+    val filteredOut = isAnchor && anchorFilteredOut
     MangaListItem(
         title = manga.title,
         coverData = MangaCover(
@@ -73,10 +78,14 @@ private fun BrowseSourceListItem(
             url = manga.thumbnailUrl,
             lastModified = manga.coverLastModified,
         ),
-        coverAlpha = if (manga.favorite) CommonMangaItemDefaults.BrowseFavoriteCoverAlpha else 1f,
+        coverAlpha = when {
+            filteredOut -> CommonMangaItemDefaults.BrowseFilteredAnchorCoverAlpha
+            manga.favorite -> CommonMangaItemDefaults.BrowseFavoriteCoverAlpha
+            else -> 1f
+        },
         badge = {
             InLibraryBadge(enabled = manga.favorite)
-            AnchorBadge(enabled = isAnchor)
+            AnchorBadge(enabled = isAnchor, filteredOut = filteredOut)
         },
         isAnchor = isAnchor,
         onLongClick = onLongClick,

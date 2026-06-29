@@ -110,6 +110,8 @@ data class BrowseSourceScreen(
         // Yakuyomi：錨點 url（已設就在任何清單顯示旗標徽章，含快照）。
         val anchorUrlPref by screenModel.browseAnchor.prefCollectAsState()
         val anchorUrl = anchorUrlPref.takeIf { it.isNotEmpty() }
+        // Yakuyomi：錨點被當前全域篩選濾掉、僅被強制留下 → 該本加區別視覺。
+        val anchorFilteredOut by screenModel.anchorFilteredOut.collectAsState()
 
         // Yakuyomi：清單分頁項 + 捲動狀態（自動載入到錨點要驅動載入＋視覺捲動，故 hoist 到此）。
         val context = LocalContext.current
@@ -420,6 +422,7 @@ data class BrowseSourceScreen(
                 onHelpClick = { uriHandler.openUri(Constants.URL_HELP) },
                 onLocalSourceHelpClick = onHelpClick,
                 anchorUrl = anchorUrl,
+                anchorFilteredOut = anchorFilteredOut,
                 gridState = gridState,
                 listState = listState,
                 hideLoadingFooter = isSnapshotListing,
