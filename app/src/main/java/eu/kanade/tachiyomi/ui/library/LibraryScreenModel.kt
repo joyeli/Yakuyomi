@@ -24,6 +24,8 @@ import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.util.chapter.getNextUnread
 import eu.kanade.tachiyomi.util.removeCovers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
@@ -34,6 +36,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.updateAndGet
 import mihon.core.common.utils.mutate
@@ -743,6 +746,47 @@ class LibraryScreenModel(
         mutableState.update { it.copy(dialog = null) }
     }
 
+    // Yakuyomi：已儲存搜尋分隔字元 U+001F（unit separator）；名稱/查詢字串不得含此字元。
+    private val savedSearchSep = '\u001F'
+
+    /** 已儲存搜尋（reactive 解碼成 (name, query)、依名稱排序）。 */
+    val savedSearches: StateFlow<List<Pair<String, String>>> = libraryPreferences.savedSearches.changes()
+        .map(::decodeSavedSearches)
+        .stateIn(
+            screenModelScope,
+            SharingStarted.WhileSubscribed(5_000),
+            decodeSavedSearches(libraryPreferences.savedSearches.get()),
+        )
+
+    private fun decodeSavedSearches(raw: Set<String>): List<Pair<String, String>> =
+        raw.mapNotNull {
+            val parts = it.split(savedSearchSep, limit = 2)
+            if (parts.size == 2 && parts[0].isNotEmpty()) parts[0] to parts[1] else null
+        }.sortedBy { it.first.lowercase() }
+
+    fun openSavedSearchesDialog() {
+        mutableState.update { it.copy(dialog = Dialog.SavedSearches) }
+    }
+
+    /** 把目前搜尋字串以 [name] 存起來（同名覆蓋）；目前無搜尋字或名稱為空則不存。 */
+    fun saveCurrentSearch(name: String) {
+        val query = state.value.searchQuery?.trim().orEmpty()
+        val trimmedName = name.trim()
+        if (query.isEmpty() || trimmedName.isEmpty()) return
+        val others = libraryPreferences.savedSearches.get()
+            .filterNot { it.substringBefore(savedSearchSep) == trimmedName }
+            .toSet()
+        libraryPreferences.savedSearches.set(others + "$trimmedName$savedSearchSep$query")
+    }
+
+    fun deleteSavedSearch(name: String) {
+        libraryPreferences.savedSearches.set(
+            libraryPreferences.savedSearches.get()
+                .filterNot { it.substringBefore(savedSearchSep) == name }
+                .toSet(),
+        )
+    }
+
     sealed interface Dialog {
         data object SettingsSheet : Dialog
         data class ChangeCategory(
@@ -750,6 +794,9 @@ class LibraryScreenModel(
             val initialSelection: List<CheckboxState<Category>>,
         ) : Dialog
         data class DeleteManga(val manga: List<Manga>) : Dialog
+
+        // Yakuyomi：已儲存搜尋對話框。
+        data object SavedSearches : Dialog
     }
 
     @Immutable

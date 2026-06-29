@@ -46,6 +46,7 @@ import cafe.adriel.voyager.navigator.tab.LocalTabNavigator
 import cafe.adriel.voyager.navigator.tab.TabOptions
 import eu.kanade.presentation.category.components.ChangeCategoryDialog
 import eu.kanade.presentation.library.DeleteLibraryMangaDialog
+import eu.kanade.presentation.library.LibrarySavedSearchesDialog
 import eu.kanade.presentation.library.LibrarySettingsDialog
 import eu.kanade.presentation.library.components.FloatingSearchBar
 import eu.kanade.presentation.library.components.LibraryContent
@@ -146,8 +147,13 @@ data object LibraryTab : Tab {
         var searchBarExpanded by remember { mutableStateOf(true) }
         var pendingSearchFocus by remember { mutableStateOf(false) }
         val searchFocusRequester = remember { FocusRequester() }
-        LaunchedEffect(searchBarExpanded, state.searchQuery, state.floatingSearchBar) {
-            if (state.floatingSearchBar && searchBarExpanded && state.searchQuery.isNullOrEmpty()) {
+        // Yakuyomi：三點選單是否開著（從 FloatingSearchBar 提升）。
+        var overflowMenuOpen by remember { mutableStateOf(false) }
+        // 閒置 3 秒收合——但搜尋字非空、篩選/已存搜尋對話框開著、或三點選單開著時皆不收（維持展開）。
+        LaunchedEffect(searchBarExpanded, state.searchQuery, state.floatingSearchBar, state.dialog, overflowMenuOpen) {
+            if (state.floatingSearchBar && searchBarExpanded && state.searchQuery.isNullOrEmpty() &&
+                state.dialog == null && !overflowMenuOpen
+            ) {
                 delay(3_000)
                 searchBarExpanded = false
             }
@@ -192,6 +198,7 @@ data object LibraryTab : Tab {
                         onClickRefresh = { onClickRefresh(state.activeCategory) },
                         onClickGlobalUpdate = { onClickRefresh(null) },
                         onClickOpenRandomManga = onClickOpenRandomManga,
+                        onClickSavedSearches = screenModel::openSavedSearchesDialog,
                         searchQuery = state.searchQuery,
                         onSearchQueryChange = screenModel::search,
                         // For scroll overlay when no tab
@@ -217,6 +224,9 @@ data object LibraryTab : Tab {
                         onClickGlobalUpdate = { onClickRefresh(null) },
                         onClickRefresh = { onClickRefresh(state.activeCategory) },
                         onClickOpenRandomManga = onClickOpenRandomManga,
+                        onClickSavedSearches = screenModel::openSavedSearchesDialog,
+                        menuExpanded = overflowMenuOpen,
+                        onMenuExpandedChange = { overflowMenuOpen = it },
                         modifier = Modifier
                             .fillMaxWidth()
                             .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
@@ -334,6 +344,17 @@ data object LibraryTab : Tab {
                         screenModel.removeMangas(dialog.manga, deleteManga, deleteChapter)
                         screenModel.clearSelection()
                     },
+                )
+            }
+            is LibraryScreenModel.Dialog.SavedSearches -> {
+                val savedSearches by screenModel.savedSearches.collectAsState()
+                LibrarySavedSearchesDialog(
+                    onDismissRequest = onDismissRequest,
+                    savedSearches = savedSearches,
+                    currentQuery = state.searchQuery,
+                    onLoad = screenModel::search,
+                    onSave = screenModel::saveCurrentSearch,
+                    onDelete = screenModel::deleteSavedSearch,
                 )
             }
             null -> {}

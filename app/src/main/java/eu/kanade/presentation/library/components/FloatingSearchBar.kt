@@ -36,10 +36,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -69,6 +65,9 @@ fun FloatingSearchBar(
     onClickGlobalUpdate: () -> Unit,
     onClickRefresh: () -> Unit,
     onClickOpenRandomManga: () -> Unit,
+    onClickSavedSearches: () -> Unit,
+    menuExpanded: Boolean,
+    onMenuExpandedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     AnimatedContent(
@@ -90,6 +89,9 @@ fun FloatingSearchBar(
                 onClickGlobalUpdate = onClickGlobalUpdate,
                 onClickRefresh = onClickRefresh,
                 onClickOpenRandomManga = onClickOpenRandomManga,
+                onClickSavedSearches = onClickSavedSearches,
+                menuExpanded = menuExpanded,
+                onMenuExpandedChange = onMenuExpandedChange,
             )
         } else {
             // 收合：右下小球。
@@ -110,8 +112,10 @@ private fun ExpandedSearchBar(
     onClickGlobalUpdate: () -> Unit,
     onClickRefresh: () -> Unit,
     onClickOpenRandomManga: () -> Unit,
+    onClickSavedSearches: () -> Unit,
+    menuExpanded: Boolean,
+    onMenuExpandedChange: (Boolean) -> Unit,
 ) {
-    var menuExpanded by remember { mutableStateOf(false) }
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.extraLarge,
@@ -172,32 +176,39 @@ private fun ExpandedSearchBar(
                 )
             }
             Box {
-                IconButton(onClick = { menuExpanded = true }) {
+                IconButton(onClick = { onMenuExpandedChange(true) }) {
                     Icon(
                         imageVector = Icons.Outlined.MoreVert,
                         contentDescription = stringResource(MR.strings.label_more),
                     )
                 }
-                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                DropdownMenu(expanded = menuExpanded, onDismissRequest = { onMenuExpandedChange(false) }) {
                     DropdownMenuItem(
                         text = { Text(stringResource(MR.strings.action_update_library)) },
                         onClick = {
                             onClickGlobalUpdate()
-                            menuExpanded = false
+                            onMenuExpandedChange(false)
                         },
                     )
                     DropdownMenuItem(
                         text = { Text(stringResource(MR.strings.action_update_category)) },
                         onClick = {
                             onClickRefresh()
-                            menuExpanded = false
+                            onMenuExpandedChange(false)
                         },
                     )
                     DropdownMenuItem(
                         text = { Text(stringResource(MR.strings.action_open_random_manga)) },
                         onClick = {
                             onClickOpenRandomManga()
-                            menuExpanded = false
+                            onMenuExpandedChange(false)
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(MR.strings.action_saved_searches)) },
+                        onClick = {
+                            onClickSavedSearches()
+                            onMenuExpandedChange(false)
                         },
                     )
                 }

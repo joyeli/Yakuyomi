@@ -588,6 +588,9 @@
     <string name="pref_clear_webview_data">清除 WebView 資料</string>
     <string name="webview_data_deleted">已清除 WebView 資料</string>
     <string name="action_close">關閉</string>
+    <string name="action_saved_searches">已儲存搜尋</string>
+    <string name="saved_searches_empty">尚無已儲存的搜尋。先打一段搜尋，再到這裡儲存。</string>
+    <string name="saved_search_name">搜尋名稱</string>
     <string name="source_empty_screen">找不到來源</string>
     <string name="source_filter_empty_screen">找不到已安裝的來源</string>
     <string name="action_sort_last_manga_update">上次檢查更新</string>

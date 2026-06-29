@@ -35,16 +35,28 @@ data class LibraryItem(
                 source.id == querySource.toLongOrNull()
             }
         }
-        return libraryManga.manga.title.contains(constraint, true) ||
-            (libraryManga.manga.author?.contains(constraint, true) ?: false) ||
-            (libraryManga.manga.artist?.contains(constraint, true) ?: false) ||
-            (libraryManga.manga.description?.contains(constraint, true) ?: false) ||
-            constraint.split(",").map { it.trim() }.all { subconstraint ->
-                checkNegatableConstraint(subconstraint) {
-                    sourceName.contains(it, true) ||
-                        (libraryManga.manga.genre?.any { genre -> genre.equals(it, true) } ?: false)
+        // Yakuyomi：進階搜尋語法——逗號分隔多條件 AND；每條件可加 `-` 反向；可用 genre:/author:/artist:
+        // 精確查欄位，否則純文字比對標題/作者/繪師/簡介/來源名/類型（任一含）。兼容舊行為（無逗號=單條件整句）。
+        val manga = libraryManga.manga
+        return constraint.split(",").map { it.trim() }.filter { it.isNotEmpty() }.all { condition ->
+            checkNegatableConstraint(condition) { c ->
+                when {
+                    c.startsWith("genre:", true) ->
+                        manga.genre?.any { it.contains(c.substringAfter("genre:").trim(), true) } ?: false
+                    c.startsWith("author:", true) ->
+                        manga.author?.contains(c.substringAfter("author:").trim(), true) ?: false
+                    c.startsWith("artist:", true) ->
+                        manga.artist?.contains(c.substringAfter("artist:").trim(), true) ?: false
+                    else ->
+                        manga.title.contains(c, true) ||
+                            (manga.author?.contains(c, true) ?: false) ||
+                            (manga.artist?.contains(c, true) ?: false) ||
+                            (manga.description?.contains(c, true) ?: false) ||
+                            sourceName.contains(c, true) ||
+                            (manga.genre?.any { g -> g.contains(c, true) } ?: false)
                 }
             }
+        }
     }
 
     /**

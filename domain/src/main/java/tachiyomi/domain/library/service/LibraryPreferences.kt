@@ -70,6 +70,12 @@ class LibraryPreferences(
         false,
     )
 
+    // Yakuyomi：書庫已儲存搜尋（每筆編碼 "namequery"，名稱/查詢字串不得含此分隔字元）。
+    val savedSearches: Preference<Set<String>> = preferenceStore.getStringSet(
+        "library_saved_searches",
+        emptySet(),
+    )
+
     val markDuplicateReadChapterAsRead: Preference<Set<String>> = preferenceStore.getStringSet(
         "mark_duplicate_read_chapter_read",
         emptySet(),
