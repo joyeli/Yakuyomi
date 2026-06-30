@@ -93,6 +93,11 @@ object SettingsLibraryScreen : SearchableSettings {
                     title = stringResource(MR.strings.default_category),
                 ),
                 Preference.PreferenceItem.SwitchPreference(
+                    preference = libraryPreferences.rememberLastCategorySelection,
+                    title = stringResource(MR.strings.pref_remember_last_category_selection),
+                    subtitle = stringResource(MR.strings.pref_remember_last_category_selection_summary),
+                ),
+                Preference.PreferenceItem.SwitchPreference(
                     preference = libraryPreferences.categorizedDisplaySettings,
                     title = stringResource(MR.strings.categorized_display_settings),
                     onValueChanged = {

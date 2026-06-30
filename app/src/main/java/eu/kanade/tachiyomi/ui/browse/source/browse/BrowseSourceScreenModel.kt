@@ -391,7 +391,9 @@ class BrowseSourceScreenModel(
 
                 // Choose a category
                 else -> {
+                    // Yakuyomi：新書目（尚無分類）→ 帶入上次選過的分類（只留仍存在的），確認即可、不必每次重選。
                     val preselectedIds = getCategories.await(manga.id).map { it.id }
+                        .ifEmpty { lastUsedCategoryIds(categories) }
                     setDialog(
                         Dialog.ChangeMangaCategory(
                             manga,
@@ -424,11 +426,27 @@ class BrowseSourceScreenModel(
     }
 
     fun moveMangaToCategories(manga: Manga, categoryIds: List<Long>) {
+        rememberLastUsedCategories(categoryIds)
         screenModelScope.launchIO {
             setMangaCategories.await(
                 mangaId = manga.id,
                 categoryIds = categoryIds.toList(),
             )
+        }
+    }
+
+    /** Yakuyomi：上次在「選擇分類」對話框選過的分類（過濾掉已刪除者）；設定關閉時回空＝不預先勾選。 */
+    private fun lastUsedCategoryIds(categories: List<Category>): List<Long> {
+        if (!libraryPreferences.rememberLastCategorySelection.get()) return emptyList()
+        return libraryPreferences.lastUsedCategories.get()
+            .mapNotNull { it.toLongOrNull() }
+            .filter { id -> categories.any { it.id == id } }
+    }
+
+    /** Yakuyomi：記住這次手動選的分類組（空＝不更新，保留上次）。 */
+    private fun rememberLastUsedCategories(categoryIds: List<Long>) {
+        if (categoryIds.isNotEmpty()) {
+            libraryPreferences.lastUsedCategories.set(categoryIds.map { it.toString() }.toSet())
         }
     }
 

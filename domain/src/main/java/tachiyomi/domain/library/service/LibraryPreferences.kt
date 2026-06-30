@@ -154,6 +154,18 @@ class LibraryPreferences(
 
     val lastUsedCategory: Preference<Int> = preferenceStore.getInt(Preference.appStateKey("last_used_category"), 0)
 
+    // Yakuyomi：加入書庫「選擇分類」對話框上次選過的分類組（id 字串）。新書目自動帶入勾選 → 確認即可、不必每次重選。
+    val lastUsedCategories: Preference<Set<String>> = preferenceStore.getStringSet(
+        Preference.appStateKey("last_used_categories"),
+        emptySet(),
+    )
+
+    // Yakuyomi：新書目加入書庫時自動帶入上次選過的分類（[lastUsedCategories]）。預設開；關＝沿用原本「全不勾」。
+    val rememberLastCategorySelection: Preference<Boolean> = preferenceStore.getBoolean(
+        "remember_last_category_selection",
+        true,
+    )
+
     val categoryTabs: Preference<Boolean> = preferenceStore.getBoolean("display_category_tabs", true)
 
     val categoryNumberOfItems: Preference<Boolean> = preferenceStore.getBoolean("display_number_of_items", false)
