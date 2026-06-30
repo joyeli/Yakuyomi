@@ -57,6 +57,7 @@ fun LibraryContent(
     onMoveMangaToCategory: (Manga, Long, Long) -> Unit,
     onSetCategorySort: (Category, LibrarySort.Type, LibrarySort.Direction) -> Unit,
     onRenameCategory: (Category, String) -> Unit,
+    onMoveCategory: (Category, Int) -> Unit,
 ) {
     Column(
         modifier = Modifier.padding(
@@ -134,6 +135,7 @@ fun LibraryContent(
                     onMoveMangaToCategory = onMoveMangaToCategory,
                     onSetCategorySort = onSetCategorySort,
                     onRenameCategory = onRenameCategory,
+                    onMoveCategory = onMoveCategory,
                 )
             } else {
                 LibraryPager(

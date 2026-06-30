@@ -4,6 +4,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -11,12 +12,16 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -46,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import eu.kanade.tachiyomi.ui.library.LibraryItem
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyGridState
+import sh.calvin.reorderable.rememberReorderableLazyListState
 import tachiyomi.domain.category.model.Category
 import tachiyomi.domain.library.model.LibraryDisplayMode
 import tachiyomi.domain.library.model.LibraryManga
@@ -113,11 +119,17 @@ internal fun LibraryAllCategories(
     // Yakuyomi：每分類排序（標頭）＋ 長壓分類名改名。
     onSetCategorySort: (Category, LibrarySort.Type, LibrarySort.Direction) -> Unit,
     onRenameCategory: (Category, String) -> Unit,
+    // Yakuyomi：標頭 ≡ →「排序分類」對話框重排分類順序。newIndex＝非系統分類清單中的目標位置。
+    onMoveCategory: (Category, Int) -> Unit,
 ) {
     // 長壓分類名改名的對話框目標（null＝不顯示）。
     var renameTarget by remember { mutableStateOf<Category?>(null) }
     // 拖出原分類後彈「選擇分類」的請求（null＝不顯示）。
     var moveRequest by remember { mutableStateOf<CategoryMoveRequest?>(null) }
+    // 標頭 ≡ →「排序分類」對話框（true＝顯示）。
+    var showReorderCategories by remember { mutableStateOf(false) }
+    // 至少兩個非系統分類才有重排意義；否則標頭不顯示 ≡。
+    val canReorderCategories = categories.count { !it.isSystemCategory } >= 2
     // 每次重組重算每分類項目（state 變才重組）。不可 remember(categories)：移動漫畫時分類清單內容相等、
     // remember 會回舊快取 → 分組變動不更新（getItemsForCategory 綁當前 state，每次重組是新 lambda）。
     val categoryItems = categories.map { it to getItemsForCategory(it) }
@@ -216,6 +228,12 @@ internal fun LibraryAllCategories(
                             { renameTarget = category }
                         },
                         onSetSort = { type, direction -> onSetCategorySort(category, type, direction) },
+                        // ≡：至少兩個非系統分類才可重排，否則隱藏。
+                        onClickReorder = if (canReorderCategories) {
+                            { showReorderCategories = true }
+                        } else {
+                            null
+                        },
                     )
                 }
                 // 拖曳中改用非黏性 item（黏性標題會讓 reorderable 算錯偏移→跨分類反向位移）。
@@ -404,6 +422,15 @@ internal fun LibraryAllCategories(
             onDismiss = { moveRequest = null },
         )
     }
+
+    if (showReorderCategories) {
+        ReorderCategoriesDialog(
+            // 系統「預設」分類不參與排序（ReorderCategory 也只動非系統）。
+            categories = categories.filterNot { it.isSystemCategory },
+            onMove = onMoveCategory,
+            onDismiss = { showReorderCategories = false },
+        )
+    }
 }
 
 // 排序欄位 → 顯示字串（對齊 LibrarySettingsDialog 的排序選項；略過需追蹤器的 TrackerMean）。
@@ -429,6 +456,7 @@ private fun LibraryCategoryHeader(
     onClick: () -> Unit,
     onLongClickName: (() -> Unit)?,
     onSetSort: (LibrarySort.Type, LibrarySort.Direction) -> Unit,
+    onClickReorder: (() -> Unit)?,
 ) {
     val rotation by animateFloatAsState(if (collapsed) -90f else 0f, label = "category_chevron")
     var sortMenu by remember { mutableStateOf(false) }
@@ -468,65 +496,76 @@ private fun LibraryCategoryHeader(
             // 左右區之間留間距。
             Spacer(Modifier.width(16.dp))
 
-            // 右區：排序欄位 + 方向 + ≡，點一下＝排序選單（每分類）。
-            Box {
-                Row(
-                    modifier = Modifier
-                        .clickable { sortMenu = true }
-                        .padding(horizontal = 8.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (currentLabel != null) {
-                        Text(
-                            text = stringResource(currentLabel),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            // 右區：排序欄位 + 方向（點＝每分類排序選單）｜ ≡（點＝排序分類對話框）。
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box {
+                    Row(
+                        modifier = Modifier
+                            .clickable { sortMenu = true }
+                            .padding(horizontal = 8.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (currentLabel != null) {
+                            Text(
+                                text = stringResource(currentLabel),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Icon(
+                            imageVector = if (sort.isAscending) {
+                                Icons.Filled.ArrowUpward
+                            } else {
+                                Icons.Filled.ArrowDownward
+                            },
+                            contentDescription = null,
+                            modifier = Modifier
+                                .padding(start = 2.dp)
+                                .size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Icon(
-                        imageVector = if (sort.isAscending) Icons.Filled.ArrowUpward else Icons.Filled.ArrowDownward,
-                        contentDescription = null,
-                        modifier = Modifier
-                            .padding(start = 2.dp)
-                            .size(16.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
+                        sortTypeLabels.forEach { (type, label) ->
+                            DropdownMenuItem(
+                                text = { Text(stringResource(label)) },
+                                trailingIcon = {
+                                    if (type == sort.type) {
+                                        Icon(
+                                            imageVector = if (sort.isAscending) {
+                                                Icons.Filled.ArrowUpward
+                                            } else {
+                                                Icons.Filled.ArrowDownward
+                                            },
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    // 點當前欄位＝切方向；點別的欄位＝設該欄位、保留方向。
+                                    val direction = when {
+                                        type != sort.type -> sort.direction
+                                        sort.isAscending -> LibrarySort.Direction.Descending
+                                        else -> LibrarySort.Direction.Ascending
+                                    }
+                                    onSetSort(type, direction)
+                                    sortMenu = false
+                                },
+                            )
+                        }
+                    }
+                }
+                // ≡：點＝跳「排序分類」對話框（重排整個分類順序）。
+                onClickReorder?.let { reorder ->
                     Icon(
                         imageVector = Icons.Outlined.DragHandle,
-                        contentDescription = null,
-                        modifier = Modifier.padding(start = 6.dp),
+                        contentDescription = stringResource(MR.strings.action_reorder_categories),
+                        modifier = Modifier
+                            .clickable(onClick = reorder)
+                            .padding(start = 6.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                }
-                DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
-                    sortTypeLabels.forEach { (type, label) ->
-                        DropdownMenuItem(
-                            text = { Text(stringResource(label)) },
-                            trailingIcon = {
-                                if (type == sort.type) {
-                                    Icon(
-                                        imageVector = if (sort.isAscending) {
-                                            Icons.Filled.ArrowUpward
-                                        } else {
-                                            Icons.Filled.ArrowDownward
-                                        },
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp),
-                                    )
-                                }
-                            },
-                            onClick = {
-                                // 點當前欄位＝切方向；點別的欄位＝設該欄位、保留方向。
-                                val direction = when {
-                                    type != sort.type -> sort.direction
-                                    sort.isAscending -> LibrarySort.Direction.Descending
-                                    else -> LibrarySort.Direction.Ascending
-                                }
-                                onSetSort(type, direction)
-                                sortMenu = false
-                            },
-                        )
-                    }
                 }
             }
         }
@@ -593,6 +632,74 @@ private fun CategoryMoveDialog(
         dismissButton = {
             TextButton(onClick = onDismiss) {
                 Text(stringResource(MR.strings.action_cancel))
+            }
+        },
+    )
+}
+
+/**
+ * 「排序分類」對話框：均一全寬可拖曳清單（避開主網格全寬標題的 reorderable 位移坑），
+ * 拖曳放下即時持久化（[onMove] → ReorderCategory）。[categories]＝非系統分類，順序＝目前順序。
+ */
+@Composable
+private fun ReorderCategoriesDialog(
+    categories: List<Category>,
+    onMove: (Category, Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val ordered = remember { categories.toMutableStateList() }
+    val lazyListState = rememberLazyListState()
+    val reorderState = rememberReorderableLazyListState(lazyListState) { from, to ->
+        val moved = ordered.removeAt(from.index)
+        ordered.add(to.index, moved)
+        onMove(moved, to.index)
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(MR.strings.action_reorder_categories)) },
+        text = {
+            LazyColumn(
+                state = lazyListState,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 360.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                items(ordered, key = { "reorder_cat_${it.id}" }) { category ->
+                    ReorderableItem(reorderState, key = "reorder_cat_${category.id}") {
+                        Surface(
+                            tonalElevation = 2.dp,
+                            shape = MaterialTheme.shapes.small,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.DragHandle,
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .draggableHandle()
+                                        .padding(end = 8.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Text(
+                                    text = category.name,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(MR.strings.action_ok))
             }
         },
     )

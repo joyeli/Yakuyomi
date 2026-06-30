@@ -47,6 +47,7 @@ import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.lang.launchNonCancellable
 import tachiyomi.domain.category.interactor.GetCategories
 import tachiyomi.domain.category.interactor.RenameCategory
+import tachiyomi.domain.category.interactor.ReorderCategory
 import tachiyomi.domain.category.interactor.SetMangaCategories
 import tachiyomi.domain.category.interactor.SetSortModeForCategory
 import tachiyomi.domain.category.model.Category
@@ -84,6 +85,7 @@ class LibraryScreenModel(
     private val setMangaCategories: SetMangaCategories = Injekt.get(),
     private val setSortModeForCategory: SetSortModeForCategory = Injekt.get(),
     private val renameCategoryInteractor: RenameCategory = Injekt.get(),
+    private val reorderCategory: ReorderCategory = Injekt.get(),
     private val preferences: BasePreferences = Injekt.get(),
     private val libraryPreferences: LibraryPreferences = Injekt.get(),
     private val coverCache: CoverCache = Injekt.get(),
@@ -831,6 +833,13 @@ class LibraryScreenModel(
     fun renameCategory(category: Category, name: String) {
         screenModelScope.launchIO {
             renameCategoryInteractor.await(category, name)
+        }
+    }
+
+    /** Yakuyomi：重排分類順序（單清單模式標頭 ≡ →「排序分類」對話框拖曳）。newIndex＝非系統分類清單中的目標位置。 */
+    fun moveCategory(category: Category, newIndex: Int) {
+        screenModelScope.launchIO {
+            reorderCategory.await(category, newIndex)
         }
     }
 

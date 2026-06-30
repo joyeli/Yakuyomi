@@ -39,6 +39,7 @@
     <string name="action_edit_categories">編輯類別</string>
     <string name="action_rename_category">重新命名類別</string>
     <string name="move_to_category">移到分類</string>
+    <string name="action_reorder_categories">排序分類</string>
     <string name="action_move_category">設定類別</string>
     <string name="action_edit_cover">編輯封面</string>
     <string name="action_pause">暫停</string>

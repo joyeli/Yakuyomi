@@ -319,6 +319,7 @@ data object LibraryTab : Tab {
                         onMoveMangaToCategory = screenModel::moveMangaToCategory,
                         onSetCategorySort = screenModel::setCategorySort,
                         onRenameCategory = screenModel::renameCategory,
+                        onMoveCategory = screenModel::moveCategory,
                     )
                 }
             }
