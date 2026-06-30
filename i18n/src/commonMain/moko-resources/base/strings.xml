@@ -401,6 +401,8 @@
     <string name="default_category_summary">Always ask</string>
     <string name="pref_remember_last_category_selection">Remember last categories</string>
     <string name="pref_remember_last_category_selection_summary">When adding a new entry, pre-check the categories you picked last time.</string>
+    <string name="pref_library_swipe_to_refresh">Pull to refresh</string>
+    <string name="pref_library_swipe_to_refresh_summary">Pull down the library to update entries. Off by default to avoid accidental mass updates.</string>
     <string name="categorized_display_settings">Per-category settings for sort</string>
     <string name="pref_library_update_categories_details">Entries in excluded categories will not be updated even if they are also in included categories.</string>
     <string name="all">All</string>

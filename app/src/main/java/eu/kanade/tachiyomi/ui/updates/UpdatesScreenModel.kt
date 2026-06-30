@@ -70,6 +70,9 @@ class UpdatesScreenModel(
 
     val lastUpdated by libraryPreferences.lastUpdatedTimestamp.asState(screenModelScope)
 
+    // Yakuyomi：下拉更新開關（預設關，與書庫共用 LibraryPreferences.swipeToRefresh）。
+    val swipeToRefresh by libraryPreferences.swipeToRefresh.asState(screenModelScope)
+
     // First and last selected index in list
     private val selectedPositions: Array<Int> = arrayOf(-1, -1)
     private val selectedChapterIds: HashSet<Long> = HashSet()

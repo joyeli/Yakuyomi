@@ -71,6 +71,13 @@ class LibraryPreferences(
         false,
     )
 
+    // Yakuyomi：書庫下拉更新（swipe-to-refresh）開關。預設關——已有預設開的自動載入書目資訊，
+    // 避免書庫下拉誤觸發整庫大量更新。開＝恢復 mihon 原生下拉更新。
+    val swipeToRefresh: Preference<Boolean> = preferenceStore.getBoolean(
+        "library_swipe_to_refresh",
+        false,
+    )
+
     // Yakuyomi：書庫已儲存搜尋（每筆編碼 "namequery"，名稱/查詢字串不得含此分隔字元）。
     val savedSearches: Preference<Set<String>> = preferenceStore.getStringSet(
         "library_saved_searches",

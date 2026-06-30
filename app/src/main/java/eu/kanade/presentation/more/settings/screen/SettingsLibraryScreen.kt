@@ -220,6 +220,11 @@ object SettingsLibraryScreen : SearchableSettings {
         return Preference.PreferenceGroup(
             title = stringResource(MR.strings.pref_behavior),
             preferenceItems = listOf(
+                Preference.PreferenceItem.SwitchPreference(
+                    preference = libraryPreferences.swipeToRefresh,
+                    title = stringResource(MR.strings.pref_library_swipe_to_refresh),
+                    subtitle = stringResource(MR.strings.pref_library_swipe_to_refresh_summary),
+                ),
                 Preference.PreferenceItem.ListPreference(
                     preference = libraryPreferences.swipeToStartAction,
                     entries = mapOf(

@@ -234,6 +234,7 @@ class MangaScreenModel(
                     isRefreshingData = needRefreshInfo || needRefreshChapter,
                     dialog = null,
                     hideMissingChapters = libraryPreferences.hideMissingChapters.get(),
+                    pullToRefresh = libraryPreferences.swipeToRefresh.get(),
                 )
             }
 
@@ -1255,6 +1256,8 @@ class MangaScreenModel(
             val dialog: Dialog? = null,
             val hasPromptedToAddBefore: Boolean = false,
             val hideMissingChapters: Boolean = false,
+            // Yakuyomi：下拉更新開關（預設關，與書庫共用 LibraryPreferences.swipeToRefresh）。
+            val pullToRefresh: Boolean = false,
         ) : State {
             val processedChapters by lazy {
                 chapters.applyFilters(manga).toList()

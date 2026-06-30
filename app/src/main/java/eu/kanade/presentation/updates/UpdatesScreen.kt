@@ -48,6 +48,8 @@ fun UpdateScreen(
     state: UpdatesScreenModel.State,
     snackbarHostState: SnackbarHostState,
     lastUpdated: Long,
+    // Yakuyomi：下拉更新開關（預設關）。關時更新分頁下拉不觸發整庫更新。
+    pullToRefreshEnabled: Boolean,
     onClickCover: (UpdatesItem) -> Unit,
     onSelectAll: (Boolean) -> Unit,
     onInvertSelection: () -> Unit,
@@ -113,7 +115,7 @@ fun UpdateScreen(
                             isRefreshing = false
                         }
                     },
-                    enabled = !state.selectionMode,
+                    enabled = !state.selectionMode && pullToRefreshEnabled,
                     indicatorPadding = contentPadding,
                 ) {
                     FastScrollLazyColumn(

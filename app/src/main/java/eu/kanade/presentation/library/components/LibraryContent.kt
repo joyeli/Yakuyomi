@@ -42,6 +42,8 @@ fun LibraryContent(
     onToggleSelection: (Category, LibraryManga) -> Unit,
     onToggleRangeSelection: (Category, LibraryManga) -> Unit,
     onRefresh: () -> Boolean,
+    // Yakuyomi：下拉更新開關（預設關）。關時整個 PullRefresh 停用。
+    pullToRefreshEnabled: Boolean,
     onGlobalSearchClicked: () -> Unit,
     getItemCountForCategory: (Category) -> Int?,
     getDisplayMode: (Int) -> PreferenceMutableState<LibraryDisplayMode>,
@@ -95,7 +97,7 @@ fun LibraryContent(
 
         PullRefresh(
             refreshing = isRefreshing,
-            enabled = selection.isEmpty(),
+            enabled = selection.isEmpty() && pullToRefreshEnabled,
             onRefresh = {
                 val started = onRefresh()
                 if (!started) return@PullRefresh

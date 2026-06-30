@@ -155,14 +155,16 @@ class LibraryScreenModel(
             libraryPreferences.categoryNumberOfItems.changes(),
             libraryPreferences.showContinueReadingButton.changes(),
             libraryPreferences.floatingSearchBar.changes(),
-        ) { a, b, c, d -> arrayOf(a, b, c, d) }
-            .onEach { (showCategoryTabs, showMangaCount, showMangaContinueButton, floatingSearchBar) ->
+            libraryPreferences.swipeToRefresh.changes(),
+        ) { a, b, c, d, e -> arrayOf(a, b, c, d, e) }
+            .onEach { (showCategoryTabs, showMangaCount, showMangaContinueButton, floatingSearchBar, swipeToRefresh) ->
                 mutableState.update { state ->
                     state.copy(
                         showCategoryTabs = showCategoryTabs,
                         showMangaCount = showMangaCount,
                         showMangaContinueButton = showMangaContinueButton,
                         floatingSearchBar = floatingSearchBar,
+                        swipeToRefresh = swipeToRefresh,
                     )
                 }
             }
@@ -923,6 +925,8 @@ class LibraryScreenModel(
         val showMangaContinueButton: Boolean = false,
         // Yakuyomi：書庫浮動搜尋列開關（開＝搜尋移到底部浮動 pill、頂部隱藏放大鏡）。
         val floatingSearchBar: Boolean = false,
+        // Yakuyomi：書庫下拉更新開關（預設關，避免下拉誤觸整庫大量更新）。
+        val swipeToRefresh: Boolean = false,
         // Yakuyomi：單一可摺疊清單模式 + 已摺疊分類 id。
         val singleListMode: Boolean = false,
         val collapsedCategoryIds: Set<Long> = emptySet(),

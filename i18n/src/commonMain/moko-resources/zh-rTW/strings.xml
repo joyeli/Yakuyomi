@@ -87,6 +87,8 @@
     <string name="default_category_summary">總是詢問</string>
     <string name="pref_remember_last_category_selection">記住上次選的分類</string>
     <string name="pref_remember_last_category_selection_summary">加入新書目時，自動勾選你上次選過的分類。</string>
+    <string name="pref_library_swipe_to_refresh">下拉更新</string>
+    <string name="pref_library_swipe_to_refresh_summary">下拉書庫以更新書目。預設關閉，避免誤觸發整庫大量更新。</string>
     <string name="ext_update">更新</string>
     <string name="ext_install">安裝</string>
     <string name="ext_pending">等待中</string>
