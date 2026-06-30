@@ -59,6 +59,10 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 - **Single-list collapsible categories** — show the whole library as one scrolling list with sticky, tap-to-collapse category headers, instead of swipeable tabs.
 - **Cover-based theme** — optionally tint a manga's detail screen with colors pulled from its cover.
 - **Translated badge & filter** — a cover badge counts translated chapters; filter the library by translation state.
+- **Per-category controls** — in the single-list view, every category header shows its own sort field and direction (tap to sort), long-press the name to rename, and a ≡ button reorders categories in a drag dialog. Drag a cover within its category to reorder, or past the boundary to move it to another.
+- **Remember last categories** — adding a new title pre-checks the categories you picked last time, so you just hit *Add* (toggle in Library settings).
+- **Pull-to-refresh toggle** — off by default so a stray swipe-down can't start a full library update; one switch gates the library, the details page, and the Updates tab together.
+- **Reading & translation statistics** — the Statistics screen adds per-day reading activity (chapters and titles read, backfilled from your history) and translation usage (chapters/pages plus LLM token counts), each with today / 7-day / 30-day / all views.
 
 <div align="center">
 <img src="./.github/assets/yakuyomi-library-reorder.gif" alt="Drag-to-reorder library: long-press a cover and drag to set a manual order" width="230"/>
@@ -73,7 +77,7 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 - **Per-source anchor** — mark a title as your "last processed point"; a one-tap action keeps loading and auto-scrolls the Latest feed until it reaches the anchor, so you never lose your place. The anchor stays visible even when the global filter would hide it, dimmed with a grey flag so you can tell it apart.
 - **Offline snapshot** — save a source's currently-loaded list and browse it later with **zero network** (lighter on the source, ban-safe).
 - **Background fetch** — fetching details and chapters for a large filtered list (so they show up correctly, get update info, and can be downloaded) used to pin you to the browse screen until it finished. Now: narrow the list with the filters above, tap **Fetch details**, and walk away — it runs in the background with a progress notification you can cancel from anywhere. One title is fetched at a time (throttled to stay ban-safe); while it runs, the button shows progress instead of letting you start a second one.
-- **Page-load throttle** — a configurable minimum interval between page loads to keep sources from rate-limiting you.
+- **Ban-safe pacing** — page loads and background detail-fetching are spaced out with randomized jitter (instead of a robotic fixed interval that's itself a bot signal), keeping sources from rate-limiting or banning you. The minimum page-load interval is still configurable.
 - **Auto-refresh on open** — optionally refresh a manga's chapters every time you open it.
 
 **Search**
