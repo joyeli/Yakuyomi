@@ -34,9 +34,9 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 - **Quality knobs** — three text-removal modes (flat-fill / whole-image LaMa / per-region LaMa), vertical/horizontal typesetting, ~20 tunable parameters. No telemetry.
 
 <div align="center">
-<img src="./.github/assets/yakuyomi-live-translate.gif" alt="Live translation: speech bubbles turn from Japanese into your language as you read" width="220"/>
-<img src="./.github/assets/yakuyomi-rerender.gif" alt="Re-render: switch a page's text-removal method in place" width="220"/>
-<img src="./.github/assets/yakuyomi-queue-manage.gif" alt="Translation queue grouped by manga: expand chapters, jump a title to the front, pause it" width="220"/>
+<img src="./.github/assets/yakuyomi-live-translate.gif" alt="Live translation: speech bubbles turn from Japanese into your language as you read" height="440" hspace="6"/>
+<img src="./.github/assets/yakuyomi-rerender.gif" alt="Re-render: switch a page's text-removal method in place" height="440" hspace="6"/>
+<img src="./.github/assets/yakuyomi-queue-manage.gif" alt="Translation queue grouped by manga: expand chapters, jump a title to the front, pause it" height="440" hspace="6"/>
 <br>
 <sub><b>Live translation as you read</b>, <b>one-tap re-render</b> of the text-removal method, and a <b>per-manga translation queue</b> — expand chapters, jump a title to the front, pause it.</sub>
 </div>
@@ -48,8 +48,8 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 - **Cover in progress notifications** — the background-translation notification shows the chapter's full cover, not just an icon.
 
 <div align="center">
-<img src="./.github/assets/yakuyomi-reader-chapters.gif" alt="In-reader chapter list: jump to another chapter without leaving the reader" width="230"/>
-<img src="./.github/assets/yakuyomi-eink.gif" alt="E-ink mode: grayscale, white theme, white-flash page refresh" width="230"/>
+<img src="./.github/assets/yakuyomi-reader-chapters.gif" alt="In-reader chapter list: jump to another chapter without leaving the reader" height="440" hspace="6"/>
+<img src="./.github/assets/yakuyomi-eink.gif" alt="E-ink mode: grayscale, white theme, white-flash page refresh" height="440" hspace="6"/>
 <br>
 <sub>An <b>in-reader chapter list</b> and a <b>one-tap e-ink mode</b>.</sub>
 </div>
@@ -65,25 +65,25 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 - **Reading & translation statistics** — the Statistics screen adds per-day reading activity (chapters and titles read, backfilled from your history) and translation usage (chapters/pages plus LLM token counts), each with today / 7-day / 30-day / all views.
 
 <div align="center">
-<img src="./.github/assets/yakuyomi-library-reorder.gif" alt="Drag-to-reorder library: long-press a cover and drag to set a manual order" width="230"/>
-<img src="./.github/assets/yakuyomi-library-collapse.gif" alt="Single-list collapsible categories: all categories in one list with sticky tap-to-collapse headers" width="230"/>
-<img src="./.github/assets/yakuyomi-cover-theme.gif" alt="Cover-based theme: the detail screen tints to each manga's cover colors" width="230"/>
+<img src="./.github/assets/yakuyomi-library-reorder.gif" alt="Drag-to-reorder library: long-press a cover and drag to set a manual order" height="440" hspace="6"/>
+<img src="./.github/assets/yakuyomi-library-collapse.gif" alt="Single-list collapsible categories: all categories in one list with sticky tap-to-collapse headers" height="440" hspace="6"/>
+<img src="./.github/assets/yakuyomi-cover-theme.gif" alt="Cover-based theme: the detail screen tints to each manga's cover colors" height="440" hspace="6"/>
 <br>
 <sub><b>Drag covers into your own order</b>, collapse the whole library into <b>one list of tap-to-collapse categories</b>, and tint the detail screen to each <b>cover's colors</b>.</sub>
 </div>
 
 <div align="center">
-<img src="./.github/assets/yakuyomi-category-sort.gif" alt="Per-category sort: tap a category header to choose its own sort field and direction" width="200"/>
-<img src="./.github/assets/yakuyomi-category-manage.gif" alt="Rename and reorder categories from the single-list view" width="200"/>
-<img src="./.github/assets/yakuyomi-category-move.gif" alt="Drag a cover within its category to reorder, or past the boundary to move it to another" width="200"/>
+<img src="./.github/assets/yakuyomi-category-sort.gif" alt="Per-category sort: tap a category header to choose its own sort field and direction" height="440" hspace="6"/>
+<img src="./.github/assets/yakuyomi-category-manage.gif" alt="Rename and reorder categories from the single-list view" height="440" hspace="6"/>
 <br>
-<sub><b>Per-category controls</b> in the single-list view — give each category <b>its own sort</b>, <b>rename and reorder</b> categories, and <b>drag a cover to another category</b>.</sub>
+<sub><b>Per-category controls</b> in the single-list view — give each category <b>its own sort</b> (tap the header), and <b>rename or reorder</b> categories.</sub>
 </div>
 
 <div align="center">
-<img src="./.github/assets/yakuyomi-stats.gif" alt="Statistics: per-day reading activity and translation token usage with day/week/month views" width="230"/>
+<img src="./.github/assets/yakuyomi-category-move.gif" alt="Drag a cover within its category to reorder, or past the boundary to move it to another" height="440" hspace="6"/>
+<img src="./.github/assets/yakuyomi-stats.gif" alt="Statistics: per-day reading activity and translation token usage with day/week/month views" height="440" hspace="6"/>
 <br>
-<sub><b>Per-day statistics</b> — reading activity (chapters/titles, backfilled from history) and translation usage (chapters/pages/tokens), with today / 7-day / 30-day / all views.</sub>
+<sub><b>Drag a cover to another category</b>, and see <b>per-day statistics</b> — reading activity + translation usage (today / 7-day / 30-day / all).</sub>
 </div>
 
 **Browse & catch-up**
@@ -100,15 +100,15 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 - **Compact navigation bar** — an icons-only, tighter bottom bar option.
 
 <div align="center">
-<img src="./.github/assets/yakuyomi-floating-search.gif" alt="Floating search: a one-handed search pill that collapses to a ball; long-press for a quick menu" width="230"/>
+<img src="./.github/assets/yakuyomi-floating-search.gif" alt="Floating search: a one-handed search pill that collapses to a ball; long-press for a quick menu" height="440" hspace="6"/>
 <br>
 <sub>A <b>one-handed floating search</b> that idles into a ball.</sub>
 </div>
 
 <div align="center">
-<img src="./.github/assets/yakuyomi-browse-filter.gif" alt="Global browse filter: filter a source's loaded list by in-library / started / fetched" width="230"/>
-<img src="./.github/assets/yakuyomi-browse-snapshot.gif" alt="Offline snapshot: save a source's loaded list to browse offline" width="230"/>
-<img src="./.github/assets/yakuyomi-browse-anchor.gif" alt="Per-source anchor: auto-load and scroll the Latest feed down to your last-processed point" width="230"/>
+<img src="./.github/assets/yakuyomi-browse-filter.gif" alt="Global browse filter: filter a source's loaded list by in-library / started / fetched" height="440" hspace="6"/>
+<img src="./.github/assets/yakuyomi-browse-snapshot.gif" alt="Offline snapshot: save a source's loaded list to browse offline" height="440" hspace="6"/>
+<img src="./.github/assets/yakuyomi-browse-anchor.gif" alt="Per-source anchor: auto-load and scroll the Latest feed down to your last-processed point" height="440" hspace="6"/>
 <br>
 <sub><b>Catch up on any source</b> — filter the loaded list by <i>in library / started reading / details fetched</i>, auto-load down to your anchor, and save it as an offline snapshot.</sub>
 </div>
@@ -116,8 +116,8 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 **Large screens & foldables**
 
 <div align="center">
-<img src="./.github/assets/yakuyomi-foldable.gif" alt="Foldable: single page when folded, double-page spread when unfolded" width="330"/>
-<img src="./.github/assets/yakuyomi-queue-tablet.gif" alt="Translation queue on a tablet: two-pane master-detail — manga list left, selected manga's chapters right" width="330"/>
+<img src="./.github/assets/yakuyomi-foldable.gif" alt="Foldable: single page when folded, double-page spread when unfolded" height="440" hspace="6"/>
+<img src="./.github/assets/yakuyomi-queue-tablet.gif" alt="Translation queue on a tablet: two-pane master-detail — manga list left, selected manga's chapters right" height="440" hspace="6"/>
 <br>
 <sub><b>Fold → single page; unfold → double-page spread.</b> And the <b>translation queue</b> turns into a two-pane master-detail layout on tablets / unfolded foldables. Both pages translated on-device.</sub>
 </div>

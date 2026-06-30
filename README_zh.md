@@ -34,9 +34,9 @@ Yakuyomi 是 [mihon](https://github.com/mihonapp/mihon) 的 fork，邊下載 / �
 - **品質旋鈕** — 三種去字模式（平塗 / 整頁 LaMa / 逐區 LaMa）、直 / 橫排版、約 20 個可調參數。無 telemetry。
 
 <div align="center">
-<img src="./.github/assets/yakuyomi-live-translate.gif" alt="即時翻譯：對話框邊讀邊從日文變成你的語言" width="220"/>
-<img src="./.github/assets/yakuyomi-rerender.gif" alt="重繪：就地換頁面的去字方法" width="220"/>
-<img src="./.github/assets/yakuyomi-queue-manage.gif" alt="翻譯佇列以漫畫分組：展開章節、搶翻、整本暫停" width="220"/>
+<img src="./.github/assets/yakuyomi-live-translate.gif" alt="即時翻譯：對話框邊讀邊從日文變成你的語言" height="440" hspace="6"/>
+<img src="./.github/assets/yakuyomi-rerender.gif" alt="重繪：就地換頁面的去字方法" height="440" hspace="6"/>
+<img src="./.github/assets/yakuyomi-queue-manage.gif" alt="翻譯佇列以漫畫分組：展開章節、搶翻、整本暫停" height="440" hspace="6"/>
 <br>
 <sub><b>邊讀邊翻</b>、<b>一鍵重繪</b>換去字方法，加上<b>以漫畫分組的翻譯佇列</b>——展開章節、搶翻、整本暫停。</sub>
 </div>
@@ -48,8 +48,8 @@ Yakuyomi 是 [mihon](https://github.com/mihonapp/mihon) 的 fork，邊下載 / �
 - **進度通知帶封面** — 背景翻譯的通知顯示該章完整封面，不只是個小圖示。
 
 <div align="center">
-<img src="./.github/assets/yakuyomi-reader-chapters.gif" alt="閱讀器內章節清單：不離開閱讀器就跳到別章" width="230"/>
-<img src="./.github/assets/yakuyomi-eink.gif" alt="墨水屏模式：灰階、白底主題、翻頁白閃刷新" width="230"/>
+<img src="./.github/assets/yakuyomi-reader-chapters.gif" alt="閱讀器內章節清單：不離開閱讀器就跳到別章" height="440" hspace="6"/>
+<img src="./.github/assets/yakuyomi-eink.gif" alt="墨水屏模式：灰階、白底主題、翻頁白閃刷新" height="440" hspace="6"/>
 <br>
 <sub><b>閱讀器內章節清單</b>與<b>一鍵墨水屏模式</b>。</sub>
 </div>
@@ -65,25 +65,25 @@ Yakuyomi 是 [mihon](https://github.com/mihonapp/mihon) 的 fork，邊下載 / �
 - **閱讀與翻譯統計** — 統計畫面新增每日閱讀活動（讀了幾章/幾本，可回填既有歷史）與翻譯用量（章/頁數與 LLM token），皆可切今天／近 7 天／近 30 天／全部。
 
 <div align="center">
-<img src="./.github/assets/yakuyomi-library-reorder.gif" alt="拖放排序書庫：長按封面拖曳設定手動順序" width="230"/>
-<img src="./.github/assets/yakuyomi-library-collapse.gif" alt="單清單可摺疊分類：所有分類在一個清單、黏性標頭點一下收合" width="230"/>
-<img src="./.github/assets/yakuyomi-cover-theme.gif" alt="依封面配色：詳情頁套用該本封面的色調" width="230"/>
+<img src="./.github/assets/yakuyomi-library-reorder.gif" alt="拖放排序書庫：長按封面拖曳設定手動順序" height="440" hspace="6"/>
+<img src="./.github/assets/yakuyomi-library-collapse.gif" alt="單清單可摺疊分類：所有分類在一個清單、黏性標頭點一下收合" height="440" hspace="6"/>
+<img src="./.github/assets/yakuyomi-cover-theme.gif" alt="依封面配色：詳情頁套用該本封面的色調" height="440" hspace="6"/>
 <br>
 <sub><b>把封面拖成自己的順序</b>、把整個書庫收成<b>一串可點開收合的分類</b>、並讓詳情頁套上<b>封面的色調</b>。</sub>
 </div>
 
 <div align="center">
-<img src="./.github/assets/yakuyomi-category-sort.gif" alt="各分類獨立排序：點分類標頭選自己的排序欄位與方向" width="200"/>
-<img src="./.github/assets/yakuyomi-category-manage.gif" alt="在單一清單模式下改名與重排分類" width="200"/>
-<img src="./.github/assets/yakuyomi-category-move.gif" alt="封面在分類內拖曳調序、拖出邊界即移到別的分類" width="200"/>
+<img src="./.github/assets/yakuyomi-category-sort.gif" alt="各分類獨立排序：點分類標頭選自己的排序欄位與方向" height="440" hspace="6"/>
+<img src="./.github/assets/yakuyomi-category-manage.gif" alt="在單一清單模式下改名與重排分類" height="440" hspace="6"/>
 <br>
-<sub><b>各分類獨立控制</b>（單一清單模式）— 每個分類<b>自己的排序</b>、<b>改名與重排</b>分類、<b>把封面拖到別的分類</b>。</sub>
+<sub><b>各分類獨立控制</b>（單一清單模式）— 每個分類<b>自己的排序</b>（點標頭），以及<b>改名與重排</b>分類。</sub>
 </div>
 
 <div align="center">
-<img src="./.github/assets/yakuyomi-stats.gif" alt="統計：每日閱讀活動與翻譯 token 用量，可切今天/週/月" width="230"/>
+<img src="./.github/assets/yakuyomi-category-move.gif" alt="封面在分類內拖曳調序、拖出邊界即移到別的分類" height="440" hspace="6"/>
+<img src="./.github/assets/yakuyomi-stats.gif" alt="統計：每日閱讀活動與翻譯 token 用量，可切今天/週/月" height="440" hspace="6"/>
 <br>
-<sub><b>每日統計</b> — 閱讀活動（讀章/讀本，回填既有歷史）與翻譯用量（章/頁/token），可切今天／近 7 天／近 30 天／全部。</sub>
+<sub><b>把封面拖到別的分類</b>，以及<b>每日統計</b> — 閱讀活動 + 翻譯用量（今天／近 7 天／近 30 天／全部）。</sub>
 </div>
 
 **瀏覽與追進度**
@@ -100,15 +100,15 @@ Yakuyomi 是 [mihon](https://github.com/mihonapp/mihon) 的 fork，邊下載 / �
 - **精簡導覽列** — 可選僅圖示、更緊緻的底部導覽列。
 
 <div align="center">
-<img src="./.github/assets/yakuyomi-floating-search.gif" alt="浮動搜尋：底部單手搜尋膠囊，閒置縮成球；長壓彈出快捷選單" width="230"/>
+<img src="./.github/assets/yakuyomi-floating-search.gif" alt="浮動搜尋：底部單手搜尋膠囊，閒置縮成球；長壓彈出快捷選單" height="440" hspace="6"/>
 <br>
 <sub><b>單手浮動搜尋</b>，閒置時縮成球。</sub>
 </div>
 
 <div align="center">
-<img src="./.github/assets/yakuyomi-browse-filter.gif" alt="全域瀏覽篩選：把來源清單依 已收藏／已開卷／已擷取 就地過濾" width="230"/>
-<img src="./.github/assets/yakuyomi-browse-snapshot.gif" alt="離線快照：把來源清單存起來離線瀏覽" width="230"/>
-<img src="./.github/assets/yakuyomi-browse-anchor.gif" alt="每來源錨點：自動載入並往下捲「最新」清單，直到抵達你上次處理到的位置" width="230"/>
+<img src="./.github/assets/yakuyomi-browse-filter.gif" alt="全域瀏覽篩選：把來源清單依 已收藏／已開卷／已擷取 就地過濾" height="440" hspace="6"/>
+<img src="./.github/assets/yakuyomi-browse-snapshot.gif" alt="離線快照：把來源清單存起來離線瀏覽" height="440" hspace="6"/>
+<img src="./.github/assets/yakuyomi-browse-anchor.gif" alt="每來源錨點：自動載入並往下捲「最新」清單，直到抵達你上次處理到的位置" height="440" hspace="6"/>
 <br>
 <sub><b>在任一來源追進度</b>——把載入的清單依<i>已收藏／已開卷／已擷取</i>就地過濾、自動載入往下捲到你標的錨點，並存成離線快照。</sub>
 </div>
@@ -116,8 +116,8 @@ Yakuyomi 是 [mihon](https://github.com/mihonapp/mihon) 的 fork，邊下載 / �
 **大螢幕與折疊機**
 
 <div align="center">
-<img src="./.github/assets/yakuyomi-foldable.gif" alt="折疊機：合起來單頁、打開來自動雙開" width="330"/>
-<img src="./.github/assets/yakuyomi-queue-tablet.gif" alt="平板上的翻譯佇列：主從雙欄（左漫畫清單、右選中本章節）" width="330"/>
+<img src="./.github/assets/yakuyomi-foldable.gif" alt="折疊機：合起來單頁、打開來自動雙開" height="440" hspace="6"/>
+<img src="./.github/assets/yakuyomi-queue-tablet.gif" alt="平板上的翻譯佇列：主從雙欄（左漫畫清單、右選中本章節）" height="440" hspace="6"/>
 <br>
 <sub><b>合起來 → 單頁；打開來 → 自動雙開。</b>翻譯佇列在平板／折疊機展開時也變成<b>主從雙欄</b>（左清單、右章節）。兩頁都在裝置上翻好。</sub>
 </div>
