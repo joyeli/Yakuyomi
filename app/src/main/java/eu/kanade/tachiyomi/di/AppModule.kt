@@ -21,6 +21,7 @@ import eu.kanade.tachiyomi.data.translation.ModelDownloadManager
 import eu.kanade.tachiyomi.data.translation.TranslationCache
 import eu.kanade.tachiyomi.data.translation.TranslationEngineService
 import eu.kanade.tachiyomi.data.translation.TranslationManager
+import eu.kanade.tachiyomi.data.translation.TranslationStatsStore
 import eu.kanade.tachiyomi.extension.ExtensionManager
 import eu.kanade.tachiyomi.network.JavaScriptEngine
 import eu.kanade.tachiyomi.network.NetworkHelper
@@ -133,6 +134,7 @@ class AppModule(val app: Application) : InjektModule {
         addSingletonFactory { ModelDownloadManager(app) }
         addSingletonFactory { TranslationCache(app) }
         addSingletonFactory { TranslationEngineService(app) }
+        addSingletonFactory { TranslationStatsStore(app) }
 
         addSingletonFactory { TrackerManager() }
         addSingletonFactory { DelayedTrackingStore(app) }

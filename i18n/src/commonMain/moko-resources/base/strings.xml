@@ -399,6 +399,8 @@
 
     <string name="default_category">Default category</string>
     <string name="default_category_summary">Always ask</string>
+    <string name="pref_remember_last_category_selection">Remember last categories</string>
+    <string name="pref_remember_last_category_selection_summary">When adding a new entry, pre-check the categories you picked last time.</string>
     <string name="categorized_display_settings">Per-category settings for sort</string>
     <string name="pref_library_update_categories_details">Entries in excluded categories will not be updated even if they are also in included categories.</string>
     <string name="all">All</string>
@@ -1019,6 +1021,18 @@
     <string name="label_tracked_titles">Tracked entries</string>
     <string name="label_mean_score">Mean score</string>
     <string name="label_used">Used</string>
+    <string name="label_reading_activity_section">Reading activity</string>
+    <string name="info_reading_stats_empty">No reading in this period yet.</string>
+    <string name="label_translation_section">Translation</string>
+    <string name="label_translated_chapters">Chapters</string>
+    <string name="label_translated_pages">Pages</string>
+    <string name="label_tokens_used">Tokens</string>
+    <string name="label_token_breakdown">Prompt %1$s · Completion %2$s</string>
+    <string name="label_stats_period_today">Today</string>
+    <string name="label_stats_period_week">7 days</string>
+    <string name="label_stats_period_month">30 days</string>
+    <string name="label_stats_period_all">All</string>
+    <string name="info_translation_stats_empty">No translations in this period yet.</string>
     <string name="not_applicable">N/A</string>
     <string name="day_short">%dd</string>
     <string name="hour_short">%dh</string>

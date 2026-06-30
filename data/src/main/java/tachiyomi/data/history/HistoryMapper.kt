@@ -1,11 +1,17 @@
 package tachiyomi.data.history
 
 import tachiyomi.domain.history.model.History
+import tachiyomi.domain.history.model.HistoryReadEntry
 import tachiyomi.domain.history.model.HistoryWithRelations
 import tachiyomi.domain.manga.model.MangaCover
 import java.util.Date
 
 object HistoryMapper {
+
+    // Yakuyomi：每日閱讀統計用的精簡投影（WHERE last_read > 0 保證 readAt 非空）。
+    fun mapReadingHistory(mangaId: Long, readAt: Date?): HistoryReadEntry =
+        HistoryReadEntry(mangaId = mangaId, readAt = readAt ?: Date(0))
+
     fun mapHistory(
         id: Long,
         chapterId: Long,

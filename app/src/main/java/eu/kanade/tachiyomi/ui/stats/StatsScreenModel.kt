@@ -9,9 +9,11 @@ import eu.kanade.presentation.more.stats.StatsScreenState
 import eu.kanade.presentation.more.stats.data.StatsData
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.track.TrackerManager
+import eu.kanade.tachiyomi.data.translation.TranslationStatsStore
 import eu.kanade.tachiyomi.source.model.SManga
 import kotlinx.coroutines.flow.update
 import tachiyomi.core.common.util.lang.launchIO
+import tachiyomi.domain.history.interactor.GetHistory
 import tachiyomi.domain.history.interactor.GetTotalReadDuration
 import tachiyomi.domain.library.model.LibraryManga
 import tachiyomi.domain.library.service.LibraryPreferences
@@ -24,14 +26,17 @@ import tachiyomi.domain.track.model.Track
 import tachiyomi.source.local.isLocal
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import java.time.ZoneId
 
 class StatsScreenModel(
     private val downloadManager: DownloadManager = Injekt.get(),
     private val getLibraryManga: GetLibraryManga = Injekt.get(),
     private val getTotalReadDuration: GetTotalReadDuration = Injekt.get(),
+    private val getHistory: GetHistory = Injekt.get(),
     private val getTracks: GetTracks = Injekt.get(),
     private val preferences: LibraryPreferences = Injekt.get(),
     private val trackerManager: TrackerManager = Injekt.get(),
+    private val translationStatsStore: TranslationStatsStore = Injekt.get(),
 ) : StateScreenModel<StatsScreenState>(StatsScreenState.Loading) {
 
     private val loggedInTrackers by lazy { trackerManager.loggedInTrackers() }
@@ -73,12 +78,41 @@ class StatsScreenModel(
                 trackerCount = loggedInTrackers.size,
             )
 
+            // Yakuyomi：每日閱讀（按 history.last_read 的裝置本地日期分桶）。chapters＝當日 history 筆數、titles＝不重複作品數。
+            val zone = ZoneId.systemDefault()
+            val readingStatData = StatsData.Reading(
+                days = getHistory.readingEntries()
+                    .groupBy { it.readAt.toInstant().atZone(zone).toLocalDate() }
+                    .entries
+                    .sortedBy { it.key }
+                    .map { (date, entries) ->
+                        StatsData.Reading.Day(
+                            date = date,
+                            chapters = entries.size,
+                            mangaIds = entries.map { it.mangaId }.distinct(),
+                        )
+                    },
+            )
+
+            val translationDays = translationStatsStore.allDays()
+            val translationStatData = StatsData.Translation(
+                translatedChapters = translationDays.sumOf { it.chapters },
+                translatedPages = translationDays.sumOf { it.pages },
+                promptTokens = translationDays.sumOf { it.promptTokens },
+                completionTokens = translationDays.sumOf { it.completionTokens },
+                days = translationDays.map {
+                    StatsData.Translation.Day(it.date, it.chapters, it.pages, it.promptTokens, it.completionTokens)
+                },
+            )
+
             mutableState.update {
                 StatsScreenState.Success(
                     overview = overviewStatData,
                     titles = titlesStatData,
                     chapters = chaptersStatData,
                     trackers = trackersStatData,
+                    reading = readingStatData,
+                    translation = translationStatData,
                 )
             }
         }

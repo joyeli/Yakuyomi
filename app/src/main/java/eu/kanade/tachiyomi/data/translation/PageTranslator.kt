@@ -51,6 +51,9 @@ class PageTranslator(private val context: Context) {
      */
     private val engineService: TranslationEngineService = Injekt.get()
 
+    /** 翻譯統計（每日章/頁/token 計數）。[translateChapter] 章翻完時 record。 */
+    private val statsStore: TranslationStatsStore = Injekt.get()
+
     /**
      * 保護 manifest 的「讀-改-寫」（[persistLivePage] 可能多頁併發落地）。
      * [translateChapter] 是單消費者（drainMutex 序列化）故不經此鎖；即時逐頁翻才需要它（多個 loadPage 併發持久化同章）。
@@ -121,6 +124,9 @@ class PageTranslator(private val context: Context) {
         var processed = total - pending.size // resume：已完成頁先計入進度
         onProgress(processed, total)
         var translated = 0
+        // 統計：本輪 LLM token 用量累加（每頁 PageStats 帶 prompt/completion；含全數過濾的 Skipped 也耗了 token）。
+        var promptTokens = 0
+        var completionTokens = 0
         // 逐頁錯誤累積：某頁 Failed → 跳過、續翻下一頁（不再因連續失敗中止整章），失敗的頁名+原因寫進
         // 該話資料夾的 [ERRORS_FILE]（同步到雲端可直接查；未標記的頁留待重試＝整章 isChapterTranslated=false 變紅）。
         val errors = StringBuilder()
@@ -135,6 +141,8 @@ class PageTranslator(private val context: Context) {
                     ?.use { BitmapFactory.decodeStream(it) } ?: continue
                 when (val r = engineService.translatePage(bmp, inpaintMethodRaw)) {
                     is PageResult.Translated -> {
+                        promptTokens += r.stats.promptTokens
+                        completionTokens += r.stats.completionTokens
                         writeBack(img, r.page)
                         // 保留重繪素材（best-effort、不擋翻譯）：bmp 為剛解碼的原圖（引擎不會 mutate 輸入、回的是新 bitmap）。
                         if (keepMaterials && r.analysis != null) {
@@ -153,6 +161,8 @@ class PageTranslator(private val context: Context) {
                         onPageDone(name)
                     }
                     is PageResult.Skipped -> {
+                        promptTokens += r.stats.promptTokens // 全數過濾的略過仍耗了 token（其餘 Skipped＝0）
+                        completionTokens += r.stats.completionTokens
                         logcat { "翻譯略過 $name：${r.reason}" }
                         done.add(name)
                         writeManifest(chapterDir, done) // 略過＝沒字可翻、算處理過、不重試
@@ -176,6 +186,12 @@ class PageTranslator(private val context: Context) {
             overwriteBytes(chapterDir, ERRORS_FILE, errors.toString().toByteArray())
         } else {
             runCatching { chapterDir.findFile(ERRORS_FILE)?.delete() }
+        }
+        // 統計：記當日新翻頁數 + token（resume 已跳過 done 頁 ⇒ translated 為本輪新翻、不重複計）。
+        // chapters 只在本輪把整章補成「全翻完」時 +1（避免部分翻/重試各算一次）。
+        if (translated > 0 || promptTokens > 0 || completionTokens > 0) {
+            val chapterCount = if (translated > 0 && isChapterTranslated(chapterDir)) 1 else 0
+            statsStore.record(chapterCount, translated, promptTokens, completionTokens)
         }
         return translated
     }

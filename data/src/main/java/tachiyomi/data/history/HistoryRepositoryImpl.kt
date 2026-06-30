@@ -9,6 +9,7 @@ import tachiyomi.core.common.util.system.logcat
 import tachiyomi.data.Database
 import tachiyomi.data.subscribeToList
 import tachiyomi.domain.history.model.History
+import tachiyomi.domain.history.model.HistoryReadEntry
 import tachiyomi.domain.history.model.HistoryUpdate
 import tachiyomi.domain.history.model.HistoryWithRelations
 import tachiyomi.domain.history.repository.HistoryRepository
@@ -21,6 +22,12 @@ class HistoryRepositoryImpl(
         return database.historyViewQueries
             .history(query, HistoryMapper::mapHistoryWithRelations)
             .subscribeToList()
+    }
+
+    override suspend fun getReadingHistory(): List<HistoryReadEntry> {
+        return database.historyQueries
+            .getReadingHistory(HistoryMapper::mapReadingHistory)
+            .awaitAsList()
     }
 
     override suspend fun getLastHistory(): HistoryWithRelations? {
