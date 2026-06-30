@@ -72,6 +72,20 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 <sub><b>Drag covers into your own order</b>, collapse the whole library into <b>one list of tap-to-collapse categories</b>, and tint the detail screen to each <b>cover's colors</b>.</sub>
 </div>
 
+<div align="center">
+<img src="./.github/assets/yakuyomi-category-sort.gif" alt="Per-category sort: tap a category header to choose its own sort field and direction" width="200"/>
+<img src="./.github/assets/yakuyomi-category-manage.gif" alt="Rename and reorder categories from the single-list view" width="200"/>
+<img src="./.github/assets/yakuyomi-category-move.gif" alt="Drag a cover within its category to reorder, or past the boundary to move it to another" width="200"/>
+<br>
+<sub><b>Per-category controls</b> in the single-list view — give each category <b>its own sort</b>, <b>rename and reorder</b> categories, and <b>drag a cover to another category</b>.</sub>
+</div>
+
+<div align="center">
+<img src="./.github/assets/yakuyomi-stats.gif" alt="Statistics: per-day reading activity and translation token usage with day/week/month views" width="230"/>
+<br>
+<sub><b>Per-day statistics</b> — reading activity (chapters/titles, backfilled from history) and translation usage (chapters/pages/tokens), with today / 7-day / 30-day / all views.</sub>
+</div>
+
 **Browse & catch-up**
 - **Global browse filter** — filter any source's results by *in your library* / *started reading*, applied instantly to the loaded list without re-fetching.
 - **Per-source anchor** — mark a title as your "last processed point"; a one-tap action keeps loading and auto-scrolls the Latest feed until it reaches the anchor, so you never lose your place. The anchor stays visible even when the global filter would hide it, dimmed with a grey flag so you can tell it apart.

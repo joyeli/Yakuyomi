@@ -72,6 +72,20 @@ Yakuyomi 是 [mihon](https://github.com/mihonapp/mihon) 的 fork，邊下載 / �
 <sub><b>把封面拖成自己的順序</b>、把整個書庫收成<b>一串可點開收合的分類</b>、並讓詳情頁套上<b>封面的色調</b>。</sub>
 </div>
 
+<div align="center">
+<img src="./.github/assets/yakuyomi-category-sort.gif" alt="各分類獨立排序：點分類標頭選自己的排序欄位與方向" width="200"/>
+<img src="./.github/assets/yakuyomi-category-manage.gif" alt="在單一清單模式下改名與重排分類" width="200"/>
+<img src="./.github/assets/yakuyomi-category-move.gif" alt="封面在分類內拖曳調序、拖出邊界即移到別的分類" width="200"/>
+<br>
+<sub><b>各分類獨立控制</b>（單一清單模式）— 每個分類<b>自己的排序</b>、<b>改名與重排</b>分類、<b>把封面拖到別的分類</b>。</sub>
+</div>
+
+<div align="center">
+<img src="./.github/assets/yakuyomi-stats.gif" alt="統計：每日閱讀活動與翻譯 token 用量，可切今天/週/月" width="230"/>
+<br>
+<sub><b>每日統計</b> — 閱讀活動（讀章/讀本，回填既有歷史）與翻譯用量（章/頁/token），可切今天／近 7 天／近 30 天／全部。</sub>
+</div>
+
 **瀏覽與追進度**
 - **全域瀏覽篩選** — 把任一來源的結果依「已收藏 / 已開卷」就地過濾，不重抓、即時生效。
 - **每來源錨點** — 把一本書標成「上次處理到這」；一鍵持續載入並自動往下捲「最新」清單直到抵達錨點，不再迷失進度。即使全域篩選會把錨點濾掉，它仍保留顯示、以變暗的灰色旗標標出來。
