@@ -14,6 +14,7 @@ import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.source.repository.SourcePagingSource
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import kotlin.random.Random
 
 class SourceSearchPagingSource(
     source: Source,
@@ -51,12 +52,14 @@ abstract class BaseSourcePagingSource(
     override suspend fun load(params: LoadParams<Long>): LoadResult<Long, Manga> {
         val page = params.key ?: 1
 
-        // Yakuyomi：節流連續翻頁。客戶端全域篩選把整頁濾到剩沒幾本時，Paging 會為了填滿畫面狂翻下一頁、
-        // 對來源連續猛打 request（有被 ban 風險）。確保兩次載入之間至少間隔設定秒數（[PREF_LOAD_INTERVAL]，預設 1 秒）——
-        // 正常捲動（兩頁載入本就間隔遠大於此值）幾乎不受影響，只擋住「濾到很稀疏→連翻爆衝」這種情況。
+        // Yakuyomi：節流連續翻頁 + 隨機抖動。所有翻下一頁（正常捲動／全域篩選濾稀疏→Paging 為填滿畫面狂翻／
+        // 自動載入到錨點）都走這條 load()，對來源連續猛打 request＝ban 風險。除了基礎最小間隔（[PREF_LOAD_INTERVAL]，
+        // 預設 1 秒）外，再疊一段隨機抖動（[JITTER_MIN_MS]+rand[JITTER_SPAN_MS]）讓間隔不規律——固定心跳本身也是
+        // ban 訊號。正常捲動（兩頁載入間隔本就遠大於此值）幾乎不受影響，只擋住「濾稀疏／自動載入到錨點」的爆衝。
         if (page > 1) {
-            val intervalMs = preferenceStore.getInt(PREF_LOAD_INTERVAL, 1).get().coerceAtLeast(0) * 1000L
-            val wait = intervalMs - (SystemClock.elapsedRealtime() - lastLoadAt)
+            val baseMs = preferenceStore.getInt(PREF_LOAD_INTERVAL, 1).get().coerceAtLeast(0) * 1000L
+            val targetMs = baseMs + JITTER_MIN_MS + Random.nextLong(JITTER_SPAN_MS)
+            val wait = targetMs - (SystemClock.elapsedRealtime() - lastLoadAt)
             if (wait > 0) delay(wait)
         }
         lastLoadAt = SystemClock.elapsedRealtime()
@@ -93,6 +96,11 @@ abstract class BaseSourcePagingSource(
     companion object {
         // 翻頁最小間隔（秒）偏好 key。與 app 端 SourcePreferences.browseLoadInterval 同 key（此處在 data 層、直接讀 store 免跨層）。
         const val PREF_LOAD_INTERVAL = "browse_load_interval"
+
+        // 翻頁抖動：基礎間隔之上再疊 [JITTER_MIN_MS, JITTER_MIN_MS+JITTER_SPAN_MS) 毫秒的隨機延遲（0.25–0.85s），
+        // 即使基礎間隔設 0 也保有抖動，避免固定心跳被偵測。
+        private const val JITTER_MIN_MS = 250L
+        private const val JITTER_SPAN_MS = 600L
     }
 }
 
