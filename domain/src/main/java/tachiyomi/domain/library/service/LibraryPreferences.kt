@@ -158,7 +158,8 @@ class LibraryPreferences(
 
     val categoryNumberOfItems: Preference<Boolean> = preferenceStore.getBoolean("display_number_of_items", false)
 
-    val categorizedDisplaySettings: Preference<Boolean> = preferenceStore.getBoolean("categorized_display", false)
+    // Yakuyomi：每分類獨立的排序/顯示設定，預設開（單清單模式的每分類排序標頭靠此）。
+    val categorizedDisplaySettings: Preference<Boolean> = preferenceStore.getBoolean("categorized_display", true)
 
     // Yakuyomi：把所有分類顯示為單一可摺疊清單（取代頁籤/分頁），預設關＝維持原頁籤行為。
     val singleListCollapsibleCategories: Preference<Boolean> = preferenceStore.getBoolean(

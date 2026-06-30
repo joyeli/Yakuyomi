@@ -22,6 +22,8 @@ import kotlinx.coroutines.launch
 import tachiyomi.domain.category.model.Category
 import tachiyomi.domain.library.model.LibraryDisplayMode
 import tachiyomi.domain.library.model.LibraryManga
+import tachiyomi.domain.library.model.LibrarySort
+import tachiyomi.domain.manga.model.Manga
 import tachiyomi.presentation.core.components.material.PullRefresh
 import kotlin.time.Duration.Companion.seconds
 
@@ -52,6 +54,9 @@ fun LibraryContent(
     singleListMode: Boolean,
     collapsedCategoryIds: Set<Long>,
     onToggleCategoryCollapsed: (Long) -> Unit,
+    onMoveMangaToCategory: (Manga, Long, Long) -> Unit,
+    onSetCategorySort: (Category, LibrarySort.Type, LibrarySort.Direction) -> Unit,
+    onRenameCategory: (Category, String) -> Unit,
 ) {
     Column(
         modifier = Modifier.padding(
@@ -124,6 +129,11 @@ fun LibraryContent(
                     onLongClickManga = onToggleRangeSelection,
                     onClickContinueReading = onContinueReadingClicked,
                     onGlobalSearchClicked = onGlobalSearchClicked,
+                    getIsManualSort = getIsManualSort,
+                    onMoveManga = onMoveManga,
+                    onMoveMangaToCategory = onMoveMangaToCategory,
+                    onSetCategorySort = onSetCategorySort,
+                    onRenameCategory = onRenameCategory,
                 )
             } else {
                 LibraryPager(

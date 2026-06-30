@@ -316,6 +316,9 @@ data object LibraryTab : Tab {
                         singleListMode = state.singleListMode,
                         collapsedCategoryIds = state.collapsedCategoryIds,
                         onToggleCategoryCollapsed = screenModel::toggleCategoryCollapsed,
+                        onMoveMangaToCategory = screenModel::moveMangaToCategory,
+                        onSetCategorySort = screenModel::setCategorySort,
+                        onRenameCategory = screenModel::renameCategory,
                     )
                 }
             }

@@ -46,7 +46,9 @@ import tachiyomi.core.common.util.lang.compareToWithCollator
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.lang.launchNonCancellable
 import tachiyomi.domain.category.interactor.GetCategories
+import tachiyomi.domain.category.interactor.RenameCategory
 import tachiyomi.domain.category.interactor.SetMangaCategories
+import tachiyomi.domain.category.interactor.SetSortModeForCategory
 import tachiyomi.domain.category.model.Category
 import tachiyomi.domain.chapter.interactor.GetBookmarkedChaptersByMangaId
 import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
@@ -80,6 +82,8 @@ class LibraryScreenModel(
     private val setReadStatus: SetReadStatus = Injekt.get(),
     private val updateManga: UpdateManga = Injekt.get(),
     private val setMangaCategories: SetMangaCategories = Injekt.get(),
+    private val setSortModeForCategory: SetSortModeForCategory = Injekt.get(),
+    private val renameCategoryInteractor: RenameCategory = Injekt.get(),
     private val preferences: BasePreferences = Injekt.get(),
     private val libraryPreferences: LibraryPreferences = Injekt.get(),
     private val coverCache: CoverCache = Injekt.get(),
@@ -816,12 +820,42 @@ class LibraryScreenModel(
         libraryPreferences.manualOrderForCategory(categoryId).set(orderedIds)
     }
 
+    /** Yakuyomi：設某分類的排序（單清單模式標頭用）。categorizedDisplaySettings 開＝寫該分類、關＝寫全域。 */
+    fun setCategorySort(category: Category, type: LibrarySort.Type, direction: LibrarySort.Direction) {
+        screenModelScope.launchIO {
+            setSortModeForCategory.await(category, type, direction)
+        }
+    }
+
+    /** Yakuyomi：分類改名（單清單模式標頭長壓）。 */
+    fun renameCategory(category: Category, name: String) {
+        screenModelScope.launchIO {
+            renameCategoryInteractor.await(category, name)
+        }
+    }
+
     /** Yakuyomi：單一清單模式下摺疊/展開某分類（持久化跨重啟）。 */
     fun toggleCategoryCollapsed(categoryId: Long) {
         val key = categoryId.toString()
         val current = libraryPreferences.collapsedCategoryIds.get()
         libraryPreferences.collapsedCategoryIds.set(
             if (key in current) current - key else current + key,
+        )
+    }
+
+    /**
+     * Yakuyomi：單一清單模式下把漫畫從一個分類拖到另一個分類＝改分類（move 語意：移除來源、加入目標）。
+     * 系統「預設」分類非真實成員（空分類集才顯示在預設）→ 拖入預設＝只移除來源、拖出預設＝只加入目標。
+     */
+    fun moveMangaToCategory(manga: Manga, fromCategoryId: Long, toCategoryId: Long) {
+        if (fromCategoryId == toCategoryId) return
+        val cats = state.value.displayedCategories
+        val toSystem = cats.find { it.id == toCategoryId }?.isSystemCategory ?: false
+        val fromSystem = cats.find { it.id == fromCategoryId }?.isSystemCategory ?: false
+        setMangaCategories(
+            mangaList = listOf(manga),
+            addCategories = if (toSystem) emptyList() else listOf(toCategoryId),
+            removeCategories = if (fromSystem) emptyList() else listOf(fromCategoryId),
         )
     }
 
