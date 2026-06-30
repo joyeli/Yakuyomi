@@ -26,6 +26,10 @@
     <string name="label_download_queue">Download queue</string>
     <string name="label_translation_queue">Translation queue</string>
     <string name="label_translation">Translation</string>
+    <string name="translation_retap_paused_unloaded">Paused the queue and unloaded the engine</string>
+    <string name="translation_retap_unloaded">Unloaded the translation engine</string>
+    <string name="translation_retap_master_off">Translation turned off</string>
+    <string name="translation_retap_master_on">Translation on — loading the engine</string>
     <string name="translation_status_queued">Queued</string>
     <string name="translation_status_translating">Translating</string>
     <string name="translation_status_error">Failed</string>

@@ -1046,6 +1046,10 @@
     <string name="quickstart_action_done">了解</string>
     <string name="label_translation_queue">翻譯佇列</string>
     <string name="label_translation">翻譯</string>
+    <string name="translation_retap_paused_unloaded">已暫停佇列並卸載翻譯引擎</string>
+    <string name="translation_retap_unloaded">已卸載翻譯引擎</string>
+    <string name="translation_retap_master_off">已關閉翻譯總開關</string>
+    <string name="translation_retap_master_on">已開啟翻譯，引擎載入中</string>
     <string name="action_filter_translated">已翻譯</string>
     <string name="action_global_filter">全域篩選（所有來源）</string>
     <string name="action_open_entry">開啟</string>

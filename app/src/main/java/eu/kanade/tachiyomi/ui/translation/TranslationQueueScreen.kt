@@ -58,12 +58,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
+import cafe.adriel.voyager.navigator.Navigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import cafe.adriel.voyager.navigator.tab.TabOptions
 import eu.kanade.presentation.components.AppBar
@@ -76,8 +78,12 @@ import eu.kanade.tachiyomi.data.translation.TranslationEngineService
 import eu.kanade.tachiyomi.data.translation.TranslationManager
 import eu.kanade.tachiyomi.data.translation.model.TranslationItem
 import eu.kanade.tachiyomi.ui.manga.MangaScreen
+import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.receiveAsFlow
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import tachiyomi.domain.manga.model.Manga
@@ -108,6 +114,9 @@ object TranslationQueueScreen : Screen() {
  */
 data object TranslationTab : Tab {
 
+    // Yakuyomi：再點一次「翻譯」分頁 → 三態循環（見 TranslationQueueScreenModel.cycleEngineState）。
+    private val reselectChannel = Channel<Unit>()
+
     override val options: TabOptions
         @Composable
         get() = TabOptions(
@@ -117,9 +126,19 @@ data object TranslationTab : Tab {
             icon = rememberVectorPainter(Icons.Outlined.Translate),
         )
 
+    override suspend fun onReselect(navigator: Navigator) {
+        reselectChannel.send(Unit)
+    }
+
     @Composable
     override fun Content() {
         val screenModel = rememberScreenModel { TranslationQueueScreenModel() }
+        val context = LocalContext.current
+        LaunchedEffect(Unit) {
+            reselectChannel.receiveAsFlow().collectLatest {
+                context.toast(screenModel.cycleEngineState())
+            }
+        }
         TranslationQueueContent(screenModel, navigateUp = null)
     }
 }
@@ -683,10 +702,41 @@ private fun statusLine(item: TranslationItem): String {
 
 private class TranslationQueueScreenModel(
     private val translationManager: TranslationManager = Injekt.get(),
+    private val engineService: TranslationEngineService = Injekt.get(),
+    private val translationPreferences: TranslationPreferences = Injekt.get(),
 ) : ScreenModel {
     val queueState: StateFlow<List<TranslationItem>> = translationManager.queueState
     val isPaused: StateFlow<Boolean> = translationManager.isPaused
     val pausedMangas: StateFlow<Set<Long>> = translationManager.pausedMangas
+
+    /**
+     * Yakuyomi：「翻譯」分頁再點一次的三態循環（總開關 × 引擎是否載入），一直切換循環：
+     *  A 總開關開 + 引擎已載入 → （有任務先暫停）卸載引擎（釋放 ~450MB）。
+     *  B 總開關開 + 引擎未載入 → 關總開關。
+     *  C 總開關關 → 開總開關 + 載入引擎。
+     * 回傳要 toast 的提示字串。
+     */
+    fun cycleEngineState(): dev.icerock.moko.resources.StringResource {
+        val master = translationPreferences.translationMasterEnabled.get()
+        val warm = engineService.warm.value
+        return when {
+            master && warm -> {
+                val hadTasks = translationManager.queueState.value.isNotEmpty()
+                if (hadTasks) translationManager.pause()
+                engineService.shutdownAsync()
+                if (hadTasks) MR.strings.translation_retap_paused_unloaded else MR.strings.translation_retap_unloaded
+            }
+            master -> {
+                translationPreferences.translationMasterEnabled.set(false)
+                MR.strings.translation_retap_master_off
+            }
+            else -> {
+                translationPreferences.translationMasterEnabled.set(true)
+                engineService.warmUpAsync()
+                MR.strings.translation_retap_master_on
+            }
+        }
+    }
 
     fun clearQueue() = translationManager.clearQueue()
     fun pause() = translationManager.pause()
