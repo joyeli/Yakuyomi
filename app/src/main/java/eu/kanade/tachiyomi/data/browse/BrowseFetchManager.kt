@@ -80,8 +80,9 @@ class BrowseFetchManager(private val context: Context) {
                     }.getOrDefault(false)
                     if (!ok) failed.add(manga.id)
                     _state.update { it.copy(done = i + 1) }
-                    // 節流防 ban：每筆 0.4–0.75s + 抖動。最後一筆不等。
-                    if (i < mangaList.lastIndex && isActive) delay(400L + Random.nextLong(350L))
+                    // 節流防 ban：每本 2.0–4.0s（base 2s + 抖動 0–2s）。背景跑、不阻前景 ⇒ 取安全節奏（每本一個
+                    // 詳情+章節請求、長清單可達數百，是最該放慢的路徑）。最後一筆不等。
+                    if (i < mangaList.lastIndex && isActive) delay(2000L + Random.nextLong(2000L))
                 }
             } finally {
                 val cancelled = !isActive

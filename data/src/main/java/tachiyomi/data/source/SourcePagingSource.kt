@@ -97,10 +97,11 @@ abstract class BaseSourcePagingSource(
         // 翻頁最小間隔（秒）偏好 key。與 app 端 SourcePreferences.browseLoadInterval 同 key（此處在 data 層、直接讀 store 免跨層）。
         const val PREF_LOAD_INTERVAL = "browse_load_interval"
 
-        // 翻頁抖動：基礎間隔之上再疊 [JITTER_MIN_MS, JITTER_MIN_MS+JITTER_SPAN_MS) 毫秒的隨機延遲（0.25–0.85s），
-        // 即使基礎間隔設 0 也保有抖動，避免固定心跳被偵測。
-        private const val JITTER_MIN_MS = 250L
-        private const val JITTER_SPAN_MS = 600L
+        // 翻頁抖動：基礎間隔之上再疊 [JITTER_MIN_MS, JITTER_MIN_MS+JITTER_SPAN_MS) 毫秒的隨機延遲（0.5–2.0s），
+        // 即使基礎間隔設 0 也保有抖動，避免固定心跳被偵測。預設 base(1s)+0.5 = 下限 1.5s、抖動到 3.0s（「平衡」安全檔）。
+        // 寬抖動（接近 base ±100%）比窄抖動更不像機器人；安全節奏約 0.25–0.5 req/s。
+        private const val JITTER_MIN_MS = 500L
+        private const val JITTER_SPAN_MS = 1500L
     }
 }
 
