@@ -28,6 +28,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.PersonOutline
 import androidx.compose.material.icons.filled.Warning
@@ -183,8 +184,9 @@ fun MangaActionRow(
     onTrackingClicked: () -> Unit,
     onEditIntervalClicked: (() -> Unit)?,
     onEditCategory: (() -> Unit)?,
-    // Yakuyomi：設此本為其來源的探索錨點（null＝不顯示，如本地源）。
+    // Yakuyomi：設此本為其來源的探索錨點（null＝不顯示，如本地源）。isAnchor＝本書已是該來源錨點（鈕變實心/主色）。
     onSetAnchorClicked: (() -> Unit)? = null,
+    isAnchor: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val defaultActionButtonColor = MaterialTheme.colorScheme.onSurface.copy(alpha = DISABLED_ALPHA)
@@ -227,9 +229,13 @@ fun MangaActionRow(
         )
         if (onSetAnchorClicked != null) {
             MangaActionButton(
-                title = stringResource(MR.strings.action_set_anchor),
-                icon = Icons.Outlined.Flag,
-                color = defaultActionButtonColor,
+                title = if (isAnchor) {
+                    stringResource(MR.strings.action_is_anchor)
+                } else {
+                    stringResource(MR.strings.action_set_anchor)
+                },
+                icon = if (isAnchor) Icons.Filled.Flag else Icons.Outlined.Flag,
+                color = if (isAnchor) MaterialTheme.colorScheme.primary else defaultActionButtonColor,
                 onClick = onSetAnchorClicked,
             )
         }

@@ -439,6 +439,7 @@ private fun MangaScreenSmallImpl(
                             onTrackingClicked = onTrackingClicked,
                             onEditIntervalClicked = onEditIntervalClicked,
                             onSetAnchorClicked = onSetAnchorClicked,
+                            isAnchor = state.isAnchor,
                             onEditCategory = onEditCategoryClicked,
                         )
                     }
@@ -677,6 +678,7 @@ fun MangaScreenLargeImpl(
                             onTrackingClicked = onTrackingClicked,
                             onEditIntervalClicked = onEditIntervalClicked,
                             onSetAnchorClicked = onSetAnchorClicked,
+                            isAnchor = state.isAnchor,
                             onEditCategory = onEditCategoryClicked,
                         )
                         ExpandableMangaDescription(

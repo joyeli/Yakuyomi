@@ -44,6 +44,7 @@
     <string name="action_global_filter">Filter (all sources)</string>
     <string name="action_open_entry">Open</string>
     <string name="action_set_anchor">Set anchor</string>
+    <string name="action_is_anchor">Anchor</string>
     <string name="action_clear_anchor">Clear anchor</string>
     <string name="anchor_set_confirm">Mark this entry as the browse anchor for %1$s? You\'ll see it flagged while browsing this source\'s Latest list.</string>
     <string name="anchor_badge">Anchor</string>

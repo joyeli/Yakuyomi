@@ -1054,6 +1054,7 @@
     <string name="action_global_filter">全域篩選（所有來源）</string>
     <string name="action_open_entry">開啟</string>
     <string name="action_set_anchor">設為錨點</string>
+    <string name="action_is_anchor">已是錨點</string>
     <string name="action_clear_anchor">清除錨點</string>
     <string name="anchor_set_confirm">把這本設成「%1$s」的探索錨點？瀏覽這個來源的「最新」清單時會看到它被標上旗標。</string>
     <string name="anchor_badge">錨點</string>

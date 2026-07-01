@@ -208,6 +208,17 @@ class MangaScreenModel(
         observeDownloads()
         observeTranslations()
 
+        // Yakuyomi：觀察本源錨點 pref → 更新 State.isAnchor，讓詳情頁「設為錨點」動作鈕在設/取消時即時反映。
+        screenModelScope.launchIO {
+            val manga = getMangaAndChapters.awaitManga(mangaId)
+            sourcePreferences.browseAnchor(manga.source).changes()
+                .distinctUntilChanged()
+                .flowWithLifecycle(lifecycle)
+                .collectLatest { anchorUrl ->
+                    updateSuccessState { it.copy(isAnchor = anchorUrl.isNotEmpty() && anchorUrl == manga.url) }
+                }
+        }
+
         screenModelScope.launchIO {
             val manga = getMangaAndChapters.awaitManga(mangaId)
             val chapters = getMangaAndChapters.awaitChapters(mangaId, applyScanlatorFilter = true)
@@ -235,6 +246,8 @@ class MangaScreenModel(
                     dialog = null,
                     hideMissingChapters = libraryPreferences.hideMissingChapters.get(),
                     pullToRefresh = libraryPreferences.swipeToRefresh.get(),
+                    isAnchor = sourcePreferences.browseAnchor(manga.source).get()
+                        .let { it.isNotEmpty() && it == manga.url },
                 )
             }
 
@@ -1258,6 +1271,8 @@ class MangaScreenModel(
             val hideMissingChapters: Boolean = false,
             // Yakuyomi：下拉更新開關（預設關，與書庫共用 LibraryPreferences.swipeToRefresh）。
             val pullToRefresh: Boolean = false,
+            // Yakuyomi：本書是否為其來源的探索錨點（詳情頁「設為錨點」動作鈕據此反映實心/主色狀態）。
+            val isAnchor: Boolean = false,
         ) : State {
             val processedChapters by lazy {
                 chapters.applyFilters(manga).toList()
