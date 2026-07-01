@@ -70,6 +70,23 @@ class SourcePreferences(
     // 探索「快照」：每 source 一份離線清單（JSON：時間戳 + 書本 url 順序）。空＝無快照。詳見 BrowseSnapshotStore 用法。
     fun browseSnapshot(sourceId: Long): Preference<String> = preferenceStore.getString("browse_snapshot_$sourceId", "")
 
+    // Yakuyomi：自動載入到錨點的「續傳頁碼」（每 source）。>0＝上次抓到第幾頁、還沒到錨點，可續；0＝無/已完成（到錨點或到底）。
+    fun browseAnchorResumePage(sourceId: Long): Preference<Int> =
+        preferenceStore.getInt("browse_anchor_resume_page_$sourceId", 0)
+
+    // Yakuyomi：目前正在背景載入到錨點的來源（單一全域槽）。>0＝該 sourceId 正在跑；-1＝無。跨行程持久 → 殺行程/重開機仍知道要續。
+    val browseAnchorCrawlActive: Preference<Long> = preferenceStore.getLong("browse_anchor_crawl_active", -1L)
+
+    // Yakuyomi：背景載入連續抓不到任何頁（多半＝被 ban）的次數。達上限就停下、通知可續。任一批抓到就歸零。
+    val browseAnchorFailStreak: Preference<Int> = preferenceStore.getInt("browse_anchor_fail_streak", 0)
+
+    // Yakuyomi：背景載入每批頁數（越小越不易 ban）。預設 5（實測某來源約 24 頁 burst 就 ban，取遠低值）。
+    val browseAnchorChunkPages: Preference<Int> = preferenceStore.getInt("browse_anchor_chunk_pages", 5)
+
+    // Yakuyomi：背景載入批次間隔（分鐘）。批與批之間歇這麼久，讓來源速率視窗重置。預設 1（實測某來源 3000+ 本跑通）。
+    // 加速靠縮短間隔（每批維持小頁數＝每次 burst 最小、最安全），不靠加大每批頁數。
+    val browseAnchorIntervalMinutes: Preference<Int> = preferenceStore.getInt("browse_anchor_interval_minutes", 1)
+
     val extensionRepos: Preference<Set<String>> = preferenceStore.getStringSet("extension_repos", emptySet())
 
     val extensionUpdatesCount: Preference<Int> = preferenceStore.getInt("ext_updates_count", 0)

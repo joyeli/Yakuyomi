@@ -6,7 +6,9 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.core.net.toUri
+import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.tachiyomi.data.backup.restore.BackupRestoreJob
+import eu.kanade.tachiyomi.data.browse.BrowseAnchorLoadManager
 import eu.kanade.tachiyomi.data.browse.BrowseFetchManager
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.library.LibraryUpdateJob
@@ -75,6 +77,17 @@ class NotificationReceiver : BroadcastReceiver() {
             ACTION_CANCEL_LIBRARY_UPDATE -> cancelLibraryUpdate(context)
             // Yakuyomi：通知列「取消」探索背景擷取。
             ACTION_CANCEL_BROWSE_FETCH -> Injekt.get<BrowseFetchManager>().cancel()
+            // Yakuyomi：通知列「取消」探索自動載入到錨點。
+            ACTION_CANCEL_ANCHOR_LOAD -> Injekt.get<BrowseAnchorLoadManager>().cancel()
+            // Yakuyomi：通知列「繼續」探索自動載入到錨點（帶 sourceId；anchorUrl 從 pref 取）。
+            ACTION_CONTINUE_ANCHOR_LOAD -> {
+                val sourceId = intent.getLongExtra(EXTRA_SOURCE_ID, -1L)
+                if (sourceId != -1L) {
+                    val anchor = Injekt.get<SourcePreferences>().browseAnchor(sourceId).get()
+                    Injekt.get<BrowseAnchorLoadManager>().start(sourceId, anchor)
+                }
+                context.cancelNotification(Notifications.ID_ANCHOR_LOAD_COMPLETE)
+            }
             // Start downloading app update
             ACTION_START_APP_UPDATE -> startDownloadAppUpdate(context, intent)
             // Cancel downloading app update
@@ -244,6 +257,9 @@ class NotificationReceiver : BroadcastReceiver() {
 
         private const val ACTION_CANCEL_LIBRARY_UPDATE = "$ID.$NAME.CANCEL_LIBRARY_UPDATE"
         private const val ACTION_CANCEL_BROWSE_FETCH = "$ID.$NAME.CANCEL_BROWSE_FETCH"
+        private const val ACTION_CANCEL_ANCHOR_LOAD = "$ID.$NAME.CANCEL_ANCHOR_LOAD"
+        private const val ACTION_CONTINUE_ANCHOR_LOAD = "$ID.$NAME.CONTINUE_ANCHOR_LOAD"
+        private const val EXTRA_SOURCE_ID = "$ID.$NAME.EXTRA_SOURCE_ID"
 
         private const val ACTION_START_APP_UPDATE = "$ID.$NAME.ACTION_START_APP_UPDATE"
         private const val ACTION_CANCEL_APP_UPDATE_DOWNLOAD = "$ID.$NAME.CANCEL_APP_UPDATE_DOWNLOAD"
@@ -536,6 +552,33 @@ class NotificationReceiver : BroadcastReceiver() {
             return PendingIntent.getBroadcast(
                 context,
                 0,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+        }
+
+        /** Yakuyomi：通知列「取消」探索自動載入到錨點的 [PendingIntent]。 */
+        internal fun cancelAnchorLoadPendingBroadcast(context: Context): PendingIntent {
+            val intent = Intent(context, NotificationReceiver::class.java).apply {
+                action = ACTION_CANCEL_ANCHOR_LOAD
+            }
+            return PendingIntent.getBroadcast(
+                context,
+                0,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+        }
+
+        /** Yakuyomi：通知列「繼續」探索自動載入到錨點的 [PendingIntent]（帶 sourceId；requestCode 用 sourceId 避免 extra 被覆蓋）。 */
+        internal fun continueAnchorLoadPendingBroadcast(context: Context, sourceId: Long): PendingIntent {
+            val intent = Intent(context, NotificationReceiver::class.java).apply {
+                action = ACTION_CONTINUE_ANCHOR_LOAD
+                putExtra(EXTRA_SOURCE_ID, sourceId)
+            }
+            return PendingIntent.getBroadcast(
+                context,
+                sourceId.toInt(),
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )

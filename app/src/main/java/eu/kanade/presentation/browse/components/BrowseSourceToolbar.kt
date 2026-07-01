@@ -43,6 +43,8 @@ fun BrowseSourceToolbar(
     onMarkFirstAsAnchor: (() -> Unit)? = null,
     onAutoLoadToAnchor: (() -> Unit)? = null,
     onStopAutoLoad: (() -> Unit)? = null,
+    // Yakuyomi：自動載入尚有續傳（上次到每段上限/手動停、未到錨點）→ 按鈕標籤改「繼續載入」引導再按。
+    isResumingAnchor: Boolean = false,
     // Yakuyomi：清除快照（overflow，僅有快照時非空）。
     onClearSnapshot: (() -> Unit)? = null,
 ) {
@@ -74,7 +76,11 @@ fun BrowseSourceToolbar(
                         )
                         onAutoLoadToAnchor != null -> add(
                             AppBar.Action(
-                                title = stringResource(MR.strings.action_auto_load_to_anchor),
+                                title = if (isResumingAnchor) {
+                                    stringResource(MR.strings.action_continue_auto_load)
+                                } else {
+                                    stringResource(MR.strings.action_auto_load_to_anchor)
+                                },
                                 icon = Icons.Outlined.PlayArrow,
                                 onClick = onAutoLoadToAnchor,
                             ),

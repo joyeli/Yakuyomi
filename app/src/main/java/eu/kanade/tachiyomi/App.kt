@@ -180,6 +180,9 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         // fire-and-forget（不卡啟動）；還原後若有排隊章會自己 ensureDrain + 重啟前景服務（未暫停的話）。
         runCatching { Injekt.get<TranslationManager>().restoreAsync() }
 
+        // Yakuyomi：探索「自動載入到錨點」的背景鏈還原（旗標還在＝上次沒跑完 → 確保 WorkManager 鏈仍在，續爬）。
+        runCatching { Injekt.get<eu.kanade.tachiyomi.data.browse.BrowseAnchorLoadManager>().ensureRestored() }
+
         if (!LogcatLogger.isInstalled) {
             val minLogPriority = when {
                 networkPreferences.verboseLogging.get() -> LogPriority.VERBOSE

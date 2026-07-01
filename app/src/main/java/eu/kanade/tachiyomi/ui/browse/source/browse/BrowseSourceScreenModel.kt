@@ -19,6 +19,7 @@ import eu.kanade.domain.source.interactor.GetIncognitoState
 import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.domain.track.interactor.AddTracks
 import eu.kanade.presentation.util.ioCoroutineScope
+import eu.kanade.tachiyomi.data.browse.BrowseAnchorLoadManager
 import eu.kanade.tachiyomi.data.browse.BrowseFetchManager
 import eu.kanade.tachiyomi.data.cache.CoverCache
 import eu.kanade.tachiyomi.source.model.FilterList
@@ -84,6 +85,7 @@ class BrowseSourceScreenModel(
     private val updateManga: UpdateManga = Injekt.get(),
     private val addTracks: AddTracks = Injekt.get(),
     private val browseFetchManager: BrowseFetchManager = Injekt.get(),
+    private val browseAnchorLoadManager: BrowseAnchorLoadManager = Injekt.get(),
     getIncognitoState: GetIncognitoState = Injekt.get(),
 ) : StateScreenModel<BrowseSourceScreenModel.State>(State(Listing.valueOf(listingQuery))) {
 
@@ -126,6 +128,9 @@ class BrowseSourceScreenModel(
     // Yakuyomi：探索「錨點」（每 source 一本，值＝mangaUrl）。標「上次處理到這」，瀏覽清單以旗標徽章標出。
     val browseAnchor = sourcePreferences.browseAnchor(sourceId)
 
+    // Yakuyomi：自動載入到錨點的續傳頁碼（>0＝尚未到錨點、可續 → UI 按鈕顯示「繼續載入」）。
+    val browseAnchorResumePage = sourcePreferences.browseAnchorResumePage(sourceId)
+
     // 錨點是否已在「已載入」範圍出現（在過濾前的串流偵測 → 篩選把它濾掉也算數）。自動載入到錨點用此停止。
     private val _anchorReached = MutableStateFlow(false)
     val anchorReached: StateFlow<Boolean> = _anchorReached.asStateFlow()
@@ -145,6 +150,17 @@ class BrowseSourceScreenModel(
     fun cancelBatchFetch() = browseFetchManager.cancel()
 
     fun consumeFetchResult() = browseFetchManager.consumeResult()
+
+    // Yakuyomi：自動載入到錨點改成背景任務（週期冷卻防 ban、可停、完成存快照），委派給 [BrowseAnchorLoadManager]。
+    val anchorLoadState: StateFlow<BrowseAnchorLoadManager.State> = browseAnchorLoadManager.state
+    val anchorLoadResult: StateFlow<BrowseAnchorLoadManager.Result?> = browseAnchorLoadManager.result
+
+    /** 開始背景載入到本源錨點。回 false＝忙線 / 無錨點 / 來源不可用。 */
+    fun startAnchorLoad(): Boolean = browseAnchorLoadManager.start(sourceId, browseAnchor.get())
+
+    fun cancelAnchorLoad() = browseAnchorLoadManager.cancel()
+
+    fun consumeAnchorLoadResult() = browseAnchorLoadManager.consumeResult()
 
     val mangaPagerFlowFlow = state.map { it.listing }
         .distinctUntilChanged()
@@ -252,7 +268,11 @@ class BrowseSourceScreenModel(
         browseSnapshot.set(snapshotJson.encodeToString(BrowseSnapshot(System.currentTimeMillis(), urls)))
     }
 
-    fun clearSnapshot() = browseSnapshot.set("")
+    fun clearSnapshot() {
+        browseSnapshot.set("")
+        // 清快取＝整個重來 → 續傳頁碼一起歸零，下次「開始」從第 1 頁（否則會從舊斷點續、按鈕也還顯示「繼續」）。
+        browseAnchorResumePage.set(0)
+    }
 
     /** 從快照 urls 讀 DB（跳過已被「清除資料庫」清掉的），做成可顯示清單。 */
     private suspend fun buildSnapshotItems(): List<StateFlow<Manga>> {

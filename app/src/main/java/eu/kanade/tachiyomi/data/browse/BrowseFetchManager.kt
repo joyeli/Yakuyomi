@@ -82,7 +82,13 @@ class BrowseFetchManager(private val context: Context) {
                     _state.update { it.copy(done = i + 1) }
                     // 節流防 ban：每本 2.0–4.0s（base 2s + 抖動 0–2s）。背景跑、不阻前景 ⇒ 取安全節奏（每本一個
                     // 詳情+章節請求、長清單可達數百，是最該放慢的路徑）。最後一筆不等。
-                    if (i < mangaList.lastIndex && isActive) delay(2000L + Random.nextLong(2000L))
+                    if (i < mangaList.lastIndex && isActive) {
+                        delay(2000L + Random.nextLong(2000L))
+                        // 週期冷卻：每 COOLDOWN_EVERY 本多歇 20–40s，把「連續數百本」打斷成幾波 + 休息（對照自動載入到錨點）。
+                        if ((i + 1) % COOLDOWN_EVERY == 0) {
+                            delay(COOLDOWN_MIN_MS + Random.nextLong(COOLDOWN_SPAN_MS))
+                        }
+                    }
                 }
             } finally {
                 val cancelled = !isActive
@@ -128,5 +134,12 @@ class BrowseFetchManager(private val context: Context) {
             setSmallIcon(android.R.drawable.stat_sys_download_done)
             setAutoCancel(true)
         }
+    }
+
+    companion object {
+        // 週期冷卻：每 COOLDOWN_EVERY 本多歇 [COOLDOWN_MIN_MS, +COOLDOWN_SPAN_MS) 毫秒（20–40s），打斷連續抓取。
+        private const val COOLDOWN_EVERY = 10
+        private const val COOLDOWN_MIN_MS = 20_000L
+        private const val COOLDOWN_SPAN_MS = 20_000L
     }
 }

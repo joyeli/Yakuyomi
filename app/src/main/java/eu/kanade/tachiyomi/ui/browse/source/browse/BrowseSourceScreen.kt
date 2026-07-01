@@ -42,7 +42,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalUriHandler
-import androidx.paging.LoadState
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
@@ -63,6 +62,7 @@ import eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceScreenModel.Listi
 import eu.kanade.tachiyomi.ui.category.CategoryScreen
 import eu.kanade.tachiyomi.ui.manga.MangaScreen
 import eu.kanade.tachiyomi.ui.webview.WebViewScreen
+import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -71,7 +71,6 @@ import mihon.presentation.core.util.collectAsLazyPagingItems
 import tachiyomi.core.common.Constants
 import tachiyomi.core.common.preference.TriState
 import tachiyomi.core.common.util.lang.launchIO
-import tachiyomi.domain.library.model.LibraryDisplayMode
 import tachiyomi.domain.source.model.StubSource
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.material.Scaffold
@@ -110,6 +109,8 @@ data class BrowseSourceScreen(
         // Yakuyomi：錨點 url（已設就在任何清單顯示旗標徽章，含快照）。
         val anchorUrlPref by screenModel.browseAnchor.prefCollectAsState()
         val anchorUrl = anchorUrlPref.takeIf { it.isNotEmpty() }
+        // Yakuyomi：自動載入續傳頁碼（>0＝可續 → 按鈕顯示「繼續載入」引導）。
+        val anchorResumePage by screenModel.browseAnchorResumePage.prefCollectAsState()
         // Yakuyomi：錨點被當前全域篩選濾掉、僅被強制留下 → 該本加區別視覺。
         val anchorFilteredOut by screenModel.anchorFilteredOut.collectAsState()
 
@@ -123,14 +124,16 @@ data class BrowseSourceScreen(
         val fetchState by screenModel.browseFetchState.collectAsState()
         val fetchResult by screenModel.browseFetchResult.collectAsState()
 
-        // Yakuyomi：快照（離線清單）狀態 + 自動載入到錨點 + 相關對話框旗標。
+        // Yakuyomi：快照（離線清單）狀態 + 自動載入到錨點（改為背景任務）+ 相關對話框旗標。
         val snapshotRaw by screenModel.browseSnapshot.prefCollectAsState()
         val snapshot = remember(snapshotRaw) { screenModel.readSnapshot() }
         val isSnapshotListing = state.listing is Listing.Snapshot
-        var autoLoading by remember { mutableStateOf(false) }
+        // 自動載入到錨點＝背景 BrowseAnchorLoadManager（週期冷卻防 ban、可停、完成自動存快照）；autoLoading 由其狀態決定。
+        val anchorLoadState by screenModel.anchorLoadState.collectAsState()
+        val anchorLoadResult by screenModel.anchorLoadResult.collectAsState()
+        val autoLoading = anchorLoadState.running
         var showSnapshotOverwriteConfirm by remember { mutableStateOf(false) }
         var showSnapshotClearConfirm by remember { mutableStateOf(false) }
-        var showSaveAfterLoadConfirm by remember { mutableStateOf(false) }
         var showLeaveSnapshotClearConfirm by remember { mutableStateOf(false) }
 
         val navigator = LocalNavigator.currentOrThrow
@@ -181,37 +184,19 @@ data class BrowseSourceScreen(
             }
         }
 
-        // Yakuyomi：自動載入到錨點——持續觸發 append（受節流牽制）並捲動，直到錨點出現或到底/錯誤/上限。
-        LaunchedEffect(autoLoading) {
-            if (!autoLoading) return@LaunchedEffect
-            val useGrid = screenModel.displayMode != LibraryDisplayMode.List
-            try {
-                var iterations = 0
-                while (autoLoading && !screenModel.anchorReached.value && iterations < AUTO_LOAD_MAX_PAGES) {
-                    val append = mangaList.loadState.append
-                    if (append is LoadState.Error) break
-                    if (append is LoadState.NotLoading && append.endOfPaginationReached) break
-                    val target = (mangaList.itemCount - 1).coerceAtLeast(0)
-                    if (useGrid) gridState.scrollToItem(target) else listState.scrollToItem(target)
-                    iterations++
-                    // 等這次 append 結束（節流 ≥1s/頁）
-                    var waited = 0
-                    while (autoLoading && mangaList.loadState.append is LoadState.Loading && waited < 100) {
-                        kotlinx.coroutines.delay(100)
-                        waited++
-                    }
-                    kotlinx.coroutines.delay(200)
-                }
-                if (screenModel.anchorReached.value) {
-                    val idx = mangaList.itemSnapshotList.items.indexOfFirst { it.value.url == anchorUrlPref }
-                    if (idx >= 0) {
-                        if (useGrid) gridState.animateScrollToItem(idx) else listState.animateScrollToItem(idx)
-                    }
-                    showSaveAfterLoadConfirm = true
-                }
-            } finally {
-                autoLoading = false
+        // Yakuyomi：背景自動載入到錨點完成 → toast 回饋（載了幾本 / 有無找到錨點；快照已由 manager 存好），並 consume。
+        LaunchedEffect(anchorLoadResult) {
+            val r = anchorLoadResult ?: return@LaunchedEffect
+            if (r.sourceId == sourceId) {
+                context.toast(
+                    when {
+                        r.found -> context.contextStringResource(MR.strings.browse_anchor_load_complete_found, r.loaded)
+                        r.done -> context.contextStringResource(MR.strings.browse_anchor_load_complete_end, r.loaded)
+                        else -> context.contextStringResource(MR.strings.browse_anchor_load_paused, r.loaded)
+                    },
+                )
             }
+            screenModel.consumeAnchorLoadResult()
         }
 
         // Yakuyomi：離開快照模式時，詢問是否清除快照。
@@ -252,18 +237,30 @@ data class BrowseSourceScreen(
                         onSettingsClick = { navigator.push(SourcePreferencesScreen(sourceId)) },
                         onSearch = screenModel::search,
                         // 錨點按鈕只在「最新」清單露出（追更新工作流）；依狀態切換：標記錨點 / 自動載入 / 停止。
+                        // 自動載入改成背景任務：開＝startAnchorLoad（週期冷卻防 ban、完成存快照）、停＝cancelAnchorLoad。
                         onStopAutoLoad = if (autoLoading) {
-                            { autoLoading = false }
+                            { screenModel.cancelAnchorLoad() }
                         } else {
                             null
                         },
                         onAutoLoadToAnchor = if (
                             !autoLoading && state.listing is Listing.Latest && anchorUrlPref.isNotEmpty()
                         ) {
-                            { autoLoading = true }
+                            {
+                                val started = screenModel.startAnchorLoad()
+                                context.toast(
+                                    if (started) {
+                                        MR.strings.browse_anchor_load_started
+                                    } else {
+                                        MR.strings.browse_fetch_busy
+                                    },
+                                )
+                            }
                         } else {
                             null
                         },
+                        // 續傳中（未到錨點、還有得抓）→ 按鈕標籤改「繼續載入」，即使 toast 消失也持續引導。
+                        isResumingAnchor = anchorResumePage > 0,
                         onMarkFirstAsAnchor = if (
                             !autoLoading && state.listing is Listing.Latest && anchorUrlPref.isEmpty()
                         ) {
@@ -546,39 +543,6 @@ data class BrowseSourceScreen(
             )
         }
 
-        // Yakuyomi：自動載入到錨點完成後，詢問是否把目前清單存成快照。
-        if (showSaveAfterLoadConfirm) {
-            AlertDialog(
-                onDismissRequest = { showSaveAfterLoadConfirm = false },
-                title = { Text(text = stringResource(MR.strings.action_save_snapshot)) },
-                text = {
-                    Text(
-                        text = stringResource(
-                            MR.strings.save_snapshot_after_load_confirm,
-                            mangaList.itemCount,
-                        ),
-                    )
-                },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            showSaveAfterLoadConfirm = false
-                            if (screenModel.hasSnapshot()) {
-                                showSnapshotOverwriteConfirm = true
-                            } else {
-                                saveSnapshotNow()
-                            }
-                        },
-                    ) { Text(text = stringResource(MR.strings.action_ok)) }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showSaveAfterLoadConfirm = false }) {
-                        Text(text = stringResource(MR.strings.action_cancel))
-                    }
-                },
-            )
-        }
-
         val onDismissRequest = { screenModel.setDialog(null) }
         when (val dialog = state.dialog) {
             is BrowseSourceScreenModel.Dialog.MangaActions -> {
@@ -666,9 +630,6 @@ data class BrowseSourceScreen(
 
     companion object {
         private val queryEvent = Channel<SearchType>()
-
-        // Yakuyomi：自動載入到錨點的安全上限（避免來源無此錨點時無限翻頁）。
-        private const val AUTO_LOAD_MAX_PAGES = 60
     }
 
     sealed class SearchType(val txt: String) {

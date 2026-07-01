@@ -48,6 +48,10 @@ object Notifications {
     const val ID_BROWSE_FETCH_PROGRESS = -212
     const val ID_BROWSE_FETCH_COMPLETE = -213
 
+    // Yakuyomi：探索「自動載入到錨點」背景任務（沿用 CHANNEL_BROWSE_FETCH）。
+    const val ID_ANCHOR_LOAD_PROGRESS = -214
+    const val ID_ANCHOR_LOAD_COMPLETE = -215
+
     /**
      * Notification channel and ids used by the library updater.
      */

@@ -68,6 +68,38 @@ object SettingsBrowseScreen : SearchableSettings {
                 ),
             ),
             Preference.PreferenceGroup(
+                title = stringResource(MR.strings.pref_category_browse_anchor_load),
+                preferenceItems = listOf(
+                    Preference.PreferenceItem.ListPreference(
+                        preference = sourcePreferences.browseAnchorChunkPages,
+                        entries = persistentMapOf(
+                            3 to "3",
+                            5 to "5",
+                            8 to "8",
+                            10 to "10",
+                        ),
+                        title = stringResource(MR.strings.pref_browse_anchor_chunk_pages),
+                        subtitle = stringResource(MR.strings.pref_browse_anchor_chunk_pages_summary),
+                    ),
+                    Preference.PreferenceItem.ListPreference(
+                        preference = sourcePreferences.browseAnchorIntervalMinutes,
+                        entries = persistentMapOf(
+                            1 to stringResource(MR.strings.label_minutes, 1),
+                            2 to stringResource(MR.strings.label_minutes, 2),
+                            3 to stringResource(MR.strings.label_minutes, 3),
+                            5 to stringResource(MR.strings.label_minutes, 5),
+                            10 to stringResource(MR.strings.label_minutes, 10),
+                            15 to stringResource(MR.strings.label_minutes, 15),
+                        ),
+                        title = stringResource(MR.strings.pref_browse_anchor_interval),
+                        subtitle = stringResource(MR.strings.pref_browse_anchor_interval_summary),
+                    ),
+                    Preference.PreferenceItem.InfoPreference(
+                        stringResource(MR.strings.pref_browse_anchor_load_info),
+                    ),
+                ),
+            ),
+            Preference.PreferenceGroup(
                 title = stringResource(MR.strings.pref_category_nsfw_content),
                 preferenceItems = listOf(
                     Preference.PreferenceItem.SwitchPreference(

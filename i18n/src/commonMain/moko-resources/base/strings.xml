@@ -49,6 +49,7 @@
     <string name="anchor_set_confirm">Mark this entry as the browse anchor for %1$s? You\'ll see it flagged while browsing this source\'s Latest list.</string>
     <string name="anchor_badge">Anchor</string>
     <string name="action_auto_load_to_anchor">Auto-load to anchor</string>
+    <string name="action_continue_auto_load">Continue loading to anchor</string>
     <string name="action_stop_auto_load">Stop loading</string>
     <string name="action_save_snapshot">Save snapshot</string>
     <string name="action_clear_snapshot">Clear snapshot</string>
@@ -67,6 +68,20 @@
     <string name="browse_fetch_complete_failed">%1$d of %2$d failed</string>
     <string name="browse_fetch_complete_ok">Fetched %1$d titles</string>
     <string name="browse_fetch_busy">A fetch is already running in the background</string>
+    <string name="browse_anchor_load_started">Background loading started — it runs a few pages at a time; check the notification for progress</string>
+    <string name="browse_anchor_load_running_title">Loading to anchor</string>
+    <string name="browse_anchor_load_running_text">%1$s · page %2$d · %3$d loaded</string>
+    <string name="browse_anchor_load_complete_title">Auto-load complete</string>
+    <string name="browse_anchor_load_complete_found">Reached the anchor — %1$d titles saved as a snapshot</string>
+    <string name="browse_anchor_load_complete_end">%1$d titles saved as a snapshot</string>
+    <string name="browse_anchor_load_paused">Stopped after repeated failures (source may be blocking) — %1$d titles loaded so far. Tap Continue to retry.</string>
+    <string name="label_minutes">%1$d min</string>
+    <string name="pref_category_browse_anchor_load">Auto-load to anchor</string>
+    <string name="pref_browse_anchor_chunk_pages">Pages per batch</string>
+    <string name="pref_browse_anchor_chunk_pages_summary">Pages fetched per background batch. Fewer = less likely to get blocked by the source.</string>
+    <string name="pref_browse_anchor_interval">Batch interval</string>
+    <string name="pref_browse_anchor_interval_summary">How long to wait between batches. Longer = safer.</string>
+    <string name="pref_browse_anchor_load_info">Auto-load crawls toward the anchor in the background, a few pages at a time spread over long intervals, so the source only ever sees a normal-looking browse. Works with the screen off and resumes automatically after the app is killed or the device reboots. Reaching an anchor months back can take many hours — that\'s expected.</string>
     <string name="fetch_details_summary">Fetched %1$d, %2$d failed</string>
     <string name="fetch_details_failed_title">Failed to fetch</string>
     <string name="action_source_filters">Source filters</string>
