@@ -51,6 +51,15 @@ class SourcePreferences(
 
     val hideInLibraryItems: Preference<Boolean> = preferenceStore.getBoolean("browse_hide_in_library_items", false)
 
+    // Yakuyomi：來源清單是否顯示「最近使用」欄（預設關）。關＝該來源只照 pin/語言正常分組，不另置頂一份。
+    val showRecentlyUsedSource: Preference<Boolean> = preferenceStore.getBoolean("show_recently_used_source", false)
+
+    // Yakuyomi：來源清單是否顯示本地來源（預設關）。
+    val showLocalSource: Preference<Boolean> = preferenceStore.getBoolean("show_local_source", false)
+
+    // Yakuyomi：點來源進去預設顯示「最新」而非「熱門」（預設開）。開＝探索頁隱藏「最新」chip、進來直接最新。
+    val browseDefaultToLatest: Preference<Boolean> = preferenceStore.getBoolean("browse_default_to_latest", true)
+
     // Yakuyomi：探索全域篩選（跨所有來源、與各 source 自帶 extension filter 獨立）。客戶端後置篩選。
     val browseFilterFavorite: Preference<TriState> = preferenceStore.getEnum(
         "browse_filter_favorite",

@@ -103,6 +103,14 @@ class BrowseSourceScreenModel(
                 listing = Listing.Search(query, source.getFilterList())
             }
 
+            // Yakuyomi：預設最新——點來源主體（Popular）進來時，若開關開且來源支援最新，改用「最新」。
+            if (listing is Listing.Popular &&
+                sourcePreferences.browseDefaultToLatest.get() &&
+                source.supportsLatest
+            ) {
+                listing = Listing.Latest
+            }
+
             it.copy(
                 listing = listing,
                 filters = source.getFilterList(),

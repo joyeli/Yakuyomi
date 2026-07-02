@@ -682,6 +682,10 @@
 
       <!-- Browse section -->
     <string name="pref_hide_in_library_items">Hide entries already in library</string>
+    <string name="pref_show_recently_used_source">Show recently used source</string>
+    <string name="pref_show_local_source">Show local source</string>
+    <string name="pref_browse_default_to_latest">Default to Latest</string>
+    <string name="pref_browse_default_to_latest_summary">Open sources directly on their Latest list and hide the Latest button in the source list</string>
     <string name="pref_browse_load_interval">Minimum page-load interval</string>
     <string name="pref_browse_load_interval_summary">Throttle browsing pagination to avoid hammering the source (helps when filters hide most results)</string>
 

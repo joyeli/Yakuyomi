@@ -715,6 +715,10 @@
     <string name="track_error">%1$s 發生錯誤：%2$s</string>
     <string name="information_required_plain">*必填</string>
     <string name="pref_hide_in_library_items">隱藏已在書櫃的作品</string>
+    <string name="pref_show_recently_used_source">顯示最近使用的來源</string>
+    <string name="pref_show_local_source">顯示本地來源</string>
+    <string name="pref_browse_default_to_latest">預設最新</string>
+    <string name="pref_browse_default_to_latest_summary">點來源直接進「最新」清單，並隱藏來源列表上的「最新」按鈕</string>
     <string name="pref_browse_load_interval">翻頁最小間隔</string>
     <string name="pref_browse_load_interval_summary">節流瀏覽翻頁速度，避免狂打來源（篩選濾掉大量結果時特別有用）</string>
     <string name="action_copy_to_clipboard">複製</string>

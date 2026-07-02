@@ -42,9 +42,19 @@ object SettingsBrowseScreen : SearchableSettings {
             Preference.PreferenceGroup(
                 title = stringResource(MR.strings.label_sources),
                 preferenceItems = listOf(
+                    // Yakuyomi：「隱藏已在書庫」設定移除——已由探索頁的收藏篩選（filter）取代。
                     Preference.PreferenceItem.SwitchPreference(
-                        preference = sourcePreferences.hideInLibraryItems,
-                        title = stringResource(MR.strings.pref_hide_in_library_items),
+                        preference = sourcePreferences.showRecentlyUsedSource,
+                        title = stringResource(MR.strings.pref_show_recently_used_source),
+                    ),
+                    Preference.PreferenceItem.SwitchPreference(
+                        preference = sourcePreferences.showLocalSource,
+                        title = stringResource(MR.strings.pref_show_local_source),
+                    ),
+                    Preference.PreferenceItem.SwitchPreference(
+                        preference = sourcePreferences.browseDefaultToLatest,
+                        title = stringResource(MR.strings.pref_browse_default_to_latest),
+                        subtitle = stringResource(MR.strings.pref_browse_default_to_latest_summary),
                     ),
                     Preference.PreferenceItem.ListPreference(
                         preference = sourcePreferences.browseLoadInterval,

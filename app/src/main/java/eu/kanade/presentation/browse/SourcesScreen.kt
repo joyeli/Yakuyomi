@@ -52,6 +52,8 @@ fun SourcesScreen(
     snapshotSourceIds: Set<Long> = emptySet(),
     onClickSnapshot: (Source) -> Unit = {},
     onLongClickSnapshot: (Source) -> Unit = {},
+    // Yakuyomi：是否顯示各來源右側的「最新」按鈕（「預設最新」開時隱藏——點來源主體本就直接進最新）。
+    showSourceLatestButton: Boolean = true,
 ) {
     when {
         state.isLoading -> LoadingScreen(Modifier.padding(contentPadding))
@@ -94,6 +96,7 @@ fun SourcesScreen(
                             hasSnapshot = model.source.id in snapshotSourceIds,
                             onClickSnapshot = onClickSnapshot,
                             onLongClickSnapshot = onLongClickSnapshot,
+                            showLatestButton = showSourceLatestButton,
                         )
                     }
                 }
@@ -127,6 +130,7 @@ private fun SourceItem(
     hasSnapshot: Boolean = false,
     onClickSnapshot: (Source) -> Unit = {},
     onLongClickSnapshot: (Source) -> Unit = {},
+    showLatestButton: Boolean = true,
 ) {
     BaseSourceItem(
         modifier = modifier,
@@ -151,7 +155,8 @@ private fun SourceItem(
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                 )
             }
-            if (source.supportsLatest) {
+            // Yakuyomi：「預設最新」開時隱藏此按鈕（點來源主體本就直接進最新，冗餘）。
+            if (source.supportsLatest && showLatestButton) {
                 TextButton(onClick = { onClickItem(source, Listing.Latest) }) {
                     Text(
                         text = stringResource(MR.strings.latest),

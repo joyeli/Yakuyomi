@@ -10,10 +10,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
+import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.presentation.browse.SourceOptionsDialog
 import eu.kanade.presentation.browse.SourcesScreen
 import eu.kanade.presentation.components.AppBar
@@ -25,6 +27,9 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
+import tachiyomi.presentation.core.util.collectAsState as prefCollectAsState
 
 @Composable
 fun Screen.sourcesTab(): TabContent {
@@ -52,6 +57,10 @@ fun Screen.sourcesTab(): TabContent {
                 screenModel.refreshSnapshots()
             }
 
+            // Yakuyomi：「預設最新」開時隱藏各來源右側的「最新」按鈕。
+            val sourcePreferences = remember { Injekt.get<SourcePreferences>() }
+            val defaultToLatest by sourcePreferences.browseDefaultToLatest.prefCollectAsState()
+
             SourcesScreen(
                 state = state,
                 contentPadding = contentPadding,
@@ -67,6 +76,7 @@ fun Screen.sourcesTab(): TabContent {
                     )
                 },
                 onLongClickSnapshot = screenModel::showSnapshotClearDialog,
+                showSourceLatestButton = !defaultToLatest,
             )
 
             state.snapshotClearTarget?.let { target ->
