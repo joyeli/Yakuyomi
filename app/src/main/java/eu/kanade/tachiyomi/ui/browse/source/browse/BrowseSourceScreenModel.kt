@@ -139,6 +139,9 @@ class BrowseSourceScreenModel(
     private val _anchorFilteredOut = MutableStateFlow(false)
     val anchorFilteredOut: StateFlow<Boolean> = _anchorFilteredOut.asStateFlow()
 
+    // Yakuyomi：快照清單刷新觸發。在快照清單上長壓重設錨點→修剪後 bump，令靜態快照清單重建、就地反映修剪結果。
+    private val snapshotRefresh = MutableStateFlow(0)
+
     // Yakuyomi：探索批次擷取詳情＋章節，委派給常駐的 [BrowseFetchManager]（單一全域槽、前景服務保活）：
     // 送出後可離開畫面、前景繼續操作；中止/重送由 manager 管。節流/逐本抓的細節在 manager。
     val browseFetchState: StateFlow<BrowseFetchManager.State> = browseFetchManager.state
@@ -169,7 +172,9 @@ class BrowseSourceScreenModel(
             _anchorFilteredOut.value = false // 換 listing → 重置「錨點被濾掉」標記
             val cached = if (listing is Listing.Snapshot) {
                 // 快照：離線從 DB 讀存好的 urls 做成靜態 PagingData，零連線（避開 listing 分頁 request＝ban 大頭）。
-                flow { emit(PagingData.from(buildSnapshotItems())) }
+                // 對 snapshotRefresh 反應（初始建一次 + 在快照清單重設錨點修剪後 bump→重建）；爬取每批不 bump、不會每分鐘重掃。
+                snapshotRefresh
+                    .map { PagingData.from(buildSnapshotItems()) }
                     .cachedIn(ioCoroutineScope)
             } else {
                 // Pager 只跟著 listing（熱門/最新/搜尋）建立並 cachedIn → 只有切換 listing 才重抓來源。
@@ -242,8 +247,17 @@ class BrowseSourceScreenModel(
         browseFilterFetched.set(TriState.DISABLED)
     }
 
-    /** 設此 source 的錨點為這本（取代舊的）。 */
-    fun setAnchor(manga: Manga) = browseAnchor.set(manga.url)
+    /**
+     * 設此 source 的錨點為這本（取代舊的）。錨點更新後修剪快照（砍掉錨點之後的更舊項，錨點成為最後一筆）。
+     * 修剪（解析大 json）挪到 IO 免卡 UI；修剪後 bump snapshotRefresh → 若正停在快照清單（長壓重設錨點）就地刷新。
+     */
+    fun setAnchor(manga: Manga) {
+        browseAnchor.set(manga.url) // 同步：讓錨點旗標即時反映
+        screenModelScope.launchIO {
+            browseAnchorLoadManager.trimSnapshotToAnchor(sourceId)
+            snapshotRefresh.update { it + 1 }
+        }
+    }
 
     /** 清除此 source 的錨點。 */
     fun clearAnchor() = browseAnchor.set("")
@@ -263,9 +277,14 @@ class BrowseSourceScreenModel(
 
     fun hasSnapshot(): Boolean = browseSnapshot.get().isNotEmpty()
 
-    /** 把目前已載入清單的 urls 存成快照（覆蓋同 source 舊的）。 */
+    /** 把目前已載入清單的 urls 存成快照（覆蓋同 source 舊的）。快照產生後修剪（有錨點就砍掉其後的更舊項）。 */
     fun saveSnapshot(urls: List<String>) {
+        // 同步寫入：呼叫端隨後切到快照分頁依賴它已寫好。
         browseSnapshot.set(snapshotJson.encodeToString(BrowseSnapshot(System.currentTimeMillis(), urls)))
+        screenModelScope.launchIO {
+            browseAnchorLoadManager.trimSnapshotToAnchor(sourceId)
+            snapshotRefresh.update { it + 1 }
+        }
     }
 
     fun clearSnapshot() {

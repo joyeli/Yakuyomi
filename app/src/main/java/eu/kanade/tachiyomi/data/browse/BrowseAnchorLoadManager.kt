@@ -123,6 +123,22 @@ class BrowseAnchorLoadManager(private val context: Context) {
         _result.value = null
     }
 
+    /**
+     * 修剪快照：砍掉錨點之後（feed 序更舊＝已處理過）的項，讓錨點成為快照最後一筆。
+     * 無錨點 / 錨點不在快照 / 錨點已是最後一筆 → 不動。純函式、冪等，任何「快照產生後」或「錨點更新後」都可安全呼叫。
+     */
+    fun trimSnapshotToAnchor(sourceId: Long) {
+        val anchor = sourcePreferences.browseAnchor(sourceId).get()
+        if (anchor.isEmpty()) return
+        val pref = sourcePreferences.browseSnapshot(sourceId)
+        val raw = pref.get()
+        if (raw.isEmpty()) return
+        val snap = runCatching { json.decodeFromString<BrowseSnapshot>(raw) }.getOrNull() ?: return
+        val idx = snap.urls.indexOf(anchor)
+        if (idx < 0 || idx == snap.urls.lastIndex) return
+        pref.set(json.encodeToString(snap.copy(urls = snap.urls.take(idx + 1))))
+    }
+
     /** 下一批的延遲（分鐘 → 毫秒，±20% 抖動；夾在合理範圍）。 */
     fun nextDelayMs(): Long {
         val minutes = sourcePreferences.browseAnchorIntervalMinutes.get().coerceIn(MIN_INTERVAL_MIN, MAX_INTERVAL_MIN)
@@ -214,10 +230,13 @@ class BrowseAnchorLoadManager(private val context: Context) {
         sourcePreferences.browseAnchorCrawlActive.set(-1L)
         sourcePreferences.browseAnchorFailStreak.set(0)
         sourcePreferences.browseAnchorResumePage(sourceId).set(0)
+        // 先修剪（砍掉錨點之後的更舊項），再用修剪後的實際筆數回報 → 通知/toast 的「已載入 XX 本」對得上快照。
+        trimSnapshotToAnchor(sourceId)
+        val finalLoaded = readExistingUrls(sourceId).size.takeIf { it > 0 } ?: loaded
         context.cancelNotification(Notifications.ID_ANCHOR_LOAD_PROGRESS)
         _state.value = State()
-        _result.value = Result(sourceId, loaded, found, done = true)
-        notifyComplete(sourceId, loaded, found, done = true)
+        _result.value = Result(sourceId, finalLoaded, found, done = true)
+        notifyComplete(sourceId, finalLoaded, found, done = true)
     }
 
     /** 連續失敗放棄（可續）：清旗標、關進度通知、發帶「繼續」鈕的通知；續傳頁碼留著。 */

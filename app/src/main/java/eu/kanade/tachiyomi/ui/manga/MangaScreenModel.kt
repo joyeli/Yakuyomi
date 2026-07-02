@@ -156,6 +156,7 @@ class MangaScreenModel(
     // Yakuyomi：探索錨點（詳情頁入口）。⚠️ 必須宣告在 init{} 之前——init 啟動的 IO coroutine 會用到；
     // Kotlin 按宣告順序初始化，宣告在 init 之後曾造成 coroutine 搶先取用 → NPE 閃退（不定期、race）。
     private val sourcePreferences: eu.kanade.domain.source.service.SourcePreferences = Injekt.get()
+    private val browseAnchorLoadManager: eu.kanade.tachiyomi.data.browse.BrowseAnchorLoadManager = Injekt.get()
 
     /**
      * Helper function to update the UI state only if it's currently in success state
@@ -431,10 +432,11 @@ class MangaScreenModel(
         updateSuccessState { it.copy(dialog = Dialog.SetAnchorConfirm) }
     }
 
-    /** 把這本設成它所屬 source 的探索錨點。 */
+    /** 把這本設成它所屬 source 的探索錨點。錨點更新後修剪快照（砍掉錨點之後的更舊項；解析大 json 挪 IO 免卡 UI）。 */
     fun setBrowseAnchor() {
         val state = successState ?: return
         sourcePreferences.browseAnchor(state.manga.source).set(state.manga.url)
+        screenModelScope.launchIO { browseAnchorLoadManager.trimSnapshotToAnchor(state.manga.source) }
     }
 
     fun setFetchInterval(manga: Manga, interval: Int) {
