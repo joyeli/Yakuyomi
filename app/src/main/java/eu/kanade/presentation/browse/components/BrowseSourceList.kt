@@ -32,8 +32,10 @@ fun BrowseSourceList(
         state = state,
         contentPadding = contentPadding + PaddingValues(vertical = 8.dp),
     ) {
-        item {
-            if (!hideLoadingFooter && mangaList.loadState.prepend is LoadState.Loading) {
+        // 條件放在 item{} 外（對齊兩個 grid 版）：無條件的空 item 會讓 list index = 資料 index + 1，
+        // 依資料 index 捲動（滑到錨點）就會差一格。
+        if (!hideLoadingFooter && mangaList.loadState.prepend is LoadState.Loading) {
+            item {
                 BrowseSourceLoadingItem()
             }
         }
@@ -49,10 +51,10 @@ fun BrowseSourceList(
             )
         }
 
-        item {
-            if (!hideLoadingFooter &&
-                (mangaList.loadState.refresh is LoadState.Loading || mangaList.loadState.append is LoadState.Loading)
-            ) {
+        if (!hideLoadingFooter &&
+            (mangaList.loadState.refresh is LoadState.Loading || mangaList.loadState.append is LoadState.Loading)
+        ) {
+            item {
                 BrowseSourceLoadingItem()
             }
         }

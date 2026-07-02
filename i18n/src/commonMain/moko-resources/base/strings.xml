@@ -69,6 +69,9 @@
     <string name="browse_fetch_complete_ok">Fetched %1$d titles</string>
     <string name="browse_fetch_busy">A fetch is already running in the background</string>
     <string name="browse_anchor_load_started">Background loading started — it runs a few pages at a time; check the notification for progress</string>
+    <string name="action_scroll_to_anchor">Jump to anchor</string>
+    <string name="anchor_not_loaded">Anchor isn\'t in the loaded list yet</string>
+    <string name="browse_fetch_running_text">%1$s · %2$d/%3$d</string>
     <string name="browse_anchor_load_running_title">Loading to anchor</string>
     <string name="browse_anchor_load_running_text">%1$s · page %2$d · %3$d loaded</string>
     <string name="browse_anchor_load_complete_title">Auto-load complete</string>

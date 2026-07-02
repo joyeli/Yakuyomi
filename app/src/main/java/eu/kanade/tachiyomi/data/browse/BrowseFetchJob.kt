@@ -59,7 +59,18 @@ class BrowseFetchJob(context: Context, workerParams: WorkerParameters) : Corouti
         val sourceName = manager.sourceName(state.sourceId)
         return applicationContext.notificationBuilder(Notifications.CHANNEL_BROWSE_FETCH) {
             setContentTitle(applicationContext.stringResource(MR.strings.browse_fetch_running_title))
-            setContentText(sourceName)
+            setContentText(
+                if (state.total > 0) {
+                    applicationContext.stringResource(
+                        MR.strings.browse_fetch_running_text,
+                        sourceName,
+                        state.done,
+                        state.total,
+                    )
+                } else {
+                    sourceName
+                },
+            )
             if (state.total > 0) setProgress(state.total, state.done, false)
             setSmallIcon(android.R.drawable.stat_sys_download)
             setOngoing(true)

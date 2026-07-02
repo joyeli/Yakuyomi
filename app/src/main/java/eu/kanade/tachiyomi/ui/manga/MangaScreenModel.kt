@@ -153,6 +153,10 @@ class MangaScreenModel(
     private val selectedPositions: Array<Int> = arrayOf(-1, -1) // first and last selected index in list
     private val selectedChapterIds: HashSet<Long> = HashSet()
 
+    // Yakuyomi：探索錨點（詳情頁入口）。⚠️ 必須宣告在 init{} 之前——init 啟動的 IO coroutine 會用到；
+    // Kotlin 按宣告順序初始化，宣告在 init 之後曾造成 coroutine 搶先取用 → NPE 閃退（不定期、race）。
+    private val sourcePreferences: eu.kanade.domain.source.service.SourcePreferences = Injekt.get()
+
     /**
      * Helper function to update the UI state only if it's currently in success state
      */
@@ -421,9 +425,6 @@ class MangaScreenModel(
             it.copy(dialog = Dialog.SetFetchInterval(manga))
         }
     }
-
-    // Yakuyomi：探索錨點（詳情頁入口）。
-    private val sourcePreferences: eu.kanade.domain.source.service.SourcePreferences = Injekt.get()
 
     fun showSetAnchorDialog() {
         successState ?: return

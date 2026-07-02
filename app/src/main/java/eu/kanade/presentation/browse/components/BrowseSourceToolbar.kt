@@ -5,6 +5,7 @@ import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.ViewModule
 import androidx.compose.material.icons.outlined.Flag
+import androidx.compose.material.icons.outlined.MyLocation
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarScrollBehavior
@@ -47,6 +48,8 @@ fun BrowseSourceToolbar(
     isResumingAnchor: Boolean = false,
     // Yakuyomi：清除快照（overflow，僅有快照時非空）。
     onClearSnapshot: (() -> Unit)? = null,
+    // Yakuyomi：滑到錨點（已設錨點時非空；快照/一般清單皆可，錨點未載入時由呼叫端提示）。
+    onScrollToAnchor: (() -> Unit)? = null,
 ) {
     // Avoid capturing unstable source in actions lambda
     val title = source?.name
@@ -90,6 +93,16 @@ fun BrowseSourceToolbar(
                                 title = stringResource(MR.strings.action_set_anchor),
                                 icon = Icons.Outlined.Flag,
                                 onClick = onMarkFirstAsAnchor,
+                            ),
+                        )
+                    }
+                    // Yakuyomi：滑到錨點（大快照/長清單快速定位；已設錨點時顯示）。
+                    if (onScrollToAnchor != null) {
+                        add(
+                            AppBar.Action(
+                                title = stringResource(MR.strings.action_scroll_to_anchor),
+                                icon = Icons.Outlined.MyLocation,
+                                onClick = onScrollToAnchor,
                             ),
                         )
                     }

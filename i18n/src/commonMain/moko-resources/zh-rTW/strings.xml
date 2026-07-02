@@ -1079,6 +1079,9 @@
     <string name="browse_fetch_complete_ok">已擷取 %1$d 本</string>
     <string name="browse_fetch_busy">已有擷取在背景執行，請先中止</string>
     <string name="browse_anchor_load_started">背景載入已開始 — 會一次抓幾頁慢慢跑，進度看通知</string>
+    <string name="action_scroll_to_anchor">滑到錨點</string>
+    <string name="anchor_not_loaded">錨點尚未載入到此清單</string>
+    <string name="browse_fetch_running_text">%1$s · %2$d/%3$d</string>
     <string name="browse_anchor_load_running_title">載入到錨點中</string>
     <string name="browse_anchor_load_running_text">%1$s · 第 %2$d 頁 · 已載 %3$d 本</string>
     <string name="browse_anchor_load_complete_title">自動載入完成</string>

@@ -66,11 +66,13 @@ import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.launch
 import mihon.feature.migration.dialog.MigrateMangaDialog
 import mihon.presentation.core.util.collectAsLazyPagingItems
 import tachiyomi.core.common.Constants
 import tachiyomi.core.common.preference.TriState
 import tachiyomi.core.common.util.lang.launchIO
+import tachiyomi.domain.library.model.LibraryDisplayMode
 import tachiyomi.domain.source.model.StubSource
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.material.Scaffold
@@ -274,6 +276,27 @@ data class BrowseSourceScreen(
                         },
                         onClearSnapshot = if (snapshot != null) {
                             { showSnapshotClearConfirm = true }
+                        } else {
+                            null
+                        },
+                        // 滑到錨點：在「已載入項」找錨點 index 直接跳（快照＝靜態全載必中；一般清單只搜已載入頁，
+                        // 未載入→提示。不自動翻頁去找＝那就是被 ban 的 burst）。
+                        onScrollToAnchor = if (anchorUrl != null) {
+                            {
+                                val idx = mangaList.itemSnapshotList.items
+                                    .indexOfFirst { it.value.url == anchorUrl }
+                                if (idx >= 0) {
+                                    scope.launch {
+                                        if (screenModel.displayMode == LibraryDisplayMode.List) {
+                                            listState.scrollToItem(idx)
+                                        } else {
+                                            gridState.scrollToItem(idx)
+                                        }
+                                    }
+                                } else {
+                                    context.toast(MR.strings.anchor_not_loaded)
+                                }
+                            }
                         } else {
                             null
                         },
