@@ -19,8 +19,9 @@ class GetApplicationRelease(
     suspend fun await(arguments: Arguments): Result {
         val now = Instant.now()
 
-        // Limit checks to once every 3 days at most
-        val nextCheckTime = Instant.ofEpochMilli(lastChecked.get()).plus(3, ChronoUnit.DAYS)
+        // Yakuyomi：啟動自動檢查的節流從上游 3 天縮到 6 小時——本 fork 發版節奏快（常一週數版），
+        // 3 天會讓「開 app 就看到更新」形同虛設、只剩「關於」頁手動查（forceCheck 不受此限）。
+        val nextCheckTime = Instant.ofEpochMilli(lastChecked.get()).plus(6, ChronoUnit.HOURS)
         if (!arguments.forceCheck && now.isBefore(nextCheckTime)) {
             return Result.NoNewUpdate
         }
