@@ -575,7 +575,9 @@ class ReaderActivity : BaseActivity() {
             onShare = ::shareChapter.takeIf { isHttpSource },
 
             chapterNavigatorType = if (isPagerType || !verticalNavigatorForLongStrip) {
-                if (state.viewer is R2LPagerViewer) {
+                // Yakuyomi：用 PagerViewer.isRtl 判斷（涵蓋 R2LPagerViewer 與 R2LDoublePagerViewer）——
+                // 雙頁對開的 R2LDoublePagerViewer 不是 R2LPagerViewer 子類，原本的 `is R2LPagerViewer` 會漏判、進度條方向反掉。
+                if ((state.viewer as? PagerViewer)?.isRtl == true) {
                     ChapterNavigatorType.HORIZONTAL_RTL
                 } else {
                     ChapterNavigatorType.HORIZONTAL_LTR
