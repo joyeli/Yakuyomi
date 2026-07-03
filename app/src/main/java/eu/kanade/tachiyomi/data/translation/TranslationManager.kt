@@ -176,6 +176,20 @@ class TranslationManager(private val context: Context) {
      */
     private fun masterEnabled(): Boolean = translationPreferences.translationMasterEnabled.get()
 
+    /**
+     * 是否還有「該被翻」的章（QUEUE 或正在 TRANSLATING、排除整本暫停者），且總開關開、未使用者暫停。
+     * 給 [TranslationHeartbeatJob] 判斷要不要把前景服務拉回來（vivo 這類 OEM 硬殺前景服務後的自動恢復）。
+     */
+    fun hasPendingWork(): Boolean {
+        if (_isPaused.value || !masterEnabled()) return false
+        return synchronized(lock) {
+            entries.any {
+                (it.status == TranslationItem.Status.QUEUE || it.status == TranslationItem.Status.TRANSLATING) &&
+                    it.manga.id !in pausedMangaIds
+            }
+        }
+    }
+
     private fun publish() {
         _queueState.value = synchronized(lock) {
             entries.map {
@@ -723,6 +737,8 @@ class TranslationManager(private val context: Context) {
             }
         } finally {
             if (wakeLock.isHeld) wakeLock.release()
+            // drain 收工（佇列空/暫停/總開關關）→ 停背景心跳（沒事做就別每 15 分醒來）。
+            if (!hasPendingWork()) TranslationHeartbeatJob.stop(context)
         }
     }
 

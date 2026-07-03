@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.asFlow
+import androidx.work.BackoffPolicy
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
 import androidx.work.ForegroundInfo
@@ -33,6 +34,7 @@ import tachiyomi.domain.translation.service.TranslationPreferences
 import tachiyomi.i18n.MR
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import java.util.concurrent.TimeUnit
 
 /**
  * 翻譯佇列的前景服務（對照 [eu.kanade.tachiyomi.data.download.DownloadJob]）。
@@ -147,13 +149,19 @@ class TranslationJob(context: Context, workerParams: WorkerParameters) : Corouti
             // 前景服務被拆 → 跑在 TranslationManager.scope 的翻譯失去保活、背景被凍。網路只在 LLM 那步要、本就有重試。
             val request = OneTimeWorkRequestBuilder<TranslationJob>()
                 .addTag(TAG)
+                // 縮短「被 OEM 硬殺後」的重排間隔（預設 30s 指數 → 10s 線性）：process 被殺時 worker 沒 return，
+                // WorkManager 依此 backoff 重排 → 更快重啟前景服務、從 manifest 續傳，vivo 這類頻繁殺 process 的走停更連續。
+                .setBackoffCriteria(BackoffPolicy.LINEAR, 10, TimeUnit.SECONDS)
                 .build()
             WorkManager.getInstance(context)
                 .enqueueUniqueWork(TAG, ExistingWorkPolicy.KEEP, request)
+            // 一併起週期心跳：前景服務被 OEM 硬殺後由它週期性拉回來（見 TranslationHeartbeatJob）。
+            TranslationHeartbeatJob.start(context)
         }
 
         fun stop(context: Context) {
             WorkManager.getInstance(context).cancelUniqueWork(TAG)
+            TranslationHeartbeatJob.stop(context)
         }
 
         fun isRunningFlow(context: Context): Flow<Boolean> {
