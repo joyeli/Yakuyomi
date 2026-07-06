@@ -39,6 +39,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -48,6 +49,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -75,6 +77,8 @@ fun FloatingSearchBar(
     onClickSavedSearches: () -> Unit,
     menuExpanded: Boolean,
     onMenuExpandedChange: (Boolean) -> Unit,
+    // Yakuyomi：回報搜尋框焦點（有焦點＝正在打字/IME 選字）→ 呼叫端據此不做閒置自動收合，避免選字中被收掉丟字。
+    onSearchFocusChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     AnimatedContent(
@@ -99,8 +103,11 @@ fun FloatingSearchBar(
                 onClickSavedSearches = onClickSavedSearches,
                 menuExpanded = menuExpanded,
                 onMenuExpandedChange = onMenuExpandedChange,
+                onSearchFocusChanged = onSearchFocusChanged,
             )
         } else {
+            // 收合成球 → 必定回報失焦（清掉殘留焦點狀態，讓下次展開的閒置收合能正常計時）。
+            LaunchedEffect(Unit) { onSearchFocusChanged(false) }
             // 收合：右下小球。
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 CollapsedBall(
@@ -130,6 +137,7 @@ private fun ExpandedSearchBar(
     onClickSavedSearches: () -> Unit,
     menuExpanded: Boolean,
     onMenuExpandedChange: (Boolean) -> Unit,
+    onSearchFocusChanged: (Boolean) -> Unit,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -155,7 +163,8 @@ private fun ExpandedSearchBar(
                 onValueChange = { onSearchQueryChange(it) },
                 modifier = Modifier
                     .weight(1f)
-                    .focusRequester(focusRequester),
+                    .focusRequester(focusRequester)
+                    .onFocusChanged { onSearchFocusChanged(it.isFocused) },
                 singleLine = true,
                 textStyle = LocalTextStyle.current.copy(color = MaterialTheme.colorScheme.onSurface),
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),

@@ -151,10 +151,20 @@ data object LibraryTab : Tab {
         val searchFocusRequester = remember { FocusRequester() }
         // Yakuyomi：三點選單是否開著（從 FloatingSearchBar 提升）。
         var overflowMenuOpen by remember { mutableStateOf(false) }
-        // 閒置 3 秒收合——但搜尋字非空、篩選/已存搜尋對話框開著、或三點選單開著時皆不收（維持展開）。
-        LaunchedEffect(searchBarExpanded, state.searchQuery, state.floatingSearchBar, state.dialog, overflowMenuOpen) {
+        // Yakuyomi：搜尋框是否有焦點（正在打字/IME 選字）——有焦點時不做閒置收合。
+        var searchFocused by remember { mutableStateOf(false) }
+        // 閒置 3 秒收合——但搜尋框有焦點（打字/選字中）、搜尋字非空、篩選/已存搜尋對話框開著、或三點選單開著時皆不收。
+        // 焦點條件很關鍵：IME 選字期間字還沒 commit 到 searchQuery（仍為空），只看 searchQuery 會誤收、把選到一半的字丟掉。
+        LaunchedEffect(
+            searchBarExpanded,
+            state.searchQuery,
+            state.floatingSearchBar,
+            state.dialog,
+            overflowMenuOpen,
+            searchFocused,
+        ) {
             if (state.floatingSearchBar && searchBarExpanded && state.searchQuery.isNullOrEmpty() &&
-                state.dialog == null && !overflowMenuOpen
+                state.dialog == null && !overflowMenuOpen && !searchFocused
             ) {
                 delay(3_000)
                 searchBarExpanded = false
@@ -229,6 +239,7 @@ data object LibraryTab : Tab {
                         onClickSavedSearches = screenModel::openSavedSearchesDialog,
                         menuExpanded = overflowMenuOpen,
                         onMenuExpandedChange = { overflowMenuOpen = it },
+                        onSearchFocusChanged = { searchFocused = it },
                         modifier = Modifier
                             .fillMaxWidth()
                             .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
