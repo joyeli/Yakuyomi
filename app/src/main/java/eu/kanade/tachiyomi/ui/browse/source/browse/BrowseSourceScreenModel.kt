@@ -186,7 +186,16 @@ class BrowseSourceScreenModel(
                     .cachedIn(ioCoroutineScope)
             } else {
                 // Pager 只跟著 listing（熱門/最新/搜尋）建立並 cachedIn → 只有切換 listing 才重抓來源。
-                Pager(PagingConfig(pageSize = 25)) {
+                // 防 ban：預設 prefetchDistance=pageSize=25、initialLoadSize=3×=75 會讓「一搜/一捲動」提前連抓好幾頁
+                // 湊緩衝（漫画柜這類敏感來源＝短時間對搜尋 endpoint 連爆 → 封 IP）。改成幾乎不提前預抓（prefetchDistance=3）、
+                // 初始不 3×（initialLoadSize=pageSize）→ 送出的分頁請求數 ≈ 真人翻頁數。代價：捲到接近底部才載下一頁、略頓。
+                Pager(
+                    PagingConfig(
+                        pageSize = 25,
+                        initialLoadSize = 25,
+                        prefetchDistance = 3,
+                    ),
+                ) {
                     getRemoteManga(sourceId, listing.query ?: "", listing.filters)
                 }.flow.map { pagingData ->
                     pagingData.map { manga ->
