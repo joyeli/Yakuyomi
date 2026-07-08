@@ -270,6 +270,13 @@ class BrowseSourceScreenModel(
         browseFilterFetched.set(TriState.DISABLED)
     }
 
+    // Yakuyomi：離開探索（此來源頁真正被 pop、screenModel 回收）時自動清掉全域篩選——狀態不留到下次回來。
+    // 進 manga 詳情再返回不觸發（screenModel 留在返回堆疊、不 dispose），故瀏覽當下的篩選不會被清。
+    override fun onDispose() {
+        super.onDispose()
+        clearGlobalFilters()
+    }
+
     /**
      * 設此 source 的錨點為這本（取代舊的）。錨點更新後修剪快照（砍掉錨點之後的更舊項，錨點成為最後一筆）。
      * 修剪（解析大 json）挪到 IO 免卡 UI；修剪後 bump snapshotRefresh → 若正停在快照清單（長壓重設錨點）就地刷新。
