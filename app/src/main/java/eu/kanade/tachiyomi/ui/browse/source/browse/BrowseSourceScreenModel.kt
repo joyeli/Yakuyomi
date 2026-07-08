@@ -227,16 +227,19 @@ class BrowseSourceScreenModel(
                         // 收藏（三態）
                         if (favFilter == TriState.ENABLED_IS && !m.favorite) return@passes false
                         if (favFilter == TriState.ENABLED_NOT && m.favorite) return@passes false
-                        // 開卷＝該本任一章「已讀 or 有閱讀進度（lastPageRead>0）」：有讀過就算，不限整話讀完。只在啟用時查 DB。
+                        // 開卷＝該本任一章「已讀 or 有閱讀進度（lastPageRead>0）」：有讀過就算，不限整話讀完。
+                        // 只在「開卷/擷取」任一啟用時查 DB（擷取判定要用到 started，見下）。
+                        val started = (readFilter != TriState.DISABLED || fetchedFilter != TriState.DISABLED) &&
+                            m.id > 0L &&
+                            getChaptersByMangaId.await(m.id).any { it.read || it.lastPageRead > 0 }
                         if (readFilter != TriState.DISABLED) {
-                            val started = m.id > 0L &&
-                                getChaptersByMangaId.await(m.id).any { it.read || it.lastPageRead > 0 }
                             if (readFilter == TriState.ENABLED_IS && !started) return@passes false
                             if (readFilter == TriState.ENABLED_NOT && started) return@passes false
                         }
-                        // 擷取＝詳情曾被載入過（initialized：曾點進去/載過書目說明）；未擷取＝全新沒點過。
+                        // 擷取＝詳情曾被載入過（initialized）；未擷取＝全新沒點過。
+                        // 開卷過必定已擷取（要讀必先載過詳情）→ 把 started 併入，避免「已開卷＋未擷取」這種矛盾結果。
                         if (fetchedFilter != TriState.DISABLED) {
-                            val fetched = m.initialized
+                            val fetched = m.initialized || started
                             if (fetchedFilter == TriState.ENABLED_IS && !fetched) return@passes false
                             if (fetchedFilter == TriState.ENABLED_NOT && fetched) return@passes false
                         }
