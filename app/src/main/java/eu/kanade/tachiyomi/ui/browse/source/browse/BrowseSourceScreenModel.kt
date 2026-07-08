@@ -133,6 +133,9 @@ class BrowseSourceScreenModel(
     val browseFilterRead = sourcePreferences.browseFilterRead
     val browseFilterFetched = sourcePreferences.browseFilterFetched
 
+    // Yakuyomi：全局浮動搜尋開關（與書庫同一顆）。開＝探索頁改用頂部窄 bar＋右下浮動球。
+    val floatingSearchBar = libraryPreferences.floatingSearchBar
+
     // Yakuyomi：探索「錨點」（每 source 一本，值＝mangaUrl）。標「上次處理到這」，瀏覽清單以旗標徽章標出。
     val browseAnchor = sourcePreferences.browseAnchor(sourceId)
 

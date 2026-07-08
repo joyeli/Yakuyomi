@@ -668,7 +668,7 @@
     <string name="information_no_entries_found">類別沒有作品</string>
     <string name="fdroid_warning">F-Droid 的組建未被正式支援\n輕觸以瞭解詳情</string>
     <string name="action_display_show_continue_reading_button">繼續閱讀按鈕</string>
-    <string name="action_display_floating_search_bar">浮動搜尋列</string>
+    <string name="action_display_floating_search_bar">浮動搜尋（書庫＋探索）</string>
     <string name="track_remove_date_conf_title">移除日期？</string>
     <string name="track_remove_finish_date_conf_text">從「%s」移除你先前輸入的閱讀完畢日期</string>
     <string name="track_remove_start_date_conf_text">從「%s」移除你先前輸入的開始閱讀日期</string>
@@ -1071,6 +1071,8 @@
     <string name="snapshot_clear_confirm">清除這個來源已儲存的快照？</string>
     <string name="snapshot_saved">已儲存快照（%1$d 本）</string>
     <string name="listing_snapshot">快照</string>
+    <string name="browse_snapshot_bar_title">快照 · %1$d 本</string>
+    <string name="browse_fetching">擷取中 %1$d/%2$d</string>
     <string name="save_snapshot_after_load_confirm">已載入 %1$d 本。要存成快照，下次離線重看嗎？</string>
     <string name="action_browse_filter_favorite">已收藏</string>
     <string name="action_browse_filter_read">已開卷</string>
