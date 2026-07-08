@@ -127,8 +127,11 @@ fun BrowseSourceTopControlBar(
                 text = listingLabel,
                 selected = listingHighlighted,
                 onClick = {
-                    // 支援最新＝在熱門/最新間切；不支援＝固定去熱門（也是離開快照/搜尋的入口）。
                     when {
+                        // 不在列表清單（快照/搜尋隱藏頁）＝回到最後所在的列表清單，不做切換。
+                        !listingHighlighted ->
+                            if (shownListing == BrowseListingKind.LATEST) onSelectLatest() else onSelectPopular()
+                        // 在列表清單：支援最新＝熱門↔最新切換；不支援＝固定熱門。
                         !supportsLatest -> onSelectPopular()
                         shownListing == BrowseListingKind.LATEST -> onSelectPopular()
                         else -> onSelectLatest()

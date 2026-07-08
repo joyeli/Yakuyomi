@@ -181,8 +181,11 @@ data class BrowseSourceScreen(
                 preSearchListing = listingKind
             }
         }
-        val topBarShownListing =
-            if (listingKind == BrowseListingKind.SEARCH) preSearchListing else listingKind
+        // 搜尋/快照＝顯示（並返回）最後所在的列表清單（熱門/最新）；在列表清單則顯示自己。
+        val topBarShownListing = when (listingKind) {
+            BrowseListingKind.POPULAR, BrowseListingKind.LATEST -> listingKind
+            else -> preSearchListing
+        }
         val listingHighlighted = !isSnapshotListing && listingKind != BrowseListingKind.SEARCH
         // 背景任務（自動載入到錨點 / 批次擷取詳情）跑時：不自動收合 + 收合球顯示進度＋停止。
         val bgJobRunning = fetchState.running || autoLoading
