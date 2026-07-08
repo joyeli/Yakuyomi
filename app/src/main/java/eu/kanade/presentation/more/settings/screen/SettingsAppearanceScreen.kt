@@ -19,6 +19,7 @@ import eu.kanade.presentation.more.settings.screen.appearance.AppLanguageScreen
 import eu.kanade.presentation.more.settings.widget.AppThemeModePreferenceWidget
 import eu.kanade.presentation.more.settings.widget.AppThemePreferenceWidget
 import eu.kanade.tachiyomi.util.system.toast
+import tachiyomi.domain.library.service.LibraryPreferences
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.collectAsState
@@ -35,10 +36,11 @@ object SettingsAppearanceScreen : SearchableSettings {
     @Composable
     override fun getPreferences(): List<Preference> {
         val uiPreferences = remember { Injekt.get<UiPreferences>() }
+        val libraryPreferences = remember { Injekt.get<LibraryPreferences>() }
 
         return listOf(
             getThemeGroup(uiPreferences = uiPreferences),
-            getDisplayGroup(uiPreferences = uiPreferences),
+            getDisplayGroup(uiPreferences = uiPreferences, libraryPreferences = libraryPreferences),
         )
     }
 
@@ -101,6 +103,7 @@ object SettingsAppearanceScreen : SearchableSettings {
     @Composable
     private fun getDisplayGroup(
         uiPreferences: UiPreferences,
+        libraryPreferences: LibraryPreferences,
     ): Preference.PreferenceGroup {
         val context = LocalContext.current
         val navigator = LocalNavigator.currentOrThrow
@@ -162,6 +165,12 @@ object SettingsAppearanceScreen : SearchableSettings {
                     preference = uiPreferences.bottomNavCompact,
                     title = stringResource(MR.strings.pref_bottom_nav_compact),
                     subtitle = stringResource(MR.strings.pref_bottom_nav_compact_summary),
+                ),
+                // Yakuyomi：單手浮動搜尋球（書庫＋探索）——已是全局互動設定，故從書庫「顯示」對話框移到這。
+                Preference.PreferenceItem.SwitchPreference(
+                    preference = libraryPreferences.floatingSearchBar,
+                    title = stringResource(MR.strings.action_display_floating_search_bar),
+                    subtitle = stringResource(MR.strings.pref_floating_search_bar_summary),
                 ),
             ),
         )

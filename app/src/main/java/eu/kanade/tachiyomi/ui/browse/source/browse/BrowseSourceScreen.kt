@@ -21,9 +21,7 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.Favorite
 import androidx.compose.material.icons.outlined.FilterList
-import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.History
-import androidx.compose.material.icons.outlined.MyLocation
 import androidx.compose.material.icons.outlined.NewReleases
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material3.AlertDialog
@@ -190,7 +188,11 @@ data class BrowseSourceScreen(
         val bgJobRunning = fetchState.running || autoLoading
         val bgJobProgress = when {
             fetchState.running -> "${fetchState.done}/${fetchState.total}"
-            autoLoading -> anchorLoadState.loaded.toString()
+            autoLoading -> context.contextStringResource(
+                MR.strings.browse_anchor_load_progress,
+                anchorLoadState.page,
+                anchorLoadState.loaded,
+            )
             else -> ""
         }
         val onStopBgJob: () -> Unit = {
@@ -359,68 +361,18 @@ data class BrowseSourceScreen(
                             onHelpClick = onHelpClick,
                             onSettingsClick = { navigator.push(SourcePreferencesScreen(sourceId)) },
                             onSearch = screenModel::search,
-                            // 錨點按鈕只在「最新」清單露出（追更新工作流）；依狀態切換：標記錨點 / 自動載入 / 停止。
-                            // 自動載入改成背景任務：開＝startAnchorLoad（週期冷卻防 ban、完成存快照）、停＝cancelAnchorLoad。
-                            onStopAutoLoad = if (autoLoading) {
-                                { screenModel.cancelAnchorLoad() }
-                            } else {
-                                null
-                            },
-                            onAutoLoadToAnchor = if (
-                                !autoLoading && state.listing is Listing.Latest && anchorUrlPref.isNotEmpty()
-                            ) {
-                                {
-                                    val started = screenModel.startAnchorLoad()
-                                    context.toast(
-                                        if (started) {
-                                            MR.strings.browse_anchor_load_started
-                                        } else {
-                                            MR.strings.browse_fetch_busy
-                                        },
-                                    )
-                                }
-                            } else {
-                                null
-                            },
-                            // 續傳中（未到錨點、還有得抓）→ 按鈕標籤改「繼續載入」，即使 toast 消失也持續引導。
-                            isResumingAnchor = anchorResumePage > 0,
-                            onMarkFirstAsAnchor = if (
-                                !autoLoading && state.listing is Listing.Latest && anchorUrlPref.isEmpty()
-                            ) {
-                                {
-                                    mangaList.itemSnapshotList.items.firstOrNull()?.let {
-                                        screenModel.setAnchor(it.value)
-                                    }
-                                }
-                            } else {
-                                null
-                            },
+                            // 錨點的 start/stop/mark 移到右下 FAB（比照擷取詳情：進度可見、就地可停；
+                            // 最新＋有錨點→載入到錨點，其餘→直接存當前頁快照）。設錨點改由長按書本「設為錨點」。
+                            onStopAutoLoad = null,
+                            onAutoLoadToAnchor = null,
+                            onMarkFirstAsAnchor = null,
                             onClearSnapshot = if (snapshot != null) {
                                 { showSnapshotClearConfirm = true }
                             } else {
                                 null
                             },
-                            // 滑到錨點：在「已載入項」找錨點 index 直接跳（快照＝靜態全載必中；一般清單只搜已載入頁，
-                            // 未載入→提示。不自動翻頁去找＝那就是被 ban 的 burst）。
-                            onScrollToAnchor = if (anchorUrl != null) {
-                                {
-                                    val idx = mangaList.itemSnapshotList.items
-                                        .indexOfFirst { it.value.url == anchorUrl }
-                                    if (idx >= 0) {
-                                        scope.launch {
-                                            if (screenModel.displayMode == LibraryDisplayMode.List) {
-                                                listState.scrollToItem(idx)
-                                            } else {
-                                                gridState.scrollToItem(idx)
-                                            }
-                                        }
-                                    } else {
-                                        context.toast(MR.strings.anchor_not_loaded)
-                                    }
-                                }
-                            } else {
-                                null
-                            },
+                            // 滑到錨點鈕移除：修剪後錨點一定是快照最後一筆，往下滑到底＝錨點，不需專用鈕。
+                            onScrollToAnchor = null,
                         )
 
                         Row(
@@ -515,9 +467,9 @@ data class BrowseSourceScreen(
             },
             bottomBar = {
                 if (floatingBar) {
-                    // 錨點狀態機（行內鈕與 ⋮ 選單共用，避免分歧）：
-                    // 載入中→停止（任何清單，A2）；最新且有錨點→開始/繼續；最新無錨點→標記第一筆；其餘→無。
-                    val anchorFirstItem = mangaList.itemSnapshotList.items.firstOrNull()?.value
+                    // 錨點狀態機（行內鈕與 ⋮ 選單共用，避免分歧；對齊傳統模式 FAB）：
+                    // 載入中→停止（任何清單，A2）；最新且有錨點→開始/繼續載入到錨點；
+                    // 其餘（無錨點/熱門/搜尋）→直接存當前頁快照（設錨點改由長按書本「設為錨點」）。
                     val anchorIcon: ImageVector?
                     val anchorLabel: String
                     val onAnchor: (() -> Unit)?
@@ -547,15 +499,10 @@ data class BrowseSourceScreen(
                                 )
                             }
                         }
-                        state.listing is Listing.Latest && anchorUrlPref.isEmpty() && anchorFirstItem != null -> {
-                            anchorIcon = Icons.Outlined.Flag
-                            anchorLabel = context.contextStringResource(MR.strings.action_set_anchor)
-                            onAnchor = { screenModel.setAnchor(anchorFirstItem) }
-                        }
                         else -> {
-                            anchorIcon = null
-                            anchorLabel = ""
-                            onAnchor = null
+                            anchorIcon = Icons.Outlined.History
+                            anchorLabel = context.contextStringResource(MR.strings.action_save_snapshot)
+                            onAnchor = { saveSnapshotNow() }
                         }
                     }
                     // 擷取詳情動作（點＝開始/停止）：快照展開列的行內鈕與長壓選單共用。
@@ -576,27 +523,6 @@ data class BrowseSourceScreen(
                             snapshotCount.coerceAtLeast(0),
                         )
                     }
-                    // 滑到錨點動作（快照＋有錨點才有）：快照展開列的行內鈕與長壓選單共用。
-                    val scrollToAnchorAction: (() -> Unit)? =
-                        if (isSnapshotListing && anchorUrl != null) {
-                            {
-                                val idx = mangaList.itemSnapshotList.items
-                                    .indexOfFirst { it.value.url == anchorUrl }
-                                if (idx >= 0) {
-                                    scope.launch {
-                                        if (screenModel.displayMode == LibraryDisplayMode.List) {
-                                            listState.scrollToItem(idx)
-                                        } else {
-                                            gridState.scrollToItem(idx)
-                                        }
-                                    }
-                                } else {
-                                    context.toast(MR.strings.anchor_not_loaded)
-                                }
-                            }
-                        } else {
-                            null
-                        }
                     // 動作項（⋮ tap 與長壓共用的中段）：顯示模式 / 網頁 / 設定 / 說明 / 清除快照。
                     val actionItems = buildList {
                         add(
@@ -668,15 +594,6 @@ data class BrowseSourceScreen(
                                         onClick = fetchDetailsAction,
                                     ),
                                 )
-                                scrollToAnchorAction?.let {
-                                    add(
-                                        BrowseBallMenuItem(
-                                            label = context.contextStringResource(MR.strings.action_scroll_to_anchor),
-                                            icon = Icons.Outlined.MyLocation,
-                                            onClick = it,
-                                        ),
-                                    )
-                                }
                             } else {
                                 onAnchor?.let {
                                     add(BrowseBallMenuItem(label = anchorLabel, icon = anchorIcon, onClick = it))
@@ -726,7 +643,6 @@ data class BrowseSourceScreen(
                         onFetchDetails = fetchDetailsAction,
                         fetchRunning = fetchState.running,
                         snapshotLeftText = snapshotLeftText,
-                        onScrollToAnchor = scrollToAnchorAction,
                         anchorInline = onAnchor,
                         anchorInlineIcon = anchorIcon,
                         anchorInlineDesc = anchorLabel,
@@ -747,51 +663,110 @@ data class BrowseSourceScreen(
             },
             snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
             floatingActionButton = {
-                // Yakuyomi：批次擷取詳情＋章節。**只在快照模式顯示**——快照是凍結的有界清單、擷取有明確終點；
-                // 熱門/最新/搜尋是無限分頁，批次擷取會無止盡，故不提供。對清單全部逐一抓、節流防 ban；
-                // 進行中顯示 X/N + 停止鈕。
-                if (!floatingBar && isSnapshotListing) {
-                    // 背景單一全域槽：Running 時按鈕變身成「進度＋中止」（顯示的是背景那份、非當前 filter），
-                    // 所以按不到第二次送出＝天然防多重送；按下＝中止背景那份（不論哪個來源在跑）。
-                    val running = fetchState.running
-                    SmallExtendedFloatingActionButton(
-                        text = {
-                            Text(
-                                text = if (running) {
-                                    "${fetchState.done}/${fetchState.total}"
-                                } else {
-                                    stringResource(MR.strings.action_fetch_details)
+                // Yakuyomi：傳統模式（浮動搜尋關）的單一 FAB（比照擷取詳情：進度可見、就地可停）。優先序：
+                // ① 自動載入到錨點跑中＝已載入本數＋停止（任何清單都露出）。
+                // ② 快照清單＝「擷取詳情」FAB（凍結有界清單、擷取有明確終點；進行中 X/N＋停止）。
+                // ③ 最新＋已設錨點＝「載入到錨點」起始（跑起來後轉①）。
+                // ④ 其餘（無錨點/熱門/搜尋）＝「存快照」＝直接把當前頁載入的清單存成快照。
+                if (!floatingBar) {
+                    val autoLoadingThisSource =
+                        anchorLoadState.running && anchorLoadState.sourceId == sourceId
+                    when {
+                        autoLoadingThisSource -> {
+                            SmallExtendedFloatingActionButton(
+                                text = {
+                                    Text(
+                                        text = stringResource(
+                                            MR.strings.browse_anchor_load_progress,
+                                            anchorLoadState.page,
+                                            anchorLoadState.loaded,
+                                        ),
+                                    )
+                                },
+                                icon = { Icon(Icons.Filled.Stop, contentDescription = null) },
+                                onClick = { screenModel.cancelAnchorLoad() },
+                            )
+                        }
+                        isSnapshotListing -> {
+                            // 背景單一全域槽：Running 時按鈕變身成「進度＋中止」（顯示的是背景那份、非當前 filter），
+                            // 所以按不到第二次送出＝天然防多重送；按下＝中止背景那份（不論哪個來源在跑）。
+                            val running = fetchState.running
+                            SmallExtendedFloatingActionButton(
+                                text = {
+                                    Text(
+                                        text = if (running) {
+                                            "${fetchState.done}/${fetchState.total}"
+                                        } else {
+                                            stringResource(MR.strings.action_fetch_details)
+                                        },
+                                    )
+                                },
+                                icon = {
+                                    Icon(
+                                        imageVector = if (running) {
+                                            Icons.Filled.Stop
+                                        } else {
+                                            Icons.Outlined.CloudDownload
+                                        },
+                                        contentDescription = null,
+                                    )
+                                },
+                                onClick = {
+                                    if (running) {
+                                        screenModel.cancelBatchFetch()
+                                    } else {
+                                        val list = mangaList.itemSnapshotList.items.map { it.value }
+                                        if (list.isEmpty()) {
+                                            scope.launchIO {
+                                                snackbarHostState.showSnackbar(
+                                                    context.contextStringResource(MR.strings.fetch_details_empty),
+                                                )
+                                            }
+                                        } else if (!screenModel.startBatchFetch(list)) {
+                                            // 後端忙線硬拒（理論上 UI 已擋，作後援）。
+                                            scope.launchIO {
+                                                snackbarHostState.showSnackbar(
+                                                    context.contextStringResource(MR.strings.browse_fetch_busy),
+                                                )
+                                            }
+                                        }
+                                    }
                                 },
                             )
-                        },
-                        icon = {
-                            Icon(
-                                imageVector = if (running) Icons.Filled.Stop else Icons.Outlined.CloudDownload,
-                                contentDescription = null,
+                        }
+                        state.listing is Listing.Latest && anchorUrlPref.isNotEmpty() -> {
+                            SmallExtendedFloatingActionButton(
+                                text = {
+                                    Text(
+                                        text = if (anchorResumePage > 0) {
+                                            stringResource(MR.strings.action_continue_auto_load)
+                                        } else {
+                                            stringResource(MR.strings.action_auto_load_to_anchor)
+                                        },
+                                    )
+                                },
+                                icon = { Icon(Icons.Outlined.PlayArrow, contentDescription = null) },
+                                onClick = {
+                                    val started = screenModel.startAnchorLoad()
+                                    context.toast(
+                                        if (started) {
+                                            MR.strings.browse_anchor_load_started
+                                        } else {
+                                            MR.strings.browse_fetch_busy
+                                        },
+                                    )
+                                },
                             )
-                        },
-                        onClick = {
-                            if (running) {
-                                screenModel.cancelBatchFetch()
-                            } else {
-                                val list = mangaList.itemSnapshotList.items.map { it.value }
-                                if (list.isEmpty()) {
-                                    scope.launchIO {
-                                        snackbarHostState.showSnackbar(
-                                            context.contextStringResource(MR.strings.fetch_details_empty),
-                                        )
-                                    }
-                                } else if (!screenModel.startBatchFetch(list)) {
-                                    // 後端忙線硬拒（理論上 UI 已擋，作後援）。
-                                    scope.launchIO {
-                                        snackbarHostState.showSnackbar(
-                                            context.contextStringResource(MR.strings.browse_fetch_busy),
-                                        )
-                                    }
-                                }
-                            }
-                        },
-                    )
+                        }
+                        else -> {
+                            // 無錨點 / 熱門 / 搜尋：直接把當前頁載入的清單存成快照。
+                            SmallExtendedFloatingActionButton(
+                                text = { Text(stringResource(MR.strings.action_save_snapshot)) },
+                                icon = { Icon(Icons.Outlined.History, contentDescription = null) },
+                                onClick = saveSnapshotNow,
+                            )
+                        }
+                    }
                 }
             },
         ) { paddingValues ->

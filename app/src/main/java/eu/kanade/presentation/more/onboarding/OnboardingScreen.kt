@@ -39,6 +39,7 @@ fun OnboardingScreen(
             StorageStep(),
             PermissionStep(),
             TranslationStep(onOpenTranslation = onOpenTranslation),
+            HighlightsStep(),
             GuidesStep(onRestoreBackup = onRestoreBackup),
         )
     }

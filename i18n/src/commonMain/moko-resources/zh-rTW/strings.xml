@@ -669,6 +669,7 @@
     <string name="fdroid_warning">F-Droid 的組建未被正式支援\n輕觸以瞭解詳情</string>
     <string name="action_display_show_continue_reading_button">繼續閱讀按鈕</string>
     <string name="action_display_floating_search_bar">浮動搜尋（書庫＋探索）</string>
+    <string name="pref_floating_search_bar_summary">書庫與探索改用底部單手搜尋球，取代上方工具列</string>
     <string name="track_remove_date_conf_title">移除日期？</string>
     <string name="track_remove_finish_date_conf_text">從「%s」移除你先前輸入的閱讀完畢日期</string>
     <string name="track_remove_start_date_conf_text">從「%s」移除你先前輸入的開始閱讀日期</string>
@@ -1037,6 +1038,15 @@
     <string name="onboarding_translation_heading">邊讀邊翻譯漫畫</string>
     <string name="onboarding_translation_description">Yakuyomi 能幫你偵測對話框、做 OCR、去字並重新排版。除了「翻譯」本身以外，全部都在這台裝置上跑——你的圖片不會外傳。只有辨識出來的文字會送到你選的雲端 LLM（用你自己的 API key——這可能產生費用）。\n\n此功能預設關閉。現在就設定，或隨時到「設定 → 翻譯」設定。</string>
     <string name="onboarding_translation_action">開啟翻譯設定</string>
+    <string name="onboarding_highlights_heading">Yakuyomi 亮點</string>
+    <string name="onboarding_highlights_search_title">單手浮動搜尋</string>
+    <string name="onboarding_highlights_search_desc">書庫與探索都能單手操作的底部搜尋球</string>
+    <string name="onboarding_highlights_snapshot_title">快照＋追更新錨點</string>
+    <string name="onboarding_highlights_snapshot_desc">離線瀏覽整站，背景幫你抓回上次看到的位置</string>
+    <string name="onboarding_highlights_doublepage_title">雙頁展開閱讀</string>
+    <string name="onboarding_highlights_doublepage_desc">見開頁自動併成一頁</string>
+    <string name="onboarding_highlights_stats_title">翻譯＆閱讀統計</string>
+    <string name="onboarding_highlights_stats_desc">看你翻了多少、讀了多少</string>
     <string name="pref_translation_quickstart">快速上手導覽</string>
     <string name="pref_translation_quickstart_summary">如何設定與使用翻譯</string>
     <string name="quickstart_what_title">在裝置上跑、自帶金鑰</string>
@@ -1073,6 +1083,7 @@
     <string name="listing_snapshot">快照</string>
     <string name="browse_snapshot_bar_title">快照 · %1$d 本</string>
     <string name="browse_fetching">擷取中 %1$d/%2$d</string>
+    <string name="browse_anchor_load_progress">%1$d 頁 · %2$d 本</string>
     <string name="save_snapshot_after_load_confirm">已載入 %1$d 本。要存成快照，下次離線重看嗎？</string>
     <string name="action_browse_filter_favorite">已收藏</string>
     <string name="action_browse_filter_read">已開卷</string>

@@ -30,11 +30,8 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.FilterList
-import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.MoreVert
-import androidx.compose.material.icons.outlined.MyLocation
-import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -69,7 +66,7 @@ import tachiyomi.presentation.core.theme.active
 // Yakuyomi：探索來源頁的「浮動控制」——由全局 floatingSearchBar 開關啟用（同書庫那顆）。
 // 收合時書目全螢幕、只留頂部窄 bar；搜尋/篩選/overflow/清單特有動作收進右下球。關閉開關時走傳統工具列（本檔不參與）。
 // 頂部 bar（返回＋名稱＋熱門/最新＋快照）＋球。展開列＝主輸入（左）＋常駐功能（右）＋⋮：
-//   非快照＝搜尋框 / ⧩篩選 · ▶錨點 / ⋮；快照＝「快照 · N 本」標題 / ☁擷取詳情 · ⧩篩選 · 📍滑到錨點 / ⋮。
+//   非快照＝搜尋框 / ⧩篩選 · ▶錨點 / ⋮；快照＝「快照 · N 本」標題 / ☁擷取詳情 · ⧩篩選 / ⋮。
 // 兩份選單（對齊書庫）：⋮（展開點三點）＝非常駐（沒擺上 bar 的剩餘功能）；
 //   長壓（收合球，快捷用）＝非常駐置頂 ＋ 常駐靠底（收合時無行內圖示可點，篩選置最底最好按）。
 // 背景任務（自動載入/批次擷取）跑時：收合球顯示進度＋停止，且不自動收合。
@@ -205,8 +202,6 @@ fun BrowseSourceFloatingBall(
     fetchRunning: Boolean,
     // 快照左側標題/進度（不可點）：閒置「快照 · N 本」、擷取中「擷取中 X/N」。
     snapshotLeftText: String = "",
-    // 快照：滑到錨點（已設錨點才有）。
-    onScrollToAnchor: (() -> Unit)? = null,
     // 非快照展開列的行內「錨點」鈕（狀態機：停止/開始/繼續/標記）；null=不顯示。
     anchorInline: (() -> Unit)? = null,
     anchorInlineIcon: ImageVector? = null,
@@ -266,15 +261,6 @@ fun BrowseSourceFloatingBall(
                         }
                         // 常駐：篩選。
                         FilterInlineButton(hasActiveFilters, onClickFilter)
-                        // 常駐：滑到錨點（有錨點才有）。
-                        if (onScrollToAnchor != null) {
-                            IconButton(onClick = onScrollToAnchor) {
-                                Icon(
-                                    Icons.Outlined.MyLocation,
-                                    contentDescription = stringResource(MR.strings.action_scroll_to_anchor),
-                                )
-                            }
-                        }
                     } else {
                         Icon(
                             Icons.Outlined.Search,
