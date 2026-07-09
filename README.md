@@ -102,16 +102,16 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 
 <div align="center">
 <img src="./.github/assets/yakuyomi-floating-search.gif" alt="Floating search: a one-handed search pill that collapses to a ball; long-press for a quick menu" height="440" hspace="6"/>
+<img src="./.github/assets/yakuyomi-browse-filter.gif" alt="Global browse filter: filter a source's loaded list by in-library / started / fetched" height="440" hspace="6"/>
 <br>
-<sub>A <b>one-handed floating search</b> that idles into a ball.</sub>
+<sub>A <b>one-handed floating search</b> that idles into a ball, and a <b>global browse filter</b> on the loaded list.</sub>
 </div>
 
 <div align="center">
-<img src="./.github/assets/yakuyomi-browse-filter.gif" alt="Global browse filter: filter a source's loaded list by in-library / started / fetched" height="440" hspace="6"/>
 <img src="./.github/assets/yakuyomi-browse-snapshot.gif" alt="Offline snapshot: save a source's loaded list to browse offline" height="440" hspace="6"/>
 <img src="./.github/assets/yakuyomi-browse-anchor.gif" alt="Per-source anchor: auto-load and scroll the Latest feed down to your last-processed point" height="440" hspace="6"/>
 <br>
-<sub><b>Catch up on any source</b> — filter the loaded list by <i>in library / started reading / details fetched</i>, auto-load down to your anchor, and save it as an offline snapshot.</sub>
+<sub><b>Catch up on any source</b> — save its loaded list as an <b>offline snapshot</b>, and <b>auto-load</b> the Latest feed down to your anchor.</sub>
 </div>
 
 **Large screens & foldables**

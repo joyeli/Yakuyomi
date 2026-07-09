@@ -102,16 +102,16 @@ Yakuyomi 是 [mihon](https://github.com/mihonapp/mihon) 的 fork，邊下載 / �
 
 <div align="center">
 <img src="./.github/assets/yakuyomi-floating-search.gif" alt="浮動搜尋：底部單手搜尋膠囊，閒置縮成球；長壓彈出快捷選單" height="440" hspace="6"/>
+<img src="./.github/assets/yakuyomi-browse-filter.gif" alt="全域瀏覽篩選：把來源清單依 已收藏／已開卷／已擷取 就地過濾" height="440" hspace="6"/>
 <br>
-<sub><b>單手浮動搜尋</b>，閒置時縮成球。</sub>
+<sub><b>單手浮動搜尋</b>（閒置縮成球），以及對載入清單就地套用的<b>全域瀏覽篩選</b>。</sub>
 </div>
 
 <div align="center">
-<img src="./.github/assets/yakuyomi-browse-filter.gif" alt="全域瀏覽篩選：把來源清單依 已收藏／已開卷／已擷取 就地過濾" height="440" hspace="6"/>
 <img src="./.github/assets/yakuyomi-browse-snapshot.gif" alt="離線快照：把來源清單存起來離線瀏覽" height="440" hspace="6"/>
 <img src="./.github/assets/yakuyomi-browse-anchor.gif" alt="每來源錨點：自動載入並往下捲「最新」清單，直到抵達你上次處理到的位置" height="440" hspace="6"/>
 <br>
-<sub><b>在任一來源追進度</b>——把載入的清單依<i>已收藏／已開卷／已擷取</i>就地過濾、自動載入往下捲到你標的錨點，並存成離線快照。</sub>
+<sub><b>在任一來源追進度</b>——把載入的清單存成<b>離線快照</b>，並<b>自動載入</b>往下捲到你標的錨點。</sub>
 </div>
 
 **大螢幕與折疊機**
