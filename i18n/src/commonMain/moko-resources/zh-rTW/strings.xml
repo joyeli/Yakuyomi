@@ -373,6 +373,7 @@
     <string name="action_move_to_bottom">排至最後</string>
     <string name="action_move_to_top">排至最前</string>
     <string name="action_cancel_all">全部取消</string>
+    <string name="action_retry_all_failed">重試全部失敗</string>
     <string name="sort_by_upload_date">上傳日期</string>
     <string name="action_sort_latest_chapter">最新章節</string>
     <string name="invalid_backup_file">無效的備份檔：</string>

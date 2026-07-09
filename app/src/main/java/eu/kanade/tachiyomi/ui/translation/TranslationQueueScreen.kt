@@ -171,6 +171,8 @@ private fun TranslationQueueContent(
         saver = listSaver(save = { it.toList() }, restore = { it.toMutableStateList() }),
     ) { mutableStateListOf<Long>() }
     val allExpanded = groups.isNotEmpty() && groups.all { it.manga.id in expandedIds }
+    // 佇列是否有失敗章節（平板工具列「重試全部失敗」鈕的顯示條件）。
+    val hasFailed = groups.any { g -> g.chapters.any { it.status == TranslationItem.Status.ERROR } }
 
     // 平板/折疊機展開＝主從雙欄（左清單 + 右選中本章節）；直板＝手風琴。選中本（跨重啟保留；失效則回退第一本）。
     val isTablet = isTabletUi()
@@ -223,23 +225,43 @@ private fun TranslationQueueContent(
                 navigateUp = navigateUp,
                 actions = {
                     if (groups.isNotEmpty()) {
-                        // 全部展開 / 全部收合
-                        IconButton(
-                            onClick = {
-                                if (allExpanded) {
-                                    expandedIds.clear()
-                                } else {
-                                    expandedIds.clear()
-                                    expandedIds.addAll(groups.map { it.manga.id })
+                        if (isTablet) {
+                            // 平板＝主從雙欄、無收合概念 → 把「展開/收合全部」換成「重試全部失敗」（有失敗才顯示）。
+                            if (hasFailed) {
+                                IconButton(onClick = { screenModel.retryAllFailed() }) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Refresh,
+                                        contentDescription = stringResource(MR.strings.action_retry_all_failed),
+                                    )
                                 }
-                            },
-                        ) {
-                            Icon(
-                                imageVector = if (allExpanded) Icons.Outlined.UnfoldLess else Icons.Outlined.UnfoldMore,
-                                contentDescription = stringResource(
-                                    if (allExpanded) MR.strings.action_collapse_all else MR.strings.action_expand_all,
-                                ),
-                            )
+                            }
+                        } else {
+                            // 手機＝手風琴：全部展開 / 全部收合。
+                            IconButton(
+                                onClick = {
+                                    if (allExpanded) {
+                                        expandedIds.clear()
+                                    } else {
+                                        expandedIds.clear()
+                                        expandedIds.addAll(groups.map { it.manga.id })
+                                    }
+                                },
+                            ) {
+                                Icon(
+                                    imageVector = if (allExpanded) {
+                                        Icons.Outlined.UnfoldLess
+                                    } else {
+                                        Icons.Outlined.UnfoldMore
+                                    },
+                                    contentDescription = stringResource(
+                                        if (allExpanded) {
+                                            MR.strings.action_collapse_all
+                                        } else {
+                                            MR.strings.action_expand_all
+                                        },
+                                    ),
+                                )
+                            }
                         }
                         AppBarActions(
                             persistentListOf(
@@ -751,6 +773,15 @@ private class TranslationQueueScreenModel(
     fun resumeManga(mangaId: Long) = translationManager.resumeManga(mangaId)
     fun retryManga(mangaId: Long) = translationManager.retryManga(mangaId)
     fun cancelManga(mangaId: Long) = translationManager.cancelManga(mangaId)
+
+    /** Yakuyomi：重試佇列中所有含失敗（ERROR）章節的漫畫（逐本 retryManga）。 */
+    fun retryAllFailed() {
+        queueState.value
+            .filter { it.status == TranslationItem.Status.ERROR }
+            .map { it.manga.id }
+            .distinct()
+            .forEach { translationManager.retryManga(it) }
+    }
     fun setMangaMethod(mangaId: Long, method: String) = translationManager.setMangaMethod(mangaId, method)
     fun reorderMangas(orderedMangaIds: List<Long>) = translationManager.reorderMangas(orderedMangaIds)
 }
