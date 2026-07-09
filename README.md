@@ -142,6 +142,36 @@ page → detect (ONNX) → OCR (ONNX) → group → translate (LLM) → remove t
 
 Four of the five stages run on the device; only translation leaves it. The pipeline and its design live in [yakuyomi-engine](https://github.com/joyeli/yakuyomi-engine).
 
+## Why the LLM runs in the cloud
+
+The heavy vision work — detection, OCR, inpainting — runs on your phone (private, free, offline). Only the OCR'd text is sent to a cloud LLM (bring your own key), because for the translation step the cloud is **almost free, faster, higher quality, and works on any phone**.
+
+Real usage with DeepSeek (`deepseek-v4-flash`), 9 days of heavy reading:
+
+| DeepSeek — 9 days, heavy use | cost |
+|---|---|
+| ~5,000 pages · ~200 chapters · ~2.7M tokens | **≈ $0.20** |
+| — per chapter | ~$0.001 |
+| — per month at that pace | ~$0.67 |
+
+Running the LLM on-device instead would save that ~$0.001 per chapter — but cost you 10–40× the wait per page, plus heat, battery, gigabytes of RAM, and a flagship phone:
+
+<img src="./.github/assets/yakuyomi-cloud-vs-ondevice.png" alt="Cumulative LLM translation time for ~5,000 pages: cloud DeepSeek ~2.8h solid vs on-device 1.5B/7B/14B ~13.9/41.7/83.3h dashed and estimated" width="100%"/>
+
+| | ☁ Cloud DeepSeek | On-device 1.5B | 7B | 14B |
+|---|---|---|---|---|
+| per page — translation step¹ | ~1–3s | ~10s | ~20–40s | ~40–80s |
+| translation quality | high (frontier) | weak | mid | good |
+| resident RAM | 0 | ~1.5 GB | ~4.5 GB | ~9 GB |
+| hardware needed | any phone | mid-range+ | 8 GB+ RAM | 16 GB flagship |
+| power / heat | none (off-device) | medium | high | very high |
+| money | ~$0.001/chapter | $0 | $0 | $0 |
+| offline | ✗ | ✓ | ✓ | ✓ |
+
+<sub>¹ Translation (LLM) step only — detection / OCR / inpaint still run on-device in every case, so a page is **not** "one finished image per second". On-device figures are estimates (dashed in the chart), not measured.</sub>
+
+So Yakuyomi keeps the expensive vision work on-device and sends only text to a cloud LLM: translation ends up effectively free, fast and high-quality, on any phone — while detection / OCR / inpainting keep your images on the device.
+
 ## Building
 
 The engine is a git submodule, so clone recursively:
