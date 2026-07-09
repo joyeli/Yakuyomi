@@ -26,6 +26,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -204,7 +205,9 @@ private const val MAX_DAY_ROWS = 30
 private fun LazyItemScope.TranslationStats(
     data: StatsData.Translation,
 ) {
-    var period by remember { mutableStateOf(StatsPeriod.Week) }
+    // rememberSaveable：LazyColumn 的 item 捲出視野會被回收，用 remember 會重置成預設 7 天；
+    // rememberSaveable 由 item 的 saveable state holder 保留，捲回來仍是使用者選的分頁。
+    var period by rememberSaveable { mutableStateOf(StatsPeriod.Week) }
     val today = remember { LocalDate.now() }
     val filtered = remember(period, data.days) {
         val from = period.fromDate(today)
@@ -327,7 +330,9 @@ private fun StatDayBar(
 private fun LazyItemScope.ReadingStats(
     data: StatsData.Reading,
 ) {
-    var period by remember { mutableStateOf(StatsPeriod.Week) }
+    // rememberSaveable：LazyColumn 的 item 捲出視野會被回收，用 remember 會重置成預設 7 天；
+    // rememberSaveable 由 item 的 saveable state holder 保留，捲回來仍是使用者選的分頁。
+    var period by rememberSaveable { mutableStateOf(StatsPeriod.Week) }
     val today = remember { LocalDate.now() }
     val filtered = remember(period, data.days) {
         val from = period.fromDate(today)
