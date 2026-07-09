@@ -14,7 +14,7 @@ series = [
     ("Cloud DeepSeek — API only (real)",  2.0, "#2e7d32", "-",  4.6, 0.16),
 ]
 
-fig, ax = plt.subplots(figsize=(9.8, 4.4), dpi=200)
+fig, ax = plt.subplots(figsize=(9.8, 4.4), dpi=140)
 fig.patch.set_facecolor("white")
 ax.set_facecolor("white")
 
