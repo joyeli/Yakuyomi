@@ -174,12 +174,12 @@ data class BrowseSourceScreen(
             else -> BrowseListingKind.POPULAR
         }
         val snapshotCount = snapshot?.urls?.size ?: -1
-        // 搜尋當隱藏頁（A1）：頂部清單鈕顯示「搜尋前所在的列表清單」；搜尋/快照時不高亮。
-        var preSearchListing by remember { mutableStateOf(BrowseListingKind.POPULAR) }
-        LaunchedEffect(listingKind) {
-            if (listingKind == BrowseListingKind.LATEST || listingKind == BrowseListingKind.POPULAR) {
-                preSearchListing = listingKind
-            }
+        // 搜尋/快照＝頂部清單鈕顯示（並返回）「最後所在的列表清單」。此狀態存在 screenModel（state.lastListListing）
+        // → 進漫畫再返回也保留，不像 Composable remember 會被重置成預設（曾是「返回後鈕變熱門」的 bug）。
+        val preSearchListing = if (state.listing is Listing.Latest || state.lastListListing is Listing.Latest) {
+            BrowseListingKind.LATEST
+        } else {
+            BrowseListingKind.POPULAR
         }
         // 搜尋/快照＝顯示（並返回）最後所在的列表清單（熱門/最新）；在列表清單則顯示自己。
         val topBarShownListing = when (listingKind) {

@@ -87,7 +87,15 @@ class BrowseSourceScreenModel(
     private val browseFetchManager: BrowseFetchManager = Injekt.get(),
     private val browseAnchorLoadManager: BrowseAnchorLoadManager = Injekt.get(),
     getIncognitoState: GetIncognitoState = Injekt.get(),
-) : StateScreenModel<BrowseSourceScreenModel.State>(State(Listing.valueOf(listingQuery))) {
+) : StateScreenModel<BrowseSourceScreenModel.State>(
+    Listing.valueOf(listingQuery).let { initial ->
+        State(
+            listing = initial,
+            // 記住初始的列表清單（熱門/最新）；非列表清單起手則退回熱門。
+            lastListListing = if (initial is Listing.Latest) Listing.Latest else Listing.Popular,
+        )
+    },
+) {
 
     var displayMode by sourcePreferences.sourceDisplayMode.asState(screenModelScope)
 
@@ -342,7 +350,18 @@ class BrowseSourceScreenModel(
     }
 
     fun setListing(listing: Listing) {
-        mutableState.update { it.copy(listing = listing, toolbarQuery = null) }
+        mutableState.update {
+            it.copy(
+                listing = listing,
+                toolbarQuery = null,
+                // 切到熱門/最新時更新「最後所在的列表清單」；快照/搜尋不覆蓋，留給頂部清單鈕顯示並返回。
+                lastListListing = if (listing is Listing.Popular || listing is Listing.Latest) {
+                    listing
+                } else {
+                    it.lastListListing
+                },
+            )
+        }
     }
 
     fun setFilters(filters: FilterList) {
@@ -577,6 +596,9 @@ class BrowseSourceScreenModel(
         val filters: FilterList = FilterList(),
         val toolbarQuery: String? = null,
         val dialog: Dialog? = null,
+        // Yakuyomi：最後所在的「列表清單」（熱門/最新）。快照/搜尋時頂部清單鈕顯示並返回它；
+        // 存在 screenModel → 跨導航（進漫畫再返回）保留，不像 Composable remember 會被重置。
+        val lastListListing: Listing = Listing.Popular,
     ) {
         val isUserQuery get() = listing is Listing.Search && !listing.query.isNullOrEmpty()
     }
