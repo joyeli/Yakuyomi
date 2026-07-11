@@ -608,7 +608,7 @@ private fun groupSubtitle(
 }
 
 /**
- * 常駐翻譯引擎狀態列（#6/#7）：顯示載入中 / 已預載 / 未預載，並提供卸下（釋放 ~450MB）/ 預載按鈕。
+ * 常駐翻譯引擎狀態列（#6/#7）：顯示載入中 / 已預載 / 未預載，並提供卸下（釋放 ~100MB）/ 預載按鈕。
  * 由佇列頁頂與導覽列長按對話框（[TranslationEngineStatusDialog]）共用。
  */
 @Composable
@@ -652,8 +652,8 @@ internal fun EngineStatusPanel(modifier: Modifier = Modifier) {
 
 /**
  * 去字方法小標籤：
- *  - [editable]＝可點的 [AssistChip]，點開 [DropdownMenu] 列 3 選項（BoxFill / Auto-整頁 / Auto-逐格），
- *    選後呼叫 [onSetMethod]（傳原始字串 boxfill / auto_whole / auto_tile）。
+ *  - [editable]＝可點的 [AssistChip]，點開 [DropdownMenu] 列 2 選項（快速去字 / AI 去字），
+ *    選後呼叫 [onSetMethod]（傳原始字串 boxfill / auto_whole）。
  *  - 否則＝靜態文字（方法已鎖、不可改）。
  *
  * [method] 空字串（理論上不會發生：翻譯項都帶 method）→ 不畫任何東西。
@@ -695,16 +695,16 @@ private fun MethodChip(
     }
 }
 
-/** 去字方法原始字串 → 友善標籤（對齊 MangaScreen/ReaderPageActionsDialog 的 3 階梯命名）。 */
+/** 去字方法原始字串 → 友善標籤（對齊 MangaScreen/ReaderPageActionsDialog 的 2 門別命名）。 */
 @Composable
 private fun methodLabel(raw: String): String = when (raw) {
     "boxfill" -> stringResource(MR.strings.rerender_boxfill)
-    "auto_tile" -> stringResource(MR.strings.rerender_auto_tile)
+    "auto_tile" -> stringResource(MR.strings.rerender_auto_tile) // 退役：只給舊存值顯示用，非可選項
     else -> stringResource(MR.strings.rerender_auto_whole) // auto_whole（預設）；舊存的 lama_* 等也落這
 }
 
-/** 可選的去字方法原始字串，順序＝3 階梯 BoxFill / Auto-整頁 / Auto-逐格（顯示名走 [methodLabel]）。 */
-private val METHOD_IDS = listOf("boxfill", "auto_whole", "auto_tile")
+/** 可選的去字方法原始字串，順序＝2 門別 快速去字 / AI 去字（顯示名走 [methodLabel]）。 */
+private val METHOD_IDS = listOf("boxfill", "auto_whole")
 
 @Composable
 private fun statusLine(item: TranslationItem): String {
@@ -733,7 +733,7 @@ private class TranslationQueueScreenModel(
 
     /**
      * Yakuyomi：「翻譯」分頁再點一次的三態循環（總開關 × 引擎是否載入），一直切換循環：
-     *  A 總開關開 + 引擎已載入 → （有任務先暫停）卸載引擎（釋放 ~450MB）。
+     *  A 總開關開 + 引擎已載入 → （有任務先暫停）卸載引擎（釋放 ~100MB）。
      *  B 總開關開 + 引擎未載入 → 關總開關。
      *  C 總開關關 → 開總開關 + 載入引擎。
      * 回傳要 toast 的提示字串。

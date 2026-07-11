@@ -309,7 +309,7 @@
     <string name="quickstart_what_title">On-device, bring-your-own-key</string>
     <string name="quickstart_what_body">Detection, OCR and text removal all run on your phone. Only the OCR\'d text goes to the LLM provider you pick — using your own API key and endpoint. Your images, and the detection / OCR / erase steps, never leave the device. There is no analytics or telemetry.\n\nCloud translation may cost money, billed by your provider. Tapping Got it at the end means you understand this.</string>
     <string name="quickstart_setup_title">Three things to get ready</string>
-    <string name="quickstart_setup_body">1. Pick a provider and paste your API key.\nSettings → Translation → Provider. Default is DeepSeek; OpenAI, Gemini, Groq, Qwen, OpenRouter and self-hosted (Sakura / custom) also work. Paste the key from your provider\'s dashboard — it is encrypted on this device. For a self-hosted or custom provider, also fill in the API base.\n\n2. Get the 3 models (detector, OCR, text-removal).\nSettings → Translation → Models → Download models (about 467 MB, verified). Or bring your own: drop the three .onnx files into the models folder in your storage location. The Model status row shows a check or cross for each.\n\n3. Pick your languages.\nDefault is Japanese → Traditional Chinese (Taiwan). Change the target or source any time.</string>
+    <string name="quickstart_setup_body">1. Pick a provider and paste your API key.\nSettings → Translation → Provider. Default is DeepSeek; OpenAI, Gemini, Groq, Qwen, OpenRouter and self-hosted (Sakura / custom) also work. Paste the key from your provider\'s dashboard — it is encrypted on this device. For a self-hosted or custom provider, also fill in the API base.\n\n2. Get the models (detector, OCR, text-removal).\nSettings → Translation → Models → Download models (about 96 MB, verified). Or bring your own: drop the model files into the models folder in your storage location. The Model status row shows a check or cross for each.\n\n3. Pick your languages.\nDefault is Japanese → Traditional Chinese (Taiwan). Change the target or source any time.</string>
     <string name="quickstart_workflows_title">Two ways to translate</string>
     <string name="quickstart_workflows_body">Translate on download — turn on Translate chapters on download. Every chapter you download is then translated automatically in the background, and the page images are replaced in place. Best when you download ahead and read later.\n\nLive (read-as-you-go) — turn on Live translation, a separate switch. When you open an unread chapter it is translated in the background and pages swap in as they become ready (a Translating X/Y pill shows at the top-left). Opening an undownloaded chapter downloads it first, then translates. Use Live translation categories to limit it to, or exclude, certain library categories.\n\nThe two switches are independent: use either, both, or neither.</string>
     <string name="quickstart_manual_title">By hand, and keeping it tidy</string>
@@ -320,9 +320,9 @@
     <string name="pref_translation_orientation_vertical">Vertical (vertical-first)</string>
     <string name="pref_translation_orientation_horizontal">Horizontal (horizontal-first)</string>
     <string name="pref_translation_inpaint_method">Text removal method</string>
-    <string name="pref_translation_inpaint_boxfill">BoxFill (fastest · colour block over art)</string>
-    <string name="pref_translation_inpaint_auto_whole">Auto-whole (balanced · recommended)</string>
-    <string name="pref_translation_inpaint_auto_tile">Auto-tile (best · slow)</string>
+    <string name="pref_translation_inpaint_boxfill">Fast (box-fill · colour block over art)</string>
+    <string name="pref_translation_inpaint_auto_whole">AI removal (AOT rebuild · high quality)</string>
+    <string name="pref_translation_inpaint_auto_tile">AI removal (per-panel)</string>
     <string name="pref_translation_source_lang_subtitle">A prompt hint; leave blank to let the LLM infer. The actual source is decided by the OCR model (BYOM).</string>
     <string name="pref_translation_lang_japanese">日本語</string>
     <string name="pref_translation_lang_trad_chinese">繁體中文（台灣）</string>
@@ -1276,9 +1276,11 @@
     <string name="pref_translation_privacy_full">When translating:\n• Only the OCR\'d text is sent to the LLM provider you configure (your own key, your own endpoint).\n• Images, detection, OCR, and text removal all run on your device and never leave it.\n• Your API key is encrypted on-device with the Android Keystore.\n• This app adds no analytics or telemetry.\n• What you send and your usage follow your chosen provider\'s terms; cloud translation may incur costs.</string>
     <string name="pref_translation_model_status">Model status</string>
     <string name="pref_translation_model_status_checking">Checking…</string>
-    <string name="pref_translation_model_status_missing"> (missing = put the 3 onnx in the storage models/ folder, or tap Download models)</string>
+    <string name="pref_translation_model_status_missing"> (missing = put the models in the storage models/ folder, or tap Download models)</string>
+    <string name="pref_translation_model_status_outdated">・outdated — tap Update models below to get the current NCNN set</string>
     <string name="pref_translation_download_models">Download models</string>
-    <string name="pref_translation_download_models_idle">Auto-download the 3 models (~467 MB) from the release + sha256 verify</string>
+    <string name="pref_translation_update_models">Update models</string>
+    <string name="pref_translation_download_models_idle">Auto-download the models (~96 MB) from the release + sha256 verify</string>
     <string name="pref_translation_download_models_done">Download complete</string>
     <string name="pref_translation_download_models_error">Failed: %s (tap to retry)</string>
     <string name="pref_translation_target_lang">Target language</string>
@@ -1344,7 +1346,7 @@
     <string name="engine_status_loading">Translation engine: loading…</string>
     <string name="engine_status_warm">Translation engine: preloaded</string>
     <string name="engine_status_cold">Translation engine: not preloaded</string>
-    <string name="engine_unload">Unload preload (free ~450MB)</string>
+    <string name="engine_unload">Unload preload (free ~100MB)</string>
     <string name="engine_preload_action">Preload engine</string>
     <!-- Yakuyomi: reader live-translate + page actions -->
     <string name="reader_engine_loading">Loading engine…</string>
@@ -1367,9 +1369,9 @@
     <!-- Yakuyomi: re-render -->
     <string name="action_rerender">Re-render</string>
     <string name="rerender_method_title">Re-render text-removal method</string>
-    <string name="rerender_boxfill">BoxFill</string>
-    <string name="rerender_auto_whole">Auto-whole</string>
-    <string name="rerender_auto_tile">Auto-tile</string>
+    <string name="rerender_boxfill">Fast (box-fill)</string>
+    <string name="rerender_auto_whole">AI removal</string>
+    <string name="rerender_auto_tile">AI removal (per-panel)</string>
     <string name="rerender_original">Original (restore untranslated)</string>
     <string name="rerender_all_book">Re-render whole book (current removal setting)</string>
     <string name="rerender_none">No translated chapters to re-render</string>

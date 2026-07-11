@@ -162,7 +162,7 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         // Updates widget update
         WidgetManager(Injekt.get(), Injekt.get()).apply { init(scope) }
 
-        // 即時翻譯開著且引擎就緒（key + 模型）→ app 一啟動就背景預暖引擎（~450MB ONNX），
+        // 即時翻譯開著且引擎就緒（key + 模型）→ app 一啟動就背景預暖引擎（~100MB ONNX），
         // 避免進第一章翻第一頁時才現載模型而特別久。fire-and-forget（背景 IO scope、不卡啟動）；
         // 釋放仍由原機制管（即時翻關 / onTrimMemory / 佇列空且即時翻關）。
         runCatching {
@@ -254,7 +254,7 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
     }
 
     /**
-     * 記憶體壓力時釋放常駐（warm）翻譯引擎（~450MB native）。只在**真壓力**等級釋放
+     * 記憶體壓力時釋放常駐（warm）翻譯引擎（~100MB native）。只在**真壓力**等級釋放
      * （RUNNING_LOW/RUNNING_CRITICAL/COMPLETE）——**不**在 UI_HIDDEN/BACKGROUND 等「只是退到背景」的等級釋放，
      * 讓引擎能撐過正常背景化（即時翻關 reader 後仍 warm 給下一章）。引擎之後會在下次翻譯 lazy 重建。
      *

@@ -13,7 +13,7 @@ English ｜ [中文](README_zh.md)
 
 </div>
 
-Yakuyomi is a fork of [mihon](https://github.com/mihonapp/mihon) that translates manga as you download or read it — Japanese to Traditional Chinese by default, any language pair configurable. Text **detection, OCR, and removal run on the device** (ONNX Runtime); only the **translation** step calls a cloud LLM. The translation engine is a separate repo, [yakuyomi-engine](https://github.com/joyeli/yakuyomi-engine), pulled in here as a submodule.
+Yakuyomi is a fork of [mihon](https://github.com/mihonapp/mihon) that translates manga as you download or read it — Japanese to Traditional Chinese by default, any language pair configurable. Text **detection, OCR, and removal run on the device** (NCNN + ONNX Runtime); only the **translation** step calls a cloud LLM. The translation engine is a separate repo, [yakuyomi-engine](https://github.com/joyeli/yakuyomi-engine), pulled in here as a submodule.
 
 <div align="center">
 <img src="./.github/assets/showcase.png" alt="Box-fill vs Yakuyomi inpainting" width="100%"/>
@@ -26,12 +26,12 @@ Yakuyomi is a fork of [mihon](https://github.com/mihonapp/mihon) that translates
 Everything below is on top of stock mihon — at a glance, what you get here that other forks don't:
 
 **Translation**
-- **Real inpainting, not overlays** — other translation forks paint a box over the text or stamp new text on top. Yakuyomi *erases* the original and **reconstructs the artwork** (LaMa) before typesetting the translation back into the bubble.
-- **On-device pipeline** — detection, OCR, and text removal run locally (ONNX Runtime); only the LLM translation call leaves your device. No image ever leaves the phone.
+- **Real inpainting, not overlays** — other translation forks paint a box over the text or stamp new text on top. Yakuyomi *erases* the original and **reconstructs the artwork** (AOT-GAN inpainting) before typesetting the translation back into the bubble.
+- **On-device pipeline** — detection, OCR, and text removal run locally (NCNN + ONNX Runtime); only the LLM translation call leaves your device. No image ever leaves the phone.
 - **Two workflows** — translate-on-download (whole chapters in the background) and live translation while you read. A page is overwritten only when its translation succeeds; nothing is ever replaced with something worse.
 - **Your provider, your key** — any OpenAI-compatible LLM (DeepSeek by default; OpenAI, Gemini, Groq, Qwen, OpenRouter, self-hosted Sakura, custom), per-provider encrypted keys, live model list ([providers doc](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/PROVIDERS.md)).
-- **Your models** — the three ONNX models download in one tap with sha256 verification, or you supply them manually ([models doc](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/MODELS.md)).
-- **Quality knobs** — three text-removal modes (flat-fill / whole-image LaMa / per-region LaMa), vertical/horizontal typesetting, ~20 tunable parameters. No telemetry.
+- **Your models** — the model set (NCNN detector + inpaint pairs, int8 OCR, ~92 MB) downloads in one tap with sha256 verification, or you supply them manually ([models doc](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/MODELS.md)).
+- **Quality knobs** — two text-removal modes (fast flat-fill / AI inpainting), vertical/horizontal typesetting, ~20 tunable parameters. No telemetry.
 
 <div align="center">
 <img src="./.github/assets/yakuyomi-live-translate.gif" alt="Live translation: speech bubbles turn from Japanese into your language as you read" height="440" hspace="6"/>
@@ -201,4 +201,4 @@ The developers of this application do not have any affiliation with the content 
 - [mihon](https://github.com/mihonapp/mihon) — the reader this forks (Apache-2.0)
 - [yakuyomi-engine](https://github.com/joyeli/yakuyomi-engine) — the on-device translation engine
 - [manga-image-translator](https://github.com/zyddnys/manga-image-translator) — prompt and behaviour reference
-- model authors — [comic-text-detector](https://github.com/dmMaze/comic-text-detector), [Koharu](https://github.com/mayocream/koharu), [LaMa](https://github.com/advimman/lama)
+- model authors — [comic-text-detector](https://github.com/dmMaze/comic-text-detector), and the OCR + AOT-GAN inpaint weights from [manga-image-translator](https://github.com/zyddnys/manga-image-translator)

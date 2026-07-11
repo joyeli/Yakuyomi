@@ -27,7 +27,7 @@ import uy.kohesive.injekt.api.get
  * 翻譯引擎的**常駐（warm）服務**（process singleton，於 [AppModule] 註冊）。
  *
  * 用途：讓整章翻（[PageTranslator.translateChapter] 逐章透過本服務）共用**同一顆**引擎實例，
- * 避免佇列一章接一章 drain 時、每章 `Yakuyomi.create(...).use { }` 都重載 ~450MB native + 重編譯 ORT 圖
+ * 避免佇列一章接一章 drain 時、每章 `Yakuyomi.create(...).use { }` 都重載 ~100MB native + 重編譯 ORT 圖
  * （M4 ⑦ 引擎生命週期）。即時翻譯開著時尤其關鍵：reader 連讀多章＝佇列連翻多章。
  *
  * **去字法可變**：[translatePage] 帶 `methodRaw` 參數（boxfill / auto_whole / auto_tile）。
@@ -40,7 +40,7 @@ import uy.kohesive.injekt.api.get
  *   **不在翻完一頁/一章後關**（這就是常駐的意義）。釋放由三個外部觸發負責（見 [shutdown]/[shutdownBlocking]）：
  *   即時翻關 / 真記憶體壓力（onTrimMemory）/ 即時翻關時佇列清空。
  *
- * **記憶體**：warm 引擎在常駐期間持有 ~450MB native；上述三觸發任一發生即釋放，下次呼叫再 lazy 重建。
+ * **記憶體**：warm 引擎在常駐期間持有 ~100MB native；上述三觸發任一發生即釋放，下次呼叫再 lazy 重建。
  */
 class TranslationEngineService(private val context: Context) {
 
@@ -49,7 +49,7 @@ class TranslationEngineService(private val context: Context) {
     /** 引擎非並發安全 → 所有引擎存取（翻譯/暖機/關閉/重建）都在此鎖下序列化（一次一頁進引擎）。 */
     private val mutex = Mutex()
 
-    /** 暖機/關閉的背景 scope（IO）：給 UI（即時翻開關）fire-and-forget，**絕不**在主執行緒上跑 ~450MB 載入/關閉或等鎖（會 ANR）。 */
+    /** 暖機/關閉的背景 scope（IO）：給 UI（即時翻開關）fire-and-forget，**絕不**在主執行緒上跑 ~100MB 載入/關閉或等鎖（會 ANR）。 */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /** 常駐引擎（lazy 建、跨頁/章復用）。null＝還沒建或已 [shutdown]。只在 [mutex] 下讀寫。 */
@@ -58,7 +58,7 @@ class TranslationEngineService(private val context: Context) {
     /** 上次建引擎時的設定簽章（含去字法）；與當前簽章不同 → 設定/去字法改過 → 重建。只在 [mutex] 下讀寫。 */
     private var builtSignature: String? = null
 
-    /** 引擎是否正在建構（載入 ~450MB native）：給 reader 角落指示器顯示「引擎載入中…」。建構期間 true、完成/失敗轉 false。 */
+    /** 引擎是否正在建構（載入 ~100MB native）：給 reader 角落指示器顯示「引擎載入中…」。建構期間 true、完成/失敗轉 false。 */
     private val _loading = MutableStateFlow(false)
     val loading: StateFlow<Boolean> = _loading.asStateFlow()
 
@@ -130,10 +130,10 @@ class TranslationEngineService(private val context: Context) {
         val signature = configSignature(methodRaw)
         if (engine != null && signature == builtSignature) return engine
 
-        // 設定/去字法改過 → 丟舊引擎重建（釋放舊 native session 才不疊加 ~450MB）。
+        // 設定/去字法改過 → 丟舊引擎重建（釋放舊 native session 才不疊加 ~100MB）。
         closeEngine()
 
-        // 真正建構（載入 ~450MB）期間 → loading=true，給 reader 指示器顯示「引擎載入中…」。finally 確保任何出口都歸位。
+        // 真正建構（載入 ~100MB）期間 → loading=true，給 reader 指示器顯示「引擎載入中…」。finally 確保任何出口都歸位。
         _loading.value = true
         return try {
             // 模型解析 + 字元表（SAF→filesDir 複製在此；缺模型回 null）。與離線翻共用同一份解析。
@@ -202,7 +202,7 @@ class TranslationEngineService(private val context: Context) {
         closeEngine()
     }
 
-    /** [warmUp] 的 fire-and-forget 版（背景 IO、不阻塞呼叫端）：給 UI 即時翻開關用，避免在主執行緒上載 ~450MB → ANR/crash。 */
+    /** [warmUp] 的 fire-and-forget 版（背景 IO、不阻塞呼叫端）：給 UI 即時翻開關用，避免在主執行緒上載 ~100MB → ANR/crash。 */
     fun warmUpAsync() {
         scope.launch { runCatching { warmUp() } }
     }

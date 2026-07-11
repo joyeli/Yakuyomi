@@ -985,9 +985,11 @@
     <string name="pref_translation_privacy_full">翻譯時：\n• 只有 OCR 後的「文字」會送到你設定的 LLM 服務商（你的金鑰、你的端點）。\n• 圖像、偵測、OCR、去字全在你的裝置上完成，不會外傳。\n• API 金鑰以 Android Keystore 加密存在裝置上。\n• 本 app 不加任何分析 / 遙測。\n• 你送出的內容與用量受你選的服務商條款規範；雲端翻譯可能產生費用。</string>
     <string name="pref_translation_model_status">模型狀態</string>
     <string name="pref_translation_model_status_checking">檢查中…</string>
-    <string name="pref_translation_model_status_missing">（缺＝把 3 顆 onnx 放到儲存位置的 models/，或用下方「下載模型」）</string>
+    <string name="pref_translation_model_status_missing">（缺＝把模型放到儲存位置的 models/，或用下方「下載模型」）</string>
+    <string name="pref_translation_model_status_outdated">・偵測到舊版模型，請按下方「更新模型」重新下載</string>
     <string name="pref_translation_download_models">下載模型</string>
-    <string name="pref_translation_download_models_idle">從 release 自動下載 3 顆模型（約 467 MB）+ sha256 驗證</string>
+    <string name="pref_translation_update_models">更新模型</string>
+    <string name="pref_translation_download_models_idle">從 release 自動下載模型（約 96 MB）+ sha256 驗證</string>
     <string name="pref_translation_download_models_done">下載完成</string>
     <string name="pref_translation_download_models_error">失敗：%s（點選重試）</string>
     <string name="pref_translation_target_lang">目標語言</string>
@@ -1053,7 +1055,7 @@
     <string name="quickstart_what_title">在裝置上跑、自帶金鑰</string>
     <string name="quickstart_what_body">偵測、OCR、去字全在你的手機上完成。只有 OCR 後的文字會送到你選的 LLM 服務商——用你自己的 API key 與端點。你的圖片，以及偵測／OCR／去字這幾步，都不會離開裝置。本 app 不加任何分析／遙測。\n\n雲端翻譯可能產生費用，由你的服務商計費。按下最後的「了解」即表示你了解這點。</string>
     <string name="quickstart_setup_title">準備好三件事</string>
-    <string name="quickstart_setup_body">1. 選一個服務商並貼上 API key。\n設定 → 翻譯 → 供應商。預設是 DeepSeek；OpenAI、Gemini、Groq、Qwen、OpenRouter 與自架（Sakura／自訂）也都可用。把服務商後台的金鑰貼進來——它會在這台裝置上加密。若是自架／自訂服務商，還要填「API base」。\n\n2. 取得 3 顆模型（偵測、OCR、去字）。\n設定 → 翻譯 → 模型 → 下載翻譯模型（約 467 MB，會驗證）。或自備模型：把三個 .onnx 檔放到你儲存位置裡的 models 資料夾。「翻譯模型狀態」列會顯示每顆的 ✓／✗。\n\n3. 選語言。\n預設是日文 → 繁體中文（台灣）。目標／來源語言隨時可改。</string>
+    <string name="quickstart_setup_body">1. 選一個服務商並貼上 API key。\n設定 → 翻譯 → 供應商。預設是 DeepSeek；OpenAI、Gemini、Groq、Qwen、OpenRouter 與自架（Sakura／自訂）也都可用。把服務商後台的金鑰貼進來——它會在這台裝置上加密。若是自架／自訂服務商，還要填「API base」。\n\n2. 取得模型（偵測、OCR、去字）。\n設定 → 翻譯 → 模型 → 下載翻譯模型（約 96 MB，會驗證）。或自備模型：把模型檔放到你儲存位置裡的 models 資料夾。「翻譯模型狀態」列會顯示每顆的 ✓／✗。\n\n3. 選語言。\n預設是日文 → 繁體中文（台灣）。目標／來源語言隨時可改。</string>
     <string name="quickstart_workflows_title">兩種翻譯方式</string>
     <string name="quickstart_workflows_body">下載時翻譯——打開「下載時翻譯章節」。之後每一話下載完，就會在背景自動翻譯，頁面圖片就地置換。適合先下載、晚點再讀。\n\n即時翻譯（邊讀邊翻）——打開「即時翻譯」這個獨立開關。當你開啟未翻的章節時，它會在背景翻譯，頁面翻好就換上（左上角會有「翻譯中 X/Y」的小標）。開啟未下載的章節會先下載再翻。用「即時翻譯分類」把它限定在（或排除）某些書庫分類。\n\n這兩個開關彼此獨立：可只用一個、兩個都用、或都不用。</string>
     <string name="quickstart_manual_title">手動翻譯與管理</string>
@@ -1122,9 +1124,9 @@
     <string name="pref_translation_orientation_vertical">垂直（垂直優先）</string>
     <string name="pref_translation_orientation_horizontal">水平（水平優先）</string>
     <string name="pref_translation_inpaint_method">去字方法</string>
-    <string name="pref_translation_inpaint_boxfill">BoxFill（最快·壓畫面塗色塊）</string>
-    <string name="pref_translation_inpaint_auto_whole">Auto-整頁（平衡·推薦）</string>
-    <string name="pref_translation_inpaint_auto_tile">Auto-逐格（質佳·慢）</string>
+    <string name="pref_translation_inpaint_boxfill">快速去字（極速·壓畫面塗色塊）</string>
+    <string name="pref_translation_inpaint_auto_whole">AI 去字（AOT 重建·高品質）</string>
+    <string name="pref_translation_inpaint_auto_tile">AI 去字（逐格）</string>
     <string name="pref_translation_source_lang_subtitle">Prompt 標註；留空＝讓 LLM 自行判斷。實際來源由 OCR 模型決定（BYOM）。</string>
     <string name="pref_translation_lang_auto_detect">自動偵測</string>
     <string name="model_role_detect">偵測</string>
@@ -1145,7 +1147,7 @@
     <string name="engine_status_loading">翻譯引擎：載入中…</string>
     <string name="engine_status_warm">翻譯引擎：已預載</string>
     <string name="engine_status_cold">翻譯引擎：未預載</string>
-    <string name="engine_unload">卸下預載（釋放 ~450MB）</string>
+    <string name="engine_unload">卸下預載（釋放 ~100MB）</string>
     <string name="engine_preload_action">預載引擎</string>
     <string name="reader_engine_loading">引擎載入中…</string>
     <string name="reader_translating_progress">翻譯中 %1$d/%2$d</string>
@@ -1166,9 +1168,9 @@
     <string name="reader_translate_chapter_stopped">已中止這話翻譯</string>
     <string name="action_rerender">重繪</string>
     <string name="rerender_method_title">重繪去字方法</string>
-    <string name="rerender_boxfill">BoxFill</string>
-    <string name="rerender_auto_whole">Auto-整頁</string>
-    <string name="rerender_auto_tile">Auto-逐格</string>
+    <string name="rerender_boxfill">快速去字</string>
+    <string name="rerender_auto_whole">AI 去字</string>
+    <string name="rerender_auto_tile">AI 去字（逐格）</string>
     <string name="rerender_original">原圖（還原未翻）</string>
     <string name="rerender_all_book">重繪全本（目前去字設定）</string>
     <string name="rerender_none">沒有可重繪的已翻章節</string>

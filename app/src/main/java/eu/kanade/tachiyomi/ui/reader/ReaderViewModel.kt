@@ -307,7 +307,7 @@ class ReaderViewModel @JvmOverloads constructor(
             .onEach { progress -> mutableState.update { it.copy(liveTranslateProgress = progress) } }
             .launchIn(viewModelScope)
 
-        // 引擎載入狀態 → reader 角落指示器（「引擎載入中…」）。即時翻開時 app 啟動 / 首章會背景載 ~450MB，
+        // 引擎載入狀態 → reader 角落指示器（「引擎載入中…」）。即時翻開時 app 啟動 / 首章會背景載 ~100MB，
         // 這段時間在角落顯示載入中、讓使用者知道延遲是在掛載模型（非卡死）。建好後轉「翻譯中 X/Y」。
         translationEngineService.loading
             .onEach { loading -> mutableState.update { it.copy(engineLoading = loading) } }
@@ -1545,7 +1545,7 @@ class ReaderViewModel @JvmOverloads constructor(
          * 由 [translationManager] 的佇列與當前章 id 併流算得（見 init 區塊）。
          */
         val liveTranslateProgress: LiveTranslateProgress? = null,
-        /** 引擎是否正在載入（~450MB）：reader 角落指示器顯示「引擎載入中…」（[eu.kanade.presentation.reader.ReaderLiveTranslateIndicator]）。 */
+        /** 引擎是否正在載入（~100MB）：reader 角落指示器顯示「引擎載入中…」（[eu.kanade.presentation.reader.ReaderLiveTranslateIndicator]）。 */
         val engineLoading: Boolean = false,
     ) {
         val currentChapter: ReaderChapter?

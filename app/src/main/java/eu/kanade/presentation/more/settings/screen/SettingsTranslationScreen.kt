@@ -85,7 +85,7 @@ object SettingsTranslationScreen : SearchableSettings {
     override fun getPreferences(): List<Preference> {
         val prefs = remember { Injekt.get<TranslationPreferences>() }
         val navigator = LocalNavigator.currentOrThrow
-        // 即時翻譯開關 → 控制 warm 引擎生命週期（開＝預暖、關＝釋放 ~450MB）。
+        // 即時翻譯開關 → 控制 warm 引擎生命週期（開＝預暖、關＝釋放 ~100MB）。
         val engineService = remember { Injekt.get<TranslationEngineService>() }
         // 「閱讀後刪除」綁下載偏好同一個 pref → 與下載設定頁連動（任一邊改都同步）。
         val downloadPrefs = remember { Injekt.get<DownloadPreferences>() }
@@ -115,11 +115,20 @@ object SettingsTranslationScreen : SearchableSettings {
         val modelPresence by produceState<List<Pair<String, Boolean>>?>(initialValue = null, modelsJustDownloaded) {
             value = withContext(Dispatchers.IO) { TranslationEngineConfig.modelPresence(context) }
         }
+        // 舊版（v1 ONNX/LaMa）模型偵測：齊全但缺 v2 NCNN → 提示更新（否則去字會壞卻無警示）。
+        val modelsOutdated by produceState(initialValue = false, modelsJustDownloaded) {
+            value = withContext(Dispatchers.IO) { TranslationEngineConfig.modelsOutdated(context) }
+        }
         val modelStatusMissing = stringResource(MR.strings.pref_translation_model_status_missing)
+        val modelStatusOutdated = stringResource(MR.strings.pref_translation_model_status_outdated)
         val modelStatusChecking = stringResource(MR.strings.pref_translation_model_status_checking)
         val modelStatusSubtitle = modelPresence?.let { mp ->
             mp.joinToString("・") { (n, ok) -> "$n ${if (ok) "✓" else "✗"}" } +
-                if (mp.all { it.second }) "" else modelStatusMissing
+                when {
+                    !mp.all { it.second } -> modelStatusMissing
+                    modelsOutdated -> modelStatusOutdated
+                    else -> ""
+                }
         } ?: modelStatusChecking
 
         // 全域翻譯總開關：關閉時下載翻 / 即時翻變灰停用（自動翻譯一律不做）。
@@ -487,7 +496,13 @@ object SettingsTranslationScreen : SearchableSettings {
                         subtitle = modelStatusSubtitle,
                     ),
                     Preference.PreferenceItem.TextPreference(
-                        title = stringResource(MR.strings.pref_translation_download_models),
+                        title = stringResource(
+                            if (modelsOutdated) {
+                                MR.strings.pref_translation_update_models
+                            } else {
+                                MR.strings.pref_translation_download_models
+                            },
+                        ),
                         subtitle = when (val s = modelDownloadState) {
                             is ModelDownloadManager.State.Running -> "${s.label}　${s.percent}%"
                             ModelDownloadManager.State.Done ->
@@ -519,9 +534,9 @@ object SettingsTranslationScreen : SearchableSettings {
                     Preference.PreferenceItem.ListPreference(
                         preference = prefs.inpaintMethod,
                         entries = persistentMapOf(
+                            // 2 門別（快速去字 / AI 去字）；auto_tile（逐格）已退役，stored auto_whole 仍選中
                             "boxfill" to stringResource(MR.strings.pref_translation_inpaint_boxfill),
                             "auto_whole" to stringResource(MR.strings.pref_translation_inpaint_auto_whole),
-                            "auto_tile" to stringResource(MR.strings.pref_translation_inpaint_auto_tile),
                         ),
                         title = stringResource(MR.strings.pref_translation_inpaint_method),
                         onValueChanged = { _ ->

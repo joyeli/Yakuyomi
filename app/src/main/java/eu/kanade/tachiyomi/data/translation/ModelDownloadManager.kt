@@ -69,7 +69,8 @@ class ModelDownloadManager(private val context: Context) {
                                 ),
                             )
                         is ModelProgress.Done -> {
-                            completed += models.firstOrNull { it.role == p.role }?.size ?: 0
+                            // 依「檔名」累計（NCNN 一個 role 有 .param+.bin 兩檔，用 role 找會重覆算 .param、漏掉 .bin）。
+                            completed += models.firstOrNull { it.name == p.name }?.size ?: 0
                             update(
                                 State.Running(
                                     context.stringResource(MR.strings.model_dl_done_one, p.name),
@@ -83,6 +84,13 @@ class ModelDownloadManager(private val context: Context) {
                         }
                         is ModelProgress.Failed -> Unit // 例外會由下面 catch 統一處理
                     }
+                }
+                // 清掉不在 manifest 內的殘留檔：v1→v2 換了檔名（lama-manga.onnx / comictextdetector.pt.onnx /
+                // ocr_48px_ctc.onnx 等），不清會殘留 ~460MB，且讓「舊版模型」偵測誤判。dir 只放自動下載、刪除安全。
+                // keep 空（理論上的退化 manifest）就不 prune——絕不因空清單掃掉已下載好的模型。
+                val keep = models.map { it.name }.toSet()
+                if (keep.isNotEmpty()) {
+                    dir.listFiles()?.forEach { f -> if (f.isFile && f.name !in keep) f.delete() }
                 }
                 update(State.Done)
             } catch (t: Throwable) {

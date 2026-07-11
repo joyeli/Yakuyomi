@@ -142,7 +142,7 @@ class ChapterLoader(
      *  - 引擎就緒（[TranslationEngineService.isReady]＝key + 3 模型齊；**不再**綁「下載時翻譯章節」開關）。
      *  - 本書的書庫分類通過「即時翻譯分類」過濾（包含/排除，鏡射下載新章分類；都不設＝全部）。
      *  - 章**尚未**整章翻好（[TranslationManager.isTranslated]）；已翻好的章交給 [DownloadPageLoader] 直接吐已覆蓋的譯圖，
-     *    不必再即時翻一次（省 ~450MB 引擎 + 每頁推論）。
+     *    不必再即時翻一次（省 ~100MB 引擎 + 每頁推論）。
      *
      * **線上路徑（未下載）改走「下載 + 重載」**：未下載章**不再**包進 [TranslatingPageLoader]（舊版的同 session
      * 串流改指不可靠）。線上的即時翻改由 [eu.kanade.tachiyomi.ui.reader.ReaderViewModel] 處理——只對「正在讀的章」

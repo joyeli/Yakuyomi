@@ -176,7 +176,7 @@ private fun SetCoverDialog(
 }
 
 /**
- * 重繪去字法選擇對話框（reader 內版）：3 階梯（BoxFill / Auto-整頁 / Auto-逐格）。
+ * 重繪去字法選擇對話框（reader 內版）：2 門別（快速去字 / AI 去字）。
  * 與 MangaScreen 的同名對話框一致；選項對映 [eu.kanade.tachiyomi.data.translation.PageTranslator.reRenderPage] 吃的去字法原始字串。
  */
 @Composable
@@ -188,7 +188,6 @@ fun ReRenderMethodDialog(
     val options = listOf(
         stringResource(MR.strings.rerender_boxfill) to "boxfill",
         stringResource(MR.strings.rerender_auto_whole) to "auto_whole",
-        stringResource(MR.strings.rerender_auto_tile) to "auto_tile",
         stringResource(MR.strings.rerender_original) to "original",
     )
     AlertDialog(

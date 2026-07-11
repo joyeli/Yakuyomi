@@ -52,36 +52,58 @@ object TranslationEngineConfig {
             n.endsWith(".onnx") && keywords.any { n.contains(it) }
         }
 
+    /** 在 [dir] 找檔名含任一 [keywords] 且以 [ext] 結尾的第一個檔（NCNN 用 ".param"、ORT 用 ".onnx"）。 */
+    fun findModel(dir: UniFile, ext: String, vararg keywords: String): UniFile? =
+        dir.listFiles()?.firstOrNull { f ->
+            val n = f.name?.lowercase() ?: return@firstOrNull false
+            n.endsWith(ext) && keywords.any { n.contains(it) }
+        }
+
     /** 自動下載落點：app 私有 `filesDir/models/`（[ModelDownloadManager] 寫這、引擎直接從此載入，免 SAF）。 */
     fun downloadedDir(context: Context): File = File(context.filesDir, MODELS_DIR)
 
-    /** 在自動下載區找符合 [keywords] 的 `.onnx`（已是本機 [File]、免複製）。 */
-    private fun downloadedOnnx(context: Context, vararg keywords: String): File? =
+    /** 在自動下載區找符合 [keywords] 且 [ext] 結尾的檔（已是本機 [File]、免複製）。 */
+    private fun downloadedModel(context: Context, ext: String, vararg keywords: String): File? =
         downloadedDir(context).takeIf { it.isDirectory }?.listFiles()?.firstOrNull { f ->
             val n = f.name.lowercase()
-            n.endsWith(".onnx") && keywords.any { n.contains(it) }
+            n.endsWith(ext) && keywords.any { n.contains(it) }
         }
 
-    /** 某角色是否存在（自動下載區 或 SAF BYOM 區，皆不複製）。 */
-    private fun rolePresent(context: Context, saf: UniFile?, vararg keywords: String): Boolean =
-        downloadedOnnx(context, *keywords) != null || (saf != null && findOnnx(saf, *keywords) != null)
+    private fun presentExt(context: Context, saf: UniFile?, ext: String, vararg keywords: String): Boolean =
+        downloadedModel(context, ext, *keywords) != null || (saf != null && findModel(saf, ext, *keywords) != null)
 
-    /** 解析某角色 → 本機檔路徑：自動下載區直接用、否則 SAF + [ensureLocal] 複製。缺＝null。 */
-    private fun resolveRole(context: Context, saf: UniFile?, vararg keywords: String): String? {
-        downloadedOnnx(context, *keywords)?.let { return it.absolutePath }
-        val u = saf?.let { findOnnx(it, *keywords) } ?: return null
+    /** 某角色是否存在（先 NCNN `.param`、再 ORT `.onnx`；自動下載區 或 SAF BYOM 區皆算）。 */
+    private fun rolePresent(context: Context, saf: UniFile?, vararg keywords: String): Boolean =
+        presentExt(context, saf, ".param", *keywords) || presentExt(context, saf, ".onnx", *keywords)
+
+    /** 解析 ORT `.onnx` 角色 → 本機路徑：自動下載區直接用、否則 SAF + [ensureLocal] 複製。缺＝null。 */
+    private fun resolveOnnxRole(context: Context, saf: UniFile?, vararg keywords: String): String? {
+        downloadedModel(context, ".onnx", *keywords)?.let { return it.absolutePath }
+        val u = saf?.let { findModel(it, ".onnx", *keywords) } ?: return null
         return ensureLocal(context, u)
     }
 
+    /** 解析 NCNN 角色 → 本機 `.param` 路徑，並確保同名 `.bin` 也在本機（引擎由 .param 推 .bin）。缺 .param 或 .bin＝null。 */
+    private fun resolveNcnnRole(context: Context, saf: UniFile?, vararg keywords: String): String? {
+        // 自動下載區：.param 與 .bin 都已在 filesDir/models（ModelDownloader 逐檔下）→ 直接用 .param 路徑。
+        downloadedModel(context, ".param", *keywords)?.let { return it.absolutePath }
+        // SAF BYOM：複製 .param + 同名 .bin 到 filesDir。
+        val paramU = saf?.let { findModel(it, ".param", *keywords) } ?: return null
+        val binName = (paramU.name ?: return null).removeSuffix(".param") + ".bin"
+        val binU = saf.findFile(binName) ?: return null // .bin 必須在旁
+        ensureLocal(context, binU)
+        return ensureLocal(context, paramU)
+    }
+
     /**
-     * 模型三顆是否齊（detector/ocr/lama）。給 [PageTranslator.isReady] / [TranslationEngineService.isReady] 共用，
-     * 避免兩處各寫一份檔名比對。自動下載區 + SAF BYOM 區擇一即可。
+     * 模型三顆是否齊（detector / ocr / 去字）。給 [PageTranslator.isReady] / [TranslationEngineService.isReady] 共用。
+     * 去字：AOT（v2 主，NCNN `.param` 或 ORT `.onnx`）或 LaMa（退役備援）任一即算。自動下載區 + SAF BYOM 區擇一即可。
      */
     fun hasAllModels(context: Context): Boolean {
         val saf = modelsDir(context)
         return rolePresent(context, saf, "detect", "comictext") &&
             rolePresent(context, saf, "ocr") &&
-            rolePresent(context, saf, "lama")
+            (rolePresent(context, saf, "aot") || rolePresent(context, saf, "lama"))
     }
 
     /**
@@ -102,8 +124,26 @@ object TranslationEngineConfig {
         return listOf(
             context.stringResource(MR.strings.model_role_detect) to rolePresent(context, saf, "detect", "comictext"),
             context.stringResource(MR.strings.model_role_ocr) to rolePresent(context, saf, "ocr"),
-            context.stringResource(MR.strings.model_role_inpaint) to rolePresent(context, saf, "lama"),
+            context.stringResource(MR.strings.model_role_inpaint) to (rolePresent(context, saf, "aot") || rolePresent(context, saf, "lama")),
         )
+    }
+
+    /**
+     * 模型「齊但過時」＝v1 舊模型（ORT 偵測 + LaMa `.onnx`）還在、但缺 v2 的 NCNN 交付（偵測/去字 `.param`）。
+     *
+     * 為何重要：升級 app（引擎 v2）後若沿用舊模型，[modelPresence] 仍全 ✓（關鍵字 + `.onnx` fallback 命中舊檔），
+     * 但引擎會拿 LaMa 當 `auto_aot` 去字模型跑（I/O 契約不符）→ **去字輸出壞掉**，使用者卻不知要換。
+     * 用這個旗標在設定頁把「模型齊全」改成「舊版·請重新下載」，並把下載鈕標成「更新模型」。
+     *
+     * 判準＝偵測與去字**都**要有 NCNN `.param`（v2 唯一交付）。舊 v1 兩者皆無 → 過時。
+     * BYOM 進階者刻意用 ONNX 也會被提示更新（可接受：v2 主推 NCNN，重下載即取得正確集）。
+     */
+    fun modelsOutdated(context: Context): Boolean {
+        if (!hasAllModels(context)) return false // 缺模型自有「missing」提示、不重複
+        val saf = modelsDir(context)
+        val detectorNcnn = presentExt(context, saf, ".param", "detect", "comictext")
+        val aotNcnn = presentExt(context, saf, ".param", "aot")
+        return !(detectorNcnn && aotNcnn)
     }
 
     /**
@@ -114,36 +154,62 @@ object TranslationEngineConfig {
      */
     fun resolveModelSet(context: Context): ModelSetBundle? {
         val saf = modelsDir(context)
-        val det = resolveRole(context, saf, "detect", "comictext") ?: return null
-        val ocr = resolveRole(context, saf, "ocr") ?: return null
-        val lama = resolveRole(context, saf, "lama") ?: return null
+        val ocr = resolveOnnxRole(context, saf, "ocr") ?: return null
+        // 偵測：NCNN `.param` 優先、ORT `.onnx` 備援（v2 交付只有 NCNN；BYOM 可放任一）。
+        val detNcnn = resolveNcnnRole(context, saf, "detect", "comictext")
+        val detOnnx = resolveOnnxRole(context, saf, "detect", "comictext")
+        if (detNcnn == null && detOnnx == null) return null
+        // 去字：NCNN AOT 優先、ORT AOT / LaMa（退役）備援。
+        val aotNcnn = resolveNcnnRole(context, saf, "aot")
+        val aotOnnx = resolveOnnxRole(context, saf, "aot")
+        val lama = resolveOnnxRole(context, saf, "lama")
+        if (aotNcnn == null && aotOnnx == null && lama == null) return null
         val alphabet = context.assets.open(ALPHABET).bufferedReader().use { it.readLines() }
-        return ModelSetBundle(ModelSet(det, ocr, lama), alphabet)
+        return ModelSetBundle(
+            ModelSet(
+                detector = detOnnx,
+                ocr = ocr,
+                inpainter = lama,
+                aotInpainter = aotOnnx,
+                detectorNcnn = detNcnn,
+                aotInpainterNcnn = aotNcnn,
+            ),
+            alphabet,
+        )
     }
 
     /**
-     * 去字方法字串（[TranslationPreferences.inpaintMethod] 原始值）→ 引擎 (method, wholeImage)。
-     *   boxfill＝全平塗(快·壓畫面塗色塊)／auto_tile＝泡泡平塗+逐區lama(質佳·慢)／其餘＝泡泡平塗+整頁lama(平衡·預設)。
-     * 砍掉的 lama_whole/lama_tile（對乾淨白泡也送 lama→黃暈+慢）落到 else＝回退平衡。
+     * 解析去字模型路徑（給重繪等「只需去字」的路徑用）：NCNN AOT `.param` 優先（同時確保 `.bin` 在本機）、
+     * ORT AOT `.onnx` / LaMa（退役）備援。缺回 null。[Inpainter] 依副檔名分流（`.param`→NCNN）。
+     */
+    fun resolveInpaintModel(context: Context): String? {
+        val saf = modelsDir(context)
+        return resolveNcnnRole(context, saf, "aot")
+            ?: resolveOnnxRole(context, saf, "aot")
+            ?: resolveOnnxRole(context, saf, "lama")
+    }
+
+    /**
+     * 去字方法字串（[TranslationPreferences.inpaintMethod] 原始值）→ 引擎 (method, wholeImage)。v2 兩門別：
+     *   boxfill＝快速去字（全平塗就近取色·快·壓畫面塗色塊）／其餘＝AI 去字（純 AOT-GAN 整頁 768·全區重建·預設）。
+     * ★ 一律純 aot（無 auto 逐區路由）：舊的 auto_aot 會在乾淨泡泡走平塗、AI 去字看起來有些地方是 boxfill──已改純 aot、全區都 AOT。
+     * 舊存的 auto_whole/auto_tile/auto_aot/lama_*（auto 路由 + LaMa/逐格已退役）都落 else＝AI 去字（引擎把 auto* 一律當 aot）。
      *
      * 即時翻譯一律傳 "boxfill"（低延遲）；離線整章翻傳使用者的 inpaintMethod。集中於此一處映射、兩路共用。
      */
     fun mapInpaintMethod(methodRaw: String): Pair<String, Boolean> = when (methodRaw) {
         "boxfill" -> "boxfill" to true
-        "auto_tile" -> "auto" to false
-        else -> "auto" to true // auto_whole（預設·平衡）；舊存的 lama_* 也落這、回退到平衡
+        else -> "aot" to true // AI 去字＝純 AOT-GAN 整頁 768（全區重建、無 auto 路由）；舊 auto_*/lama_* 都落這
     }
 
     /**
      * 去字法品質排名（高＝品質好）。用於「改去字法後升級重繪」（[TranslationManager.reRenderAllUpgradable]）的
      * 向上/向下判斷：新 rank ≥ 已存 rank 才重繪（升級或持平套排版）、新 rank < 已存則保留（不降級＝保留最好結果）。
-     * original/無＝0 ＜ boxfill＝1 ＜ auto_whole/lama_whole＝2 ＜ auto_tile/lama_tile＝3。未知＝2（當整頁 lama 級）。
+     * v2 兩門別：original/無＝0 ＜ boxfill（快速去字）＝1 ＜ 其餘（AI 去字＝純 aot；舊 auto_aot、auto_whole、lama 系列同級）＝2。
      */
     fun inpaintMethodRank(method: String?): Int = when (method) {
         "original", null, "" -> 0
         "boxfill" -> 1
-        "auto_tile", "lama_tile" -> 3
-        "auto_whole", "lama_whole" -> 2
         else -> 2
     }
 

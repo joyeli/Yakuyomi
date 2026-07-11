@@ -811,7 +811,7 @@ private fun SharedMangaBottomActionMenu(
 }
 
 /**
- * 重繪去字法選擇對話框：3 階梯（BoxFill / Auto-整頁 / Auto-逐格）＋「原圖」（還原未翻）。
+ * 重繪去字法選擇對話框：2 門別（快速去字 / AI 去字）＋「原圖」（還原未翻）。
  * 選項對映 [eu.kanade.tachiyomi.data.translation.PageTranslator.reRenderChapter] 吃的去字法原始字串。
  */
 @Composable
@@ -823,7 +823,6 @@ private fun ReRenderMethodDialog(
     val options = listOf(
         stringResource(MR.strings.rerender_boxfill) to "boxfill",
         stringResource(MR.strings.rerender_auto_whole) to "auto_whole",
-        stringResource(MR.strings.rerender_auto_tile) to "auto_tile",
         stringResource(MR.strings.rerender_original) to "original",
     )
     AlertDialog(

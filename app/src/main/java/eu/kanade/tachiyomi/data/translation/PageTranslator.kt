@@ -46,7 +46,7 @@ class PageTranslator(private val context: Context) {
 
     /**
      * 常駐（warm）翻譯引擎服務（process singleton）：[translateChapter] 逐頁透過它翻，
-     * 引擎跨章復用、不每章重載 ~450MB（M4 ⑦）。本服務內部以 Mutex 序列化引擎存取；
+     * 引擎跨章復用、不每章重載 ~100MB（M4 ⑦）。本服務內部以 Mutex 序列化引擎存取；
      * drain 本就是單一消費者，故這裡的呼叫天然序列、額外鎖只是保險。
      */
     private val engineService: TranslationEngineService = Injekt.get()
@@ -132,7 +132,7 @@ class PageTranslator(private val context: Context) {
         val errors = StringBuilder()
         var materialsFailed = false // 素材存失敗只記一次（避免 18 頁刷 18 行）
         try {
-            // 逐頁透過 warm [engineService] 翻（引擎跨章常駐、不每章重載 ~450MB）。
+            // 逐頁透過 warm [engineService] 翻（引擎跨章常駐、不每章重載 ~100MB）。
             // 服務內部以 Mutex 序列化引擎存取；drain 是單一消費者故呼叫天然序列。§11 三態處理與舊版完全一致。
             for (img in pending) {
                 if (shouldStop()) break // 合作式中止：暫停/取消 → 停在頁邊界
@@ -361,17 +361,11 @@ class PageTranslator(private val context: Context) {
             }
             return processed
         }
-        // 只需 lama（去字）；偵測/OCR/翻譯都不跑 → 不取那兩顆模型、不讀 alphabet/key。模型解析委派共用 [TranslationEngineConfig]。
-        val m = modelsDir() ?: return 0
-        val lamaU = TranslationEngineConfig.findOnnx(m, "lama") ?: return 0
-        val lamaPath = TranslationEngineConfig.ensureLocal(context, lamaU)
+        // 只需去字模型（偵測/OCR/翻譯都不跑）→ NCNN AOT 優先（.param+.bin），模型解析委派共用 [TranslationEngineConfig]。
+        val lamaPath = TranslationEngineConfig.resolveInpaintModel(context) ?: return 0
 
-        // 去字方法（與 translateChapter 同一 when 映射）：boxfill＝全平塗／auto_tile＝逐區 lama／其餘＝整頁 lama。
-        val (method, whole) = when (newMethod) {
-            "boxfill" -> "boxfill" to true
-            "auto_tile" -> "auto" to false
-            else -> "auto" to true // auto_whole（預設·平衡）；舊存的 lama_* 也落這
-        }
+        // 去字方法（與 translateChapter 同一 when 映射）：boxfill＝快速去字／其餘＝AI 去字（auto_aot）。
+        val (method, whole) = TranslationEngineConfig.mapInpaintMethod(newMethod)
 
         // 緒數（裝置相依，同 translateChapter 的 intra）：偵測+去字共用此值，這裡只用在去字。
         val cores = Runtime.getRuntime().availableProcessors()
@@ -432,7 +426,7 @@ class PageTranslator(private val context: Context) {
         if (workList.isEmpty()) return 0
 
         var processed = 0
-        // 一顆 lama session 跨整章復用（別逐頁重建：載入 ~450MB native + 編譯耗時）；`use { }` 確保釋放。
+        // 一顆 lama session 跨整章復用（別逐頁重建：載入 ~100MB native + 編譯耗時）；`use { }` 確保釋放。
         Inpainter(lamaPath, inpainterCfg).use { inpainter ->
             for (img in workList) {
                 if (shouldStop()) break // 合作式中止：停在頁邊界
@@ -458,7 +452,7 @@ class PageTranslator(private val context: Context) {
         pageFileName: String,
         newMethod: String,
     ): Boolean {
-        // 原圖：用素材的 orig.webp 還原該頁，不需 lama / 排版 → 早於 lama 載入處理（避免為還原白載 ~450MB）。
+        // 原圖：用素材的 orig.webp 還原該頁，不需 lama / 排版 → 早於 lama 載入處理（避免為還原白載 ~100MB）。
         if (newMethod == ORIGINAL_METHOD) {
             val img = chapterDir.listFiles()
                 ?.firstOrNull { f ->
@@ -470,17 +464,11 @@ class PageTranslator(private val context: Context) {
             val matDir = chapterDir.findFile(MATERIALS_DIR) ?: return false
             return reRenderOnePage(matDir, img, newMethod, null, null)
         }
-        // 只需 lama（去字）；偵測/OCR/翻譯都不跑（同 reRenderChapter）。模型解析委派共用 [TranslationEngineConfig]。
-        val m = modelsDir() ?: return false
-        val lamaU = TranslationEngineConfig.findOnnx(m, "lama") ?: return false
-        val lamaPath = TranslationEngineConfig.ensureLocal(context, lamaU)
+        // 只需去字模型（同 reRenderChapter）→ NCNN AOT 優先（.param+.bin）。模型解析委派共用 [TranslationEngineConfig]。
+        val lamaPath = TranslationEngineConfig.resolveInpaintModel(context) ?: return false
 
         // 去字方法映射（與 reRenderChapter/translateChapter 同一 when）。
-        val (method, whole) = when (newMethod) {
-            "boxfill" -> "boxfill" to true
-            "auto_tile" -> "auto" to false
-            else -> "auto" to true // auto_whole（預設·平衡）；舊存的 lama_* 也落這
-        }
+        val (method, whole) = TranslationEngineConfig.mapInpaintMethod(newMethod)
 
         // 緒數 + 進階數值（與 reRenderChapter 完全相同的讀法/clamp）。
         val cores = Runtime.getRuntime().availableProcessors()
@@ -543,7 +531,7 @@ class PageTranslator(private val context: Context) {
      * 成功覆蓋回 true。
      *
      * @param matDir 章內 `.yakuyomi/` 素材子夾（呼叫端確保非 null）。
-     * @param inpainter 已建好的 lama session（跨頁復用，避免逐頁重載 ~450MB）。
+     * @param inpainter 已建好的 lama session（跨頁復用，避免逐頁重載 ~100MB）。
      */
     private suspend fun reRenderOnePage(
         matDir: UniFile,

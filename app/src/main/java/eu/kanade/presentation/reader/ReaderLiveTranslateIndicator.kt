@@ -15,7 +15,7 @@ import tachiyomi.presentation.core.i18n.stringResource
 /**
  * Reader 內的「當前章正在翻譯」小指示器（非侵入式角落藥丸）。
  *
- * - [loading]＝true → 顯示「引擎載入中…」（優先；引擎在背景載 ~450MB ONNX，讓使用者知道延遲是掛載模型而非卡死）。
+ * - [loading]＝true → 顯示「引擎載入中…」（優先；引擎在背景載 ~100MB ONNX，讓使用者知道延遲是掛載模型而非卡死）。
  * - [translating]＝true → 顯示「翻譯中 X/Y」（[done]/[total]）；false → 顯示「翻譯排隊中」。
  * - 半透明圓角底、`labelSmall` 小字、緊湊內距；放在角落不擋頁面、也不攔觸控
  *   （[Surface] 不帶 onClick、無 clickable modifier ⇒ 點擊穿透到底下的 viewer，照常切換選單）。
@@ -32,7 +32,7 @@ fun ReaderLiveTranslateIndicator(
     modifier: Modifier = Modifier,
 ) {
     val text = when {
-        // 引擎正在載入（~450MB ONNX）→ 優先顯示，讓使用者知道延遲是在掛載模型（非卡死）。
+        // 引擎正在載入（~100MB ONNX）→ 優先顯示，讓使用者知道延遲是在掛載模型（非卡死）。
         loading -> stringResource(MR.strings.reader_engine_loading)
         // 翻譯中且已知頁數 → 帶進度；total 還沒回報（剛開始）時退化成不帶數字、避免顯示「0/0」。
         translating && total > 0 -> stringResource(MR.strings.reader_translating_progress, done, total)

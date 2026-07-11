@@ -69,7 +69,7 @@ class TranslationManager(private val context: Context) {
     private val getFavorites: GetFavorites = Injekt.get()
     private val getChaptersByMangaId: GetChaptersByMangaId = Injekt.get()
 
-    /** 常駐（warm）翻譯引擎服務：佇列翻完且**即時翻關著**時釋放它，別讓 ~450MB 閒置（即時翻開著則保 warm）。 */
+    /** 常駐（warm）翻譯引擎服務：佇列翻完且**即時翻關著**時釋放它，別讓 ~100MB 閒置（即時翻開著則保 warm）。 */
     private val engineService: TranslationEngineService = Injekt.get()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val drainMutex = Mutex()
@@ -434,7 +434,7 @@ class TranslationManager(private val context: Context) {
      *
      * 正在翻（TRANSLATING）改方法 → 設 [stopActive]（**不**設 _isPaused）：當前章停在下一頁邊界、回 QUEUE，
      * drain 立刻重挑、`translateChapter` 以新 [Entry.method] 從 manifest **續傳**——已翻頁（manifest 已記）跳過、
-     * 保留舊去字結果；**剩餘頁用新去字**。例：4/14 改 → 1-4 維持舊法、5-14 用新法。（代價：續傳會重載引擎 ~450MB。）
+     * 保留舊去字結果；**剩餘頁用新去字**。例：4/14 改 → 1-4 維持舊法、5-14 用新法。（代價：續傳會重載引擎 ~100MB。）
      */
     fun setItemMethod(chapterId: Long, method: String) {
         synchronized(lock) {
@@ -658,7 +658,7 @@ class TranslationManager(private val context: Context) {
 
     /**
      * 翻譯總開關切換的副作用，供「翻譯設定頁」與「More 頁快捷開關」**共用**（兩處綁同一 pref、自動連動）：
-     * 開→續跑佇列 + 即時翻開且引擎就緒則預暖；關→中止當前章 + 釋放 warm 引擎（~450MB）。
+     * 開→續跑佇列 + 即時翻開且引擎就緒則預暖；關→中止當前章 + 釋放 warm 引擎（~100MB）。
      * **不**負責 set pref（呼叫端各自由 widget / asState 寫入）。
      */
     fun onMasterEnabledChanged(enabled: Boolean) {
@@ -729,9 +729,9 @@ class TranslationManager(private val context: Context) {
                 persist()
             }
             // 迴圈退出（因「無 QUEUE 項」自然翻完，或「總開關關」使 while 條件 false 退出；暫停則走另一分支不到這）：
-            // 即時翻**關著**時釋放 warm 引擎，別讓 ~450MB 閒置；即時翻**開著**時保 warm（reader 隨時要讀下一章）。
+            // 即時翻**關著**時釋放 warm 引擎，別讓 ~100MB 閒置；即時翻**開著**時保 warm（reader 隨時要讀下一章）。
             // 引擎之後會在下次 translatePage lazy 重建。shutdown 走服務自己的 Mutex（與 drainMutex 不同鎖、不死鎖）。
-            // 釋放 warm 引擎：只有「總開關開 + 即時翻開」才保 warm（reader 要讀下一章）；總開關關或即時翻關 → 釋放 ~450MB。
+            // 釋放 warm 引擎：只有「總開關開 + 即時翻開」才保 warm（reader 要讀下一章）；總開關關或即時翻關 → 釋放 ~100MB。
             if (!_isPaused.value && !(masterEnabled() && translationPreferences.liveTranslate.get())) {
                 engineService.shutdown()
             }
