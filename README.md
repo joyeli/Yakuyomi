@@ -27,10 +27,10 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 
 **Translation**
 - **Real inpainting, not overlays** — other translation forks paint a box over the text or stamp new text on top. Yakuyomi *erases* the original and **reconstructs the artwork** (AOT-GAN inpainting) before typesetting the translation back into the bubble.
-- **On-device pipeline** — detection, OCR, and text removal run locally (NCNN + ONNX Runtime); only the LLM translation call leaves your device. No image ever leaves the phone.
+- **On-device pipeline** — detection and text removal run on NCNN's mobile kernels (NEON/Vulkan), OCR on an int8-quantized model — fast on CPU and GPU/NPU-ready. Only the LLM translation call leaves your device; no image ever leaves the phone.
 - **Two workflows** — translate-on-download (whole chapters in the background) and live translation while you read. A page is overwritten only when its translation succeeds; nothing is ever replaced with something worse.
 - **Your provider, your key** — any OpenAI-compatible LLM (DeepSeek by default; OpenAI, Gemini, Groq, Qwen, OpenRouter, self-hosted Sakura, custom), per-provider encrypted keys, live model list ([providers doc](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/PROVIDERS.md)).
-- **Your models** — the model set (NCNN detector + inpaint pairs, int8 OCR, ~92 MB) downloads in one tap with sha256 verification, or you supply them manually ([models doc](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/MODELS.md)).
+- **Your models** — the model set (NCNN detector + inpaint pairs, int8 OCR, ~96 MB) downloads in one tap with sha256 verification, or you supply them manually ([models doc](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/MODELS.md)).
 - **Quality knobs** — two text-removal modes (fast flat-fill / AI inpainting), vertical/horizontal typesetting, ~20 tunable parameters. No telemetry.
 
 <div align="center">
@@ -137,7 +137,7 @@ Grab the latest **signed APK** from the [**Releases page**](https://github.com/j
 ## How translation works
 
 ```
-page → detect (ONNX) → OCR (ONNX) → group → translate (LLM) → remove text (ONNX) → typeset → translated page
+page → detect (NCNN) → OCR (int8 ONNX) → group → translate (LLM) → remove text (NCNN) → typeset → translated page
 ```
 
 Four of the five stages run on the device; only translation leaves it. The pipeline and its design live in [yakuyomi-engine](https://github.com/joyeli/yakuyomi-engine).
