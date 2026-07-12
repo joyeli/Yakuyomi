@@ -27,10 +27,11 @@ Yakuyomi 是 [mihon](https://github.com/mihonapp/mihon) 的 fork，邊下載 / �
 
 **翻譯**
 - **真去字重建，不是疊字** — 其他翻譯 fork 是在文字上蓋一塊色塊、或把新字疊上去；Yakuyomi 是把原文**擦掉、重建畫面**（AOT-GAN 去字），再把譯文排回氣泡裡。
-- **裝置端 pipeline** — 偵測、去字跑 NCNN 行動核心（NEON/Vulkan），OCR 跑 int8 量化模型——CPU 上快、且 GPU/NPU-ready。只有 LLM 翻譯那步離開裝置，圖片永遠不出手機。
+- **裝置端 pipeline（v2 — NCNN + int8）** — 偵測、去字跑 **NCNN** 行動核心，OCR 跑 **int8 量化**模型。從 ONNX Runtime 換過來後，模型集從 **~470 MB 縮到 ~92 MB**、也更快——偵測 ~2.9×、OCR ~3.6×——Snapdragon 8 Gen 3 上約 **5 秒一頁**。純 CPU（GPU/NPU 試過、對這些模型沒幫助）。只有 LLM 翻譯那步離開裝置，圖片永遠不出手機。
+- **跨頁流水線（~2× 快）** — 多頁併發翻：某頁在等雲端 LLM 時，下一頁的裝置端偵測 / OCR / 去字已經在跑。淺併發下撞到網路上限——即時 / 快速去字翻譯約**加倍**吞吐。
 - **兩種工作流** — 下載時翻（整章背景翻）與邊讀邊翻；只有翻成功才覆蓋該頁，絕不用更糟的東西蓋掉原圖。
 - **自備服務商與金鑰** — 任何 OpenAI 相容 LLM（預設 DeepSeek；OpenAI、Gemini、Groq、Qwen、OpenRouter、自架 Sakura、自訂），金鑰每家一格加密、模型清單即時撈（[服務商說明](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/PROVIDERS_zh.md)）。
-- **自備模型** — 模型集（NCNN 偵測 + 去字成對檔、int8 OCR，約 96 MB）可一鍵下載（含 sha256 驗證），或自己手動放（[模型說明](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/MODELS_zh.md)）。
+- **自備模型** — 模型集（NCNN 偵測 + 去字成對檔、int8 OCR，約 92 MB）可一鍵下載（含 sha256 驗證），或自己手動放（[模型說明](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/MODELS_zh.md)）。
 - **品質旋鈕** — 兩種去字模式（快速去字 / AI 去字）、直 / 橫排版、約 20 個可調參數。無 telemetry。
 
 <div align="center">
@@ -141,6 +142,8 @@ Yakuyomi 是 [mihon](https://github.com/mihonapp/mihon) 的 fork，邊下載 / �
 ```
 
 五階段裡四個在裝置上跑，只有翻譯離開裝置。pipeline 與設計都在 [yakuyomi-engine](https://github.com/joyeli/yakuyomi-engine)。
+
+**兩層併發撐住速度。** *頁內*：去字（CPU）在翻譯請求飛在網路上時同時跑——一頁只付兩者中較長的那個、不是相加。*跨頁*：引擎流水線化——第 N 頁在等 LLM 時，第 N+1 頁的偵測 / OCR / 去字已經在裝置上跑。搭配快速的平塗去字就撞到網路上限——約 **2× 循序速率**。
 
 ## 為什麼翻譯走雲端
 
