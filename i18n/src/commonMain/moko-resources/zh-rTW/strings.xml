@@ -961,9 +961,11 @@
     <string name="pref_translation_on_download">下載時翻譯章節</string>
     <string name="pref_translation_on_download_summary">偵測 / OCR / 去字在裝置上跑；翻譯走雲端 LLM</string>
     <string name="pref_translation_live">即時翻譯（邊讀邊翻）</string>
-    <string name="pref_translation_live_summary">讀未翻章節時逐頁用快速 boxfill 即時翻並置換頁面；需 API key + 模型，與「下載時翻譯章節」獨立</string>
+    <string name="pref_translation_live_summary">讀未翻章節時逐頁即時翻並置換頁面；需 API key + 模型，與「下載時翻譯章節」獨立</string>
     <string name="pref_translation_live_categories">即時翻譯分類</string>
     <string name="pref_translation_live_categories_message">選了「包含」分類＝只翻這些分類的書；選「排除」＝這些分類的書不翻；都不選＝全部</string>
+    <string name="pref_translation_live_inpaint_method">即時翻去字方法</string>
+    <string name="pref_translation_live_inpaint_summary">即時翻譯專用的去字方法，與下載時翻譯分開。預設「快速去字」求低延遲；想邊讀邊看 AI 去字可改選「AI 去字」。</string>
     <string name="pref_translation_excluded_sources">不翻譯的來源</string>
     <string name="pref_translation_excluded_sources_summary">勾選的來源不自動翻譯（手動翻不受限）：%s</string>
     <string name="pref_translation_remove_after_read_summary">%s（與下載設定連動）</string>
@@ -1010,13 +1012,7 @@
     <string name="pref_translation_font_border_summary">雜背景上的字加描邊更好讀</string>
     <string name="pref_translation_ocr_concurrency">OCR 並發度</string>
     <string name="pref_translation_ocr_concurrency_summary">同時跑幾行 OCR（自動=核數）；越高越快到核數為止。%s</string>
-    <string name="pref_translation_intra_threads">推論執行緒（偵測 / 去字）</string>
-    <string name="pref_translation_intra_threads_summary">一次推論用幾緒（自動=大核數）；含小核反拖累。%s</string>
     <string name="pref_translation_adv_current">。現值：%s</string>
-    <string name="pref_translation_auto_std">auto 泡泡判定門檻 std</string>
-    <string name="pref_translation_auto_std_desc">背景 std&lt;此值=平塗、否則 lama；0–30，越低越多走 lama(精/慢)、越高壓畫面字塗成色塊</string>
-    <string name="pref_translation_auto_white">auto 白底門檻</string>
-    <string name="pref_translation_auto_white_desc">背景亮度≥此值才算對話框；0–255，越低暗背景誤平塗、越高灰白泡也走 lama</string>
     <string name="pref_translation_bbox_pad">去字外擴 (px)</string>
     <string name="pref_translation_bbox_pad_desc">去字範圍外擴、涵蓋貼邊假名；0–64，太小漏邊假名、太大挖到鄰近畫面</string>
     <string name="pref_translation_font_size_max">字級上限 (px)</string>

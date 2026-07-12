@@ -8,7 +8,12 @@ import android.os.Build
 import android.util.Base64
 import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.BuildConfig
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
@@ -80,6 +85,13 @@ class PageTranslator(private val context: Context) {
     }
 
     /**
+     * 跨頁流水線深度（同時在飛的頁數）：去字便宜（boxfill／即時翻）→ 深 4＝網路綁定、約 2× 循序速率；
+     * 去字貴（aot／下載時 AI 去字）→ 深 2＝CPU 綁定（再深不加速，且多頁去字疊加吃記憶體）。真機 benchmark 定案。
+     */
+    private fun pipelineDepth(methodRaw: String): Int =
+        if (TranslationEngineConfig.mapInpaintMethod(methodRaw) == "boxfill") 4 else 2
+
+    /**
      * 翻譯 [chapterDir]（UniFile，相容本機/SAF）內所有頁圖、就地覆蓋成功的頁。
      * page-level resume（§11）：跳過 manifest 已記的頁、只補沒翻的；每頁成功就更新 manifest，
      * 中斷後重跑只補剩下的。回傳這次新翻成功的頁數。
@@ -131,52 +143,88 @@ class PageTranslator(private val context: Context) {
         // 該話資料夾的 [ERRORS_FILE]（同步到雲端可直接查；未標記的頁留待重試＝整章 isChapterTranslated=false 變紅）。
         val errors = StringBuilder()
         var materialsFailed = false // 素材存失敗只記一次（避免 18 頁刷 18 行）
+        // 共享可變狀態（done/計數/errors/進度）在跨頁併發下的守鎖：只保護「讀-改-寫」那一小段（含 writeManifest），
+        // 重活（engine.translatePage 網路+推論、writeBack/saveMaterials 的檔案 I/O）都在鎖外並發跑。
+        val stateMutex = Mutex()
+        // 跨頁流水線深度（§8 二層併發之「跨頁」）：頁 N 的網路翻譯疊上頁 N+1 的裝置端偵測/OCR。
+        // 去字便宜（boxfill/即時）→ 網路綁定、深 4 達約 2×；去字貴（aot）→ CPU 綁定、深 2（再深不加速且吃記憶體）。
+        val gate = Semaphore(pipelineDepth(inpaintMethodRaw))
         try {
-            // 逐頁透過 warm [engineService] 翻（引擎跨章常駐、不每章重載 ~100MB）。
-            // 服務內部以 Mutex 序列化引擎存取；drain 是單一消費者故呼叫天然序列。§11 三態處理與舊版完全一致。
-            for (img in pending) {
-                if (shouldStop()) break // 合作式中止：暫停/取消 → 停在頁邊界
-                val name = img.name ?: continue
-                val bmp = context.contentResolver.openInputStream(img.uri)
-                    ?.use { BitmapFactory.decodeStream(it) } ?: continue
-                when (val r = engineService.translatePage(bmp, inpaintMethodRaw)) {
-                    is PageResult.Translated -> {
-                        promptTokens += r.stats.promptTokens
-                        completionTokens += r.stats.completionTokens
-                        writeBack(img, r.page)
-                        // 保留重繪素材（best-effort、不擋翻譯）：bmp 為剛解碼的原圖（引擎不會 mutate 輸入、回的是新 bitmap）。
-                        if (keepMaterials && r.analysis != null) {
-                            // 素材存失敗（如 SD/SAF 不支援 .yakuyomi 子夾）不再無聲 → 首次失敗寫進該話錯誤檔，供 adb-less 診斷。
-                            val matErr = saveMaterials(chapterDir, name, bmp, r.analysis!!, inpaintMethodRaw)
-                            if (matErr != null && !materialsFailed) {
-                                materialsFailed = true
-                                errors.appendLine("(materials)\t$matErr")
+            coroutineScope {
+                for (img in pending) {
+                    if (shouldStop()) break // 合作式中止：暫停/取消 → 停在頁邊界（不再派新頁；已派的跑完）
+                    gate.acquire() // 限同時在飛頁數；coroutineScope 會等所有已派子協程結束才返回
+                    launch(Dispatchers.Default) {
+                        try {
+                            if (shouldStop()) return@launch
+                            val name = img.name ?: return@launch
+                            val bmp = context.contentResolver.openInputStream(img.uri)
+                                ?.use { BitmapFactory.decodeStream(it) } ?: return@launch
+                            try {
+                                // 併發進引擎（EngineService 已放鬆成可並發；同章去字法相同、不重建）。§11 三態處理與循序版完全一致。
+                                when (val r = engineService.translatePage(bmp, inpaintMethodRaw)) {
+                                    is PageResult.Translated -> {
+                                        writeBack(img, r.page) // 各頁寫各自檔、鎖外並發
+                                        r.page.recycle() // 譯圖已落檔、後面用不到 → 立即回收（跨頁併發下少堆一張 bitmap，降記憶體峰值）
+                                        // 保留重繪素材（best-effort、不擋翻譯）：bmp 為剛解碼的原圖（引擎不 mutate 輸入、回新 bitmap）。鎖外並發。
+                                        val matErr = if (keepMaterials && r.analysis != null) {
+                                            saveMaterials(chapterDir, name, bmp, r.analysis!!, inpaintMethodRaw)
+                                        } else {
+                                            null
+                                        }
+                                        stateMutex.withLock {
+                                            promptTokens += r.stats.promptTokens
+                                            completionTokens += r.stats.completionTokens
+                                            // 素材存失敗（如 SD/SAF 不支援 .yakuyomi 子夾）不再無聲 → 首次失敗寫進該話錯誤檔，供 adb-less 診斷。
+                                            if (matErr != null && !materialsFailed) {
+                                                materialsFailed = true
+                                                errors.appendLine("(materials)\t$matErr")
+                                            }
+                                            translated++
+                                            done.add(name)
+                                            writeManifest(chapterDir, done)
+                                        }
+                                        // 推「這頁翻好了」事件 → 即時翻 loader 直接重畫該頁（不靠輪詢 manifest／queueState，
+                                        // 後者是 conflated StateFlow + 慢的檔案讀 → 某頁常要等後面頁的 emit 才被順便比中、更新延遲）。
+                                        onPageDone(name)
+                                    }
+                                    is PageResult.Skipped -> stateMutex.withLock {
+                                        promptTokens += r.stats.promptTokens // 全數過濾的略過仍耗了 token（其餘 Skipped＝0）
+                                        completionTokens += r.stats.completionTokens
+                                        logcat { "翻譯略過 $name：${r.reason}" }
+                                        done.add(name)
+                                        writeManifest(chapterDir, done) // 略過＝沒字可翻、算處理過、不重試
+                                    }
+                                    is PageResult.Failed -> stateMutex.withLock {
+                                        // 該頁失敗 → 跳過、留原圖、續翻下一頁；記原因供查（不標記、下次重試）。
+                                        logcat(LogPriority.WARN) { "翻譯失敗 $name：${r.reason}" }
+                                        errors.appendLine("$name\t${r.reason}")
+                                    }
+                                }
+                            } catch (c: CancellationException) {
+                                throw c // 尊重結構化併發取消（整個 drain 被 cancel）——不吞（下面 Throwable catch 才不會誤吃）
+                            } catch (t: Throwable) {
+                                // ★ 單頁例外隔離（OOM／解碼／IO／native）：記錯、留原圖待重試，**不 cross-cancel** 其他在飛頁、不炸整章。
+                                logcat(LogPriority.ERROR, t) { "翻譯頁例外（已隔離、續其他頁）$name" }
+                                stateMutex.withLock {
+                                    errors.appendLine("$name\t例外 ${t.javaClass.simpleName}: ${t.message}")
+                                }
+                            } finally {
+                                if (!bmp.isRecycled) bmp.recycle() // 任何出口（成功/略過/失敗/例外）都回收，避免併發下 bitmap 堆積 → OOM
                             }
+                            // 只有跑到 when 的頁（含例外頁）計進度；shouldStop/無檔名/解碼失敗提早 return 者不計（同循序版 continue 語義）。
+                            stateMutex.withLock {
+                                processed++
+                                onProgress(processed, total)
+                            }
+                        } finally {
+                            gate.release()
                         }
-                        translated++
-                        done.add(name)
-                        writeManifest(chapterDir, done)
-                        // 推「這頁翻好了」事件 → 即時翻 loader 直接重畫該頁（不靠輪詢 manifest／queueState，
-                        // 後者是 conflated StateFlow + 慢的檔案讀 → 某頁常要等後面頁的 emit 才被順便比中、更新延遲）。
-                        onPageDone(name)
-                    }
-                    is PageResult.Skipped -> {
-                        promptTokens += r.stats.promptTokens // 全數過濾的略過仍耗了 token（其餘 Skipped＝0）
-                        completionTokens += r.stats.completionTokens
-                        logcat { "翻譯略過 $name：${r.reason}" }
-                        done.add(name)
-                        writeManifest(chapterDir, done) // 略過＝沒字可翻、算處理過、不重試
-                    }
-                    is PageResult.Failed -> {
-                        // 該頁失敗 → 跳過、留原圖、續翻下一頁；記原因供查（不標記、下次重試）。
-                        logcat(LogPriority.WARN) { "翻譯失敗 $name：${r.reason}" }
-                        errors.appendLine("$name\t${r.reason}")
                     }
                 }
-                bmp.recycle()
-                processed++
-                onProgress(processed, total)
             }
+        } catch (c: CancellationException) {
+            throw c // 整個 drain 被 cancel（暫停/關即時翻/行程收）→ 傳播、別當章例外記；已翻頁有 manifest、resume 續補
         } catch (e: Throwable) {
             logcat(LogPriority.ERROR, e) { "translateChapter 例外（保留原圖）" }
             errors.appendLine("(chapter)\t例外 ${e.javaClass.simpleName}: ${e.message}")
@@ -362,17 +410,10 @@ class PageTranslator(private val context: Context) {
             return processed
         }
         // 只需去字模型（偵測/OCR/翻譯都不跑）→ NCNN AOT 優先（.param+.bin），模型解析委派共用 [TranslationEngineConfig]。
-        val lamaPath = TranslationEngineConfig.resolveInpaintModel(context) ?: return 0
+        val inpaintPath = TranslationEngineConfig.resolveInpaintModel(context) ?: return 0
 
-        // 去字方法（與 translateChapter 同一 when 映射）：boxfill＝快速去字／其餘＝AI 去字（auto_aot）。
-        val (method, whole) = TranslationEngineConfig.mapInpaintMethod(newMethod)
-
-        // 緒數（裝置相依，同 translateChapter 的 intra）：偵測+去字共用此值，這裡只用在去字。
-        val cores = Runtime.getRuntime().availableProcessors()
-        val intra = when (val v = translationPreferences.intraThreads.get()) {
-            "auto" -> (cores - 2).coerceAtLeast(2)
-            else -> (v.toIntOrNull() ?: 6).coerceIn(1, 32)
-        }
+        // 去字方法（與 translateChapter 同一映射）：boxfill＝快速去字／其餘＝AI 去字（aot）。
+        val method = TranslationEngineConfig.mapInpaintMethod(newMethod)
 
         // 進階數值：存字串、parse + clamp 到值域（與 translateChapter 完全相同的 pf/pi + pref 讀法）。
         fun pf(s: String, lo: Float, hi: Float, d: Float) = s.toFloatOrNull()?.coerceIn(lo, hi) ?: d
@@ -389,11 +430,7 @@ class PageTranslator(private val context: Context) {
         // 去字設定：segThreshold 屬偵測器（這裡不跑偵測、遮罩直接取素材）故不需；其餘去字參數照 translateChapter。
         val inpainterCfg = InpainterConfig(
             method = method,
-            wholeImage = whole,
-            autoStdThreshold = pf(p.autoStdThreshold.get(), 0f, 30f, 6f),
-            autoWhiteThreshold = pf(p.autoWhiteThreshold.get(), 0f, 255f, 190f),
             bboxPad = pi(p.bboxPad.get(), 0, 64, 16),
-            intraThreads = intra,
         )
         // 排版設定：與 translateChapter 的 RenderConfig 逐欄相同。
         val renderCfg = RenderConfig(
@@ -427,7 +464,7 @@ class PageTranslator(private val context: Context) {
 
         var processed = 0
         // 一顆 lama session 跨整章復用（別逐頁重建：載入 ~100MB native + 編譯耗時）；`use { }` 確保釋放。
-        Inpainter(lamaPath, inpainterCfg).use { inpainter ->
+        Inpainter(inpaintPath, inpainterCfg).use { inpainter ->
             for (img in workList) {
                 if (shouldStop()) break // 合作式中止：停在頁邊界
                 // 單頁失敗（素材壞/原圖缺）不該中斷整章：reRenderOnePage 內已包 try/catch、回 false 略過。
@@ -465,17 +502,12 @@ class PageTranslator(private val context: Context) {
             return reRenderOnePage(matDir, img, newMethod, null, null)
         }
         // 只需去字模型（同 reRenderChapter）→ NCNN AOT 優先（.param+.bin）。模型解析委派共用 [TranslationEngineConfig]。
-        val lamaPath = TranslationEngineConfig.resolveInpaintModel(context) ?: return false
+        val inpaintPath = TranslationEngineConfig.resolveInpaintModel(context) ?: return false
 
-        // 去字方法映射（與 reRenderChapter/translateChapter 同一 when）。
-        val (method, whole) = TranslationEngineConfig.mapInpaintMethod(newMethod)
+        // 去字方法映射（與 reRenderChapter/translateChapter 同一映射）。
+        val method = TranslationEngineConfig.mapInpaintMethod(newMethod)
 
-        // 緒數 + 進階數值（與 reRenderChapter 完全相同的讀法/clamp）。
-        val cores = Runtime.getRuntime().availableProcessors()
-        val intra = when (val v = translationPreferences.intraThreads.get()) {
-            "auto" -> (cores - 2).coerceAtLeast(2)
-            else -> (v.toIntOrNull() ?: 6).coerceIn(1, 32)
-        }
+        // 進階數值（與 reRenderChapter 完全相同的讀法/clamp）。
         fun pf(s: String, lo: Float, hi: Float, d: Float) = s.toFloatOrNull()?.coerceIn(lo, hi) ?: d
         fun pi(s: String, lo: Int, hi: Int, d: Int) = s.toIntOrNull()?.coerceIn(lo, hi) ?: d
         val p = translationPreferences
@@ -487,11 +519,7 @@ class PageTranslator(private val context: Context) {
         }
         val inpainterCfg = InpainterConfig(
             method = method,
-            wholeImage = whole,
-            autoStdThreshold = pf(p.autoStdThreshold.get(), 0f, 30f, 6f),
-            autoWhiteThreshold = pf(p.autoWhiteThreshold.get(), 0f, 255f, 190f),
             bboxPad = pi(p.bboxPad.get(), 0, 64, 16),
-            intraThreads = intra,
         )
         val renderCfg = RenderConfig(
             orientation = orient,
@@ -517,7 +545,7 @@ class PageTranslator(private val context: Context) {
         val matDir = chapterDir.findFile(MATERIALS_DIR) ?: return false
 
         // 只開一顆 lama session（單頁重繪、跑完即釋放）。
-        return Inpainter(lamaPath, inpainterCfg).use { inpainter ->
+        return Inpainter(inpaintPath, inpainterCfg).use { inpainter ->
             reRenderOnePage(matDir, img, newMethod, inpainter, renderCfg)
         }
     }
@@ -756,9 +784,10 @@ class PageTranslator(private val context: Context) {
     ): String? {
         return runCatching {
             val base = pageName.substringBeforeLast('.')
-            val dir = chapterDir.findFile(MATERIALS_DIR)
-                ?: chapterDir.createDirectory(MATERIALS_DIR)
-                ?: return "素材存失敗：無法建立 .yakuyomi 子夾（此儲存位置可能不支援，建議改用內部儲存）"
+            // 併發翻多頁 → 序列化子夾的 get-or-create（見 [materialsDirLock]），避免同時 createDirectory 建重複/回 null。
+            val dir = synchronized(materialsDirLock) {
+                chapterDir.findFile(MATERIALS_DIR) ?: chapterDir.createDirectory(MATERIALS_DIR)
+            } ?: return "素材存失敗：無法建立 .yakuyomi 子夾（此儲存位置可能不支援，建議改用內部儲存）"
             // 原圖 → WEBP（API≥30 用 WEBP_LOSSY，否則舊 WEBP）。
             val webpFmt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 Bitmap.CompressFormat.WEBP_LOSSY
@@ -821,6 +850,13 @@ class PageTranslator(private val context: Context) {
         // 重繪素材子夾（章內）：放原圖 + 遮罩/文字區 json。reader 列頁只看頂層圖檔 → 忽略此子夾。
         private const val MATERIALS_DIR = ".yakuyomi"
         private val MATERIALS_JSON = Json { prettyPrint = false }
+
+        /**
+         * 序列化 [MATERIALS_DIR] 子夾的 get-or-create（`findFile ?: createDirectory` 是 check-then-act）。
+         * 跨頁併發翻多頁時，多頁同時發現子夾不存在 → 同時 createDirectory → SAF 可能建出重複子夾/部分回 null。
+         * 用 object 級鎖（跨所有 PageTranslator 實例）序列化這一小段；子夾存在後 findFile 命中、不再進 create。
+         */
+        private val materialsDirLock = Any()
 
         /** 重繪的「原圖」方法：用素材 orig.webp 還原該頁（不去字/不排版、不載 lama）。重繪對話框「原圖」選項對應此值。 */
         const val ORIGINAL_METHOD = "original"

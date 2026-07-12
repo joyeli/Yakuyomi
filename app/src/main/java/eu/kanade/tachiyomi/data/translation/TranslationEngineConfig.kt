@@ -97,13 +97,14 @@ object TranslationEngineConfig {
 
     /**
      * 模型三顆是否齊（detector / ocr / 去字）。給 [PageTranslator.isReady] / [TranslationEngineService.isReady] 共用。
-     * 去字：AOT（v2 主，NCNN `.param` 或 ORT `.onnx`）或 LaMa（退役備援）任一即算。自動下載區 + SAF BYOM 區擇一即可。
+     * 去字＝AOT（v2＝NCNN `.param`）；殘留的 v1 `.onnx` 也算「存在」（再交給 [modelsOutdated] 判過時）。
+     * 自動下載區 + SAF BYOM 區擇一即可。
      */
     fun hasAllModels(context: Context): Boolean {
         val saf = modelsDir(context)
         return rolePresent(context, saf, "detect", "comictext") &&
             rolePresent(context, saf, "ocr") &&
-            (rolePresent(context, saf, "aot") || rolePresent(context, saf, "lama"))
+            rolePresent(context, saf, "aot")
     }
 
     /**
@@ -124,7 +125,7 @@ object TranslationEngineConfig {
         return listOf(
             context.stringResource(MR.strings.model_role_detect) to rolePresent(context, saf, "detect", "comictext"),
             context.stringResource(MR.strings.model_role_ocr) to rolePresent(context, saf, "ocr"),
-            context.stringResource(MR.strings.model_role_inpaint) to (rolePresent(context, saf, "aot") || rolePresent(context, saf, "lama")),
+            context.stringResource(MR.strings.model_role_inpaint) to rolePresent(context, saf, "aot"),
         )
     }
 
@@ -132,7 +133,7 @@ object TranslationEngineConfig {
      * 模型「齊但過時」＝v1 舊模型（ORT 偵測 + LaMa `.onnx`）還在、但缺 v2 的 NCNN 交付（偵測/去字 `.param`）。
      *
      * 為何重要：升級 app（引擎 v2）後若沿用舊模型，[modelPresence] 仍全 ✓（關鍵字 + `.onnx` fallback 命中舊檔），
-     * 但引擎會拿 LaMa 當 `auto_aot` 去字模型跑（I/O 契約不符）→ **去字輸出壞掉**，使用者卻不知要換。
+     * 但引擎 v2 只認 NCNN `.param`（偵測/去字）→ [resolveModelSet] 回 null、翻譯根本不啟動，使用者卻不知要換。
      * 用這個旗標在設定頁把「模型齊全」改成「舊版·請重新下載」，並把下載鈕標成「更新模型」。
      *
      * 判準＝偵測與去字**都**要有 NCNN `.param`（v2 唯一交付）。舊 v1 兩者皆無 → 過時。
@@ -154,53 +155,28 @@ object TranslationEngineConfig {
      */
     fun resolveModelSet(context: Context): ModelSetBundle? {
         val saf = modelsDir(context)
+        // 引擎已收斂成純 NCNN 偵測 + int8 OCR + NCNN AOT 去字（ORT 偵測/去字備援與 LaMa 皆退役移除）。
         val ocr = resolveOnnxRole(context, saf, "ocr") ?: return null
-        // 偵測：NCNN `.param` 優先、ORT `.onnx` 備援（v2 交付只有 NCNN；BYOM 可放任一）。
-        val detNcnn = resolveNcnnRole(context, saf, "detect", "comictext")
-        val detOnnx = resolveOnnxRole(context, saf, "detect", "comictext")
-        if (detNcnn == null && detOnnx == null) return null
-        // 去字：NCNN AOT 優先、ORT AOT / LaMa（退役）備援。
-        val aotNcnn = resolveNcnnRole(context, saf, "aot")
-        val aotOnnx = resolveOnnxRole(context, saf, "aot")
-        val lama = resolveOnnxRole(context, saf, "lama")
-        if (aotNcnn == null && aotOnnx == null && lama == null) return null
+        val detNcnn = resolveNcnnRole(context, saf, "detect", "comictext") ?: return null
+        val aotNcnn = resolveNcnnRole(context, saf, "aot") ?: return null
         val alphabet = context.assets.open(ALPHABET).bufferedReader().use { it.readLines() }
         return ModelSetBundle(
-            ModelSet(
-                detector = detOnnx,
-                ocr = ocr,
-                inpainter = lama,
-                aotInpainter = aotOnnx,
-                detectorNcnn = detNcnn,
-                aotInpainterNcnn = aotNcnn,
-            ),
+            ModelSet(ocr = ocr, detectorNcnn = detNcnn, aotInpainterNcnn = aotNcnn),
             alphabet,
         )
     }
 
     /**
-     * 解析去字模型路徑（給重繪等「只需去字」的路徑用）：NCNN AOT `.param` 優先（同時確保 `.bin` 在本機）、
-     * ORT AOT `.onnx` / LaMa（退役）備援。缺回 null。[Inpainter] 依副檔名分流（`.param`→NCNN）。
+     * 解析去字模型路徑（給重繪等「只需去字」的路徑用）：NCNN AOT `.param`（同時確保 `.bin` 在本機）。缺回 null。
      */
-    fun resolveInpaintModel(context: Context): String? {
-        val saf = modelsDir(context)
-        return resolveNcnnRole(context, saf, "aot")
-            ?: resolveOnnxRole(context, saf, "aot")
-            ?: resolveOnnxRole(context, saf, "lama")
-    }
+    fun resolveInpaintModel(context: Context): String? = resolveNcnnRole(context, modelsDir(context), "aot")
 
     /**
-     * 去字方法字串（[TranslationPreferences.inpaintMethod] 原始值）→ 引擎 (method, wholeImage)。v2 兩門別：
-     *   boxfill＝快速去字（全平塗就近取色·快·壓畫面塗色塊）／其餘＝AI 去字（純 AOT-GAN 整頁 768·全區重建·預設）。
-     * ★ 一律純 aot（無 auto 逐區路由）：舊的 auto_aot 會在乾淨泡泡走平塗、AI 去字看起來有些地方是 boxfill──已改純 aot、全區都 AOT。
-     * 舊存的 auto_whole/auto_tile/auto_aot/lama_*（auto 路由 + LaMa/逐格已退役）都落 else＝AI 去字（引擎把 auto* 一律當 aot）。
-     *
-     * 即時翻譯一律傳 "boxfill"（低延遲）；離線整章翻傳使用者的 inpaintMethod。集中於此一處映射、兩路共用。
+     * 去字方法字串（[TranslationPreferences.inpaintMethod] / 即時翻的 [TranslationPreferences.liveInpaintMethod] 原始值）
+     * → 引擎 method。兩門別：`boxfill`（快速去字·平塗）／其餘＝`aot`（AI 去字·NCNN AOT-GAN 整頁 768·預設）。
+     * 集中於此一處映射、下載/即時/重繪共用。
      */
-    fun mapInpaintMethod(methodRaw: String): Pair<String, Boolean> = when (methodRaw) {
-        "boxfill" -> "boxfill" to true
-        else -> "aot" to true // AI 去字＝純 AOT-GAN 整頁 768（全區重建、無 auto 路由）；舊 auto_*/lama_* 都落這
-    }
+    fun mapInpaintMethod(methodRaw: String): String = if (methodRaw == "boxfill") "boxfill" else "aot"
 
     /**
      * 去字法品質排名（高＝品質好）。用於「改去字法後升級重繪」（[TranslationManager.reRenderAllUpgradable]）的
@@ -248,20 +224,14 @@ object TranslationEngineConfig {
             else -> TextOrientation.AUTO
         }
 
-        // 去字方法（3 階梯）
-        val (method, whole) = mapInpaintMethod(methodRaw)
+        // 去字方法（boxfill / aot）
+        val method = mapInpaintMethod(methodRaw)
 
-        // 緒數（裝置相依）
-        val cores = Runtime.getRuntime().availableProcessors()
         // OCR 逐行並發度：auto=核數 / 2/4/6/8（concurrent 鎖 true）。真機 8.9s→4.8s。
+        val cores = Runtime.getRuntime().availableProcessors()
         val ocrConcurrency = when (val v = prefs.ocrConcurrency.get()) {
             "auto" -> cores
             else -> (v.toIntOrNull() ?: cores).coerceIn(1, 32)
-        }
-        // 推論執行緒（偵測+去字 lama）：auto=大核數估算(cores-2，big.LITTLE 留 2 小核) / 2/4/6/8。真機 6 最快。
-        val intra = when (val v = prefs.intraThreads.get()) {
-            "auto" -> (cores - 2).coerceAtLeast(2)
-            else -> (v.toIntOrNull() ?: 6).coerceIn(1, 32)
         }
 
         // 進階數值：存字串、此處 parse + clamp 到值域（超界夾回，不擋存）。
@@ -271,7 +241,6 @@ object TranslationEngineConfig {
         return EngineConfig(
             detector = DetectorConfig(
                 segThreshold = pf(prefs.segThreshold.get(), 0f, 1f, 0.12f),
-                intraThreads = intra,
             ),
             ocr = OcrConfig(
                 minProb = pf(prefs.minProb.get(), 0f, 1f, 0.5f),
@@ -281,11 +250,7 @@ object TranslationEngineConfig {
             translator = translatorCfg,
             inpainter = InpainterConfig(
                 method = method,
-                wholeImage = whole,
-                autoStdThreshold = pf(prefs.autoStdThreshold.get(), 0f, 30f, 6f),
-                autoWhiteThreshold = pf(prefs.autoWhiteThreshold.get(), 0f, 255f, 190f),
                 bboxPad = pi(prefs.bboxPad.get(), 0, 64, 16),
-                intraThreads = intra,
             ),
             render = RenderConfig(
                 orientation = orient,

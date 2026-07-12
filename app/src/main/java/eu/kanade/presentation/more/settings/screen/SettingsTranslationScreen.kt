@@ -386,6 +386,18 @@ object SettingsTranslationScreen : SearchableSettings {
                         subtitle = stringResource(MR.strings.pref_translation_excluded_sources_summary),
                         enabled = masterEnabled,
                     ),
+                    // 即時翻去字方法（與下載/手動翻的去字法分開）：預設 boxfill 求低延遲、想即時看 AI 去字可選 auto_whole(aot)。
+                    // 值沿用去字設定的字串（boxfill / auto_whole），標籤複用；引擎 mapInpaintMethod 把非 boxfill 一律當 aot。
+                    Preference.PreferenceItem.ListPreference(
+                        preference = prefs.liveInpaintMethod,
+                        entries = persistentMapOf(
+                            "boxfill" to stringResource(MR.strings.pref_translation_inpaint_boxfill),
+                            "auto_whole" to stringResource(MR.strings.pref_translation_inpaint_auto_whole),
+                        ),
+                        title = stringResource(MR.strings.pref_translation_live_inpaint_method),
+                        subtitle = stringResource(MR.strings.pref_translation_live_inpaint_summary),
+                        enabled = masterEnabled,
+                    ),
                     Preference.PreferenceItem.ListPreference(
                         preference = downloadPrefs.removeAfterReadSlots,
                         entries = persistentMapOf(
@@ -550,18 +562,6 @@ object SettingsTranslationScreen : SearchableSettings {
                     ),
                     adv(
                         showAdvanced,
-                        prefs.autoStdThreshold,
-                        stringResource(MR.strings.pref_translation_auto_std),
-                        stringResource(MR.strings.pref_translation_auto_std_desc) + curSuffix,
-                    ),
-                    adv(
-                        showAdvanced,
-                        prefs.autoWhiteThreshold,
-                        stringResource(MR.strings.pref_translation_auto_white),
-                        stringResource(MR.strings.pref_translation_auto_white_desc) + curSuffix,
-                    ),
-                    adv(
-                        showAdvanced,
                         prefs.bboxPad,
                         stringResource(MR.strings.pref_translation_bbox_pad),
                         stringResource(MR.strings.pref_translation_bbox_pad_desc) + curSuffix,
@@ -673,12 +673,7 @@ object SettingsTranslationScreen : SearchableSettings {
                         title = stringResource(MR.strings.pref_translation_ocr_concurrency),
                         subtitle = stringResource(MR.strings.pref_translation_ocr_concurrency_summary),
                     ),
-                    Preference.PreferenceItem.ListPreference(
-                        preference = prefs.intraThreads,
-                        entries = threadEntries,
-                        title = stringResource(MR.strings.pref_translation_intra_threads),
-                        subtitle = stringResource(MR.strings.pref_translation_intra_threads_summary),
-                    ),
+                    // 推論緒數選單已移除：NCNN 偵測/去字的緒數改由引擎原生設定（big.LITTLE 大核甜蜜點），非使用者可調。
                 ).toImmutableList(),
             ),
             // —— 辨識（進階）——

@@ -438,8 +438,8 @@ class Downloader(
                     download.manga,
                     listOf(download.chapter),
                     atFront = pending,
-                    // pending＝reader 即時翻/控制鈕觸發的線上章 → 一律快速 boxfill；自動下載時翻（!pending）用設定去字法。
-                    method = if (pending) TranslationManager.LIVE_INPAINT_METHOD else null,
+                    // pending＝reader 即時翻/控制鈕觸發的線上章 → 用即時翻去字法（預設 boxfill）；自動下載時翻（!pending）用設定去字法。
+                    method = if (pending) translationManager.liveInpaintMethod() else null,
                 )
                 if (pending) translationManager.clearPending(download.chapter.id)
             }

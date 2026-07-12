@@ -300,6 +300,12 @@ class TranslationManager(private val context: Context) {
     }
 
     /**
+     * 即時翻（邊讀邊翻/reader 情境）用的去字方法＝使用者可自訂的 [TranslationPreferences.liveInpaintMethod]，
+     * 預設 boxfill（快速去字、求低延遲）。與下載/手動翻的 [TranslationPreferences.inpaintMethod] 分開。
+     */
+    fun liveInpaintMethod(): String = translationPreferences.liveInpaintMethod.get()
+
+    /**
      * 排入翻譯（已下載章）。已在佇列裡的章 id 不重排。
      *
      * 每個新項擷取**當下**的去字方法（[TranslationPreferences.inpaintMethod]）存進 [Entry.method]——
@@ -312,7 +318,7 @@ class TranslationManager(private val context: Context) {
     fun translate(manga: Manga, chapters: List<Chapter>, atFront: Boolean = false, method: String? = null) {
         if (chapters.isEmpty()) return
         if (!masterEnabled()) return // 硬總開關：關閉時自動/手動翻一律不排入
-        // method 非 null＝呼叫端指定去字法（即時翻/reader 情境一律 [LIVE_INPAINT_METHOD] 求快）；
+        // method 非 null＝呼叫端指定去字法（即時翻/reader 情境傳 [liveInpaintMethod]，使用者可自訂、預設 boxfill 求快）；
         // null＝用設定的去字法（下載時翻、詳情頁手動翻——可慢可高品質）。
         val m = method ?: translationPreferences.inpaintMethod.get()
         synchronized(lock) {
@@ -897,11 +903,5 @@ class TranslationManager(private val context: Context) {
         /** drain 期間持有的 partial WakeLock 標籤 + 逾時上限（洩漏保險；正常由 finally 釋放）。見 [drainLoop]。 */
         private const val WAKELOCK_TAG = "yakuyomi:translation"
         private const val WAKELOCK_TIMEOUT_MS = 6L * 60 * 60 * 1000
-
-        /**
-         * 即時翻/reader 情境固定用的去字法＝快速 boxfill（不管使用者設定的去字模式）。讀到時求低延遲，
-         * 不跑慢的整頁/逐區 lama；素材記成 boxfill，日後可經重繪升級到 lama（設計：讀時 boxfill、閒置升 lama）。
-         */
-        const val LIVE_INPAINT_METHOD = "boxfill"
     }
 }
