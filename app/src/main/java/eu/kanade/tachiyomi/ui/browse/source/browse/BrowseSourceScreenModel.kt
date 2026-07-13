@@ -244,10 +244,13 @@ class BrowseSourceScreenModel(
                             if (readFilter == TriState.ENABLED_IS && !started) return@passes false
                             if (readFilter == TriState.ENABLED_NOT && started) return@passes false
                         }
-                        // 擷取＝詳情曾被載入過（initialized）；未擷取＝全新沒點過。
-                        // 開卷過必定已擷取（要讀必先載過詳情）→ 把 started 併入，避免「已開卷＋未擷取」這種矛盾結果。
+                        // 擷取＝這本詳情「曾經」被載入過。判準以 **DB 持久 initialized** 為準（用 id 直查 DB、與上面 started 同法），
+                        // **不**用分頁項的 m.initialized——後者是「當前來源清單解析出的最新資訊」，對「剛擷取完但分頁快照未同步/
+                        // 來源清單只回基本資訊」的情形會是舊的 false → 造成「明明擷取過卻濾不掉」。開卷過必定已擷取 → 併入 started。
                         if (fetchedFilter != TriState.DISABLED) {
-                            val fetched = m.initialized || started
+                            val fetched = started ||
+                                m.initialized ||
+                                (m.id > 0L && getManga.await(m.id)?.initialized == true)
                             if (fetchedFilter == TriState.ENABLED_IS && !fetched) return@passes false
                             if (fetchedFilter == TriState.ENABLED_NOT && fetched) return@passes false
                         }
