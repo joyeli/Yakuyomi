@@ -1344,6 +1344,8 @@
     <string name="engine_status_loading">Translation engine: loading…</string>
     <string name="engine_status_warm">Translation engine: preloaded</string>
     <string name="engine_status_cold">Translation engine: not preloaded</string>
+    <string name="engine_status_models_outdated">⚠️ Models need updating to translate</string>
+    <string name="engine_status_models_missing">⚠️ Translation models not downloaded</string>
     <string name="engine_unload">Unload preload (free ~100MB)</string>
     <string name="engine_preload_action">Preload engine</string>
     <!-- Yakuyomi: reader live-translate + page actions -->

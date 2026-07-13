@@ -49,6 +49,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -74,16 +75,21 @@ import eu.kanade.presentation.manga.components.MangaCover
 import eu.kanade.presentation.util.Screen
 import eu.kanade.presentation.util.Tab
 import eu.kanade.presentation.util.isTabletUi
+import eu.kanade.tachiyomi.data.translation.ModelDownloadManager
+import eu.kanade.tachiyomi.data.translation.TranslationEngineConfig
 import eu.kanade.tachiyomi.data.translation.TranslationEngineService
 import eu.kanade.tachiyomi.data.translation.TranslationManager
 import eu.kanade.tachiyomi.data.translation.model.TranslationItem
 import eu.kanade.tachiyomi.ui.manga.MangaScreen
+import eu.kanade.tachiyomi.ui.setting.SettingsScreen
 import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.withContext
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import tachiyomi.domain.manga.model.Manga
@@ -303,8 +309,13 @@ private fun TranslationQueueContent(
     ) { contentPadding ->
         Column(modifier = Modifier.padding(contentPadding)) {
             // 引擎狀態面板（#7）：常駐顯示在佇列頁頂，可卸下 / 預載。總開關關時藏起（引擎本就不該載）。
+            // 模型不可用時面板會改顯示「更新/下載模型」→ 導去 設定→翻譯。
             if (masterEnabled) {
-                EngineStatusPanel()
+                EngineStatusPanel(
+                    onOpenModelSettings = {
+                        navigator.push(SettingsScreen(SettingsScreen.Destination.Translation))
+                    },
+                )
             }
             if (groups.isEmpty()) {
                 EmptyScreen(
@@ -609,13 +620,29 @@ private fun groupSubtitle(
 
 /**
  * 常駐翻譯引擎狀態列（#6/#7）：顯示載入中 / 已預載 / 未預載，並提供卸下（釋放 ~100MB）/ 預載按鈕。
- * 由佇列頁頂與導覽列長按對話框（[TranslationEngineStatusDialog]）共用。
+ *
+ * **模型不可用時**（舊版 v1 / 未下載，[TranslationEngineConfig.modelsResolvable]＝false）：不再讓「預載引擎」靜默失敗，
+ * 改顯示 ⚠️「模型需更新 / 未下載」＋按鈕「更新模型 / 下載模型」→ 點了 [onOpenModelSettings] 導去設定的模型區。
+ *
+ * @param onOpenModelSettings 導去 設定→翻譯（模型下載/更新）。
  */
 @Composable
-internal fun EngineStatusPanel(modifier: Modifier = Modifier) {
+internal fun EngineStatusPanel(onOpenModelSettings: () -> Unit, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
     val engineService = remember { Injekt.get<TranslationEngineService>() }
     val loading by engineService.loading.collectAsState()
     val warm by engineService.warm.collectAsState()
+    // 模型下載狀態（同一 singleton，設定頁下載也走它）：Done → 這裡的模型檢查重跑，避免更新完仍卡「更新模型」。
+    val modelDownloadManager = remember { Injekt.get<ModelDownloadManager>() }
+    val downloadState by modelDownloadManager.state.collectAsState()
+    // 模型是否可被引擎載入（strict）＋是否有舊檔待更新。key 在 warm/loading/downloadState → 引擎或模型狀態變就重查。
+    val modelState by produceState<Pair<Boolean, Boolean>?>(initialValue = null, warm, loading, downloadState) {
+        value = withContext(Dispatchers.IO) {
+            TranslationEngineConfig.modelsResolvable(context) to TranslationEngineConfig.modelsOutdated(context)
+        }
+    }
+    val outdated = modelState?.second ?: false
+    val needsModels = modelState?.let { !it.first } ?: false // 查完且不可用 → 顯示更新/下載引導（查完前不顯示、避免一閃）
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -625,12 +652,18 @@ internal fun EngineStatusPanel(modifier: Modifier = Modifier) {
         Icon(
             imageVector = if (loading) Icons.Outlined.Sync else Icons.Outlined.Translate,
             contentDescription = null,
-            tint = if (warm) MaterialTheme.colorScheme.primary else LocalContentColor.current.copy(alpha = 0.5f),
+            tint = when {
+                warm -> MaterialTheme.colorScheme.primary
+                needsModels -> MaterialTheme.colorScheme.error // 模型不可用 → 醒目 error 色
+                else -> LocalContentColor.current.copy(alpha = 0.5f)
+            },
         )
         Text(
             text = when {
                 loading -> stringResource(MR.strings.engine_status_loading)
                 warm -> stringResource(MR.strings.engine_status_warm)
+                needsModels && outdated -> stringResource(MR.strings.engine_status_models_outdated)
+                needsModels -> stringResource(MR.strings.engine_status_models_missing)
                 else -> stringResource(MR.strings.engine_status_cold)
             },
             style = MaterialTheme.typography.bodyMedium,
@@ -642,6 +675,15 @@ internal fun EngineStatusPanel(modifier: Modifier = Modifier) {
             loading -> CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
             warm -> TextButton(onClick = { engineService.shutdownAsync() }) {
                 Text(stringResource(MR.strings.engine_unload))
+            }
+            // 模型不可用 → 別讓「預載引擎」空轉（resolveModelSet 回 null、停在未預載）→ 導去設定更新/下載模型。
+            needsModels -> TextButton(onClick = onOpenModelSettings) {
+                val label = if (outdated) {
+                    MR.strings.pref_translation_update_models
+                } else {
+                    MR.strings.pref_translation_download_models
+                }
+                Text(stringResource(label))
             }
             else -> TextButton(onClick = { engineService.warmUpAsync() }) {
                 Text(stringResource(MR.strings.engine_preload_action))

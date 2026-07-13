@@ -1145,6 +1145,8 @@
     <string name="engine_status_loading">翻譯引擎：載入中…</string>
     <string name="engine_status_warm">翻譯引擎：已預載</string>
     <string name="engine_status_cold">翻譯引擎：未預載</string>
+    <string name="engine_status_models_outdated">⚠️ 模型需更新才能翻譯</string>
+    <string name="engine_status_models_missing">⚠️ 尚未下載翻譯模型</string>
     <string name="engine_unload">卸下預載（釋放 ~100MB）</string>
     <string name="engine_preload_action">預載引擎</string>
     <string name="reader_engine_loading">引擎載入中…</string>
