@@ -81,7 +81,7 @@ class PageTranslator(private val context: Context) {
         if (!translationPreferences.translationEnabled.get()) return false
         if (apiKey().isBlank()) return false
         if (TranslationEngineConfig.isProviderBaseMissing(translationPreferences)) return false
-        return TranslationEngineConfig.hasAllModels(context)
+        return TranslationEngineConfig.modelsResolvable(context)
     }
 
     /**
@@ -108,7 +108,7 @@ class PageTranslator(private val context: Context) {
         onPageDone: (pageName: String) -> Unit = {},
     ): Int {
         // 模型齊備才翻（缺任一顆 → 不翻）。引擎本身由 [engineService] 持有/建構（warm、跨章復用），這裡不再自建。
-        if (!TranslationEngineConfig.hasAllModels(context)) return 0
+        if (!TranslationEngineConfig.modelsResolvable(context)) return 0
         val images = chapterDir.listFiles()
             ?.filter { f -> f.isFile && (f.name?.substringAfterLast('.', "")?.lowercase() ?: "") in IMAGE_EXT }
             ?.sortedBy { it.name.orEmpty() }
@@ -315,7 +315,7 @@ class PageTranslator(private val context: Context) {
         pageFileName: String,
         method: String = translationPreferences.inpaintMethod.get(),
     ): Boolean {
-        if (!TranslationEngineConfig.hasAllModels(context)) return false
+        if (!TranslationEngineConfig.modelsResolvable(context)) return false
         // 解析目標頁圖檔（頂層、副檔名為圖、檔名 == pageFileName）。
         val pageFile = chapterDir.listFiles()
             ?.firstOrNull { f ->

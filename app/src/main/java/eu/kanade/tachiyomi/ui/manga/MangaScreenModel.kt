@@ -34,6 +34,7 @@ import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.download.model.Download
 import eu.kanade.tachiyomi.data.track.EnhancedTracker
 import eu.kanade.tachiyomi.data.track.TrackerManager
+import eu.kanade.tachiyomi.data.translation.TranslationEngineConfig
 import eu.kanade.tachiyomi.data.translation.TranslationManager
 import eu.kanade.tachiyomi.data.translation.model.TranslationItem
 import eu.kanade.tachiyomi.network.HttpException
@@ -802,7 +803,24 @@ class MangaScreenModel(
             downloaded = rest
         }
         if (downloaded.isEmpty()) return
-        translationManager.translate(manga, downloaded)
+        val toTranslate = downloaded
+        screenModelScope.launchIO {
+            // 模型不可用（缺 / 舊版 v1，見 TranslationEngineConfig.modelsResolvable）→ 明確引導去設定更新，
+            // 別靜默排入後整章變紅（修 0.16.0「舊模型 → 按翻譯沒反應」）。單獨查模型、不看翻譯開關（手動翻常關著它）。
+            if (!TranslationEngineConfig.modelsResolvable(context)) {
+                snackbarHostState.showSnackbar(
+                    message = context.stringResource(
+                        if (TranslationEngineConfig.modelsOutdated(context)) {
+                            MR.strings.translation_models_outdated_action
+                        } else {
+                            MR.strings.translation_models_missing_action
+                        },
+                    ),
+                )
+                return@launchIO
+            }
+            translationManager.translate(manga, toTranslate)
+        }
     }
 
     /** 重繪選取章（換 [method] 去字法重做去字+排版，復用素材、不重跑 OCR/翻譯）。對象＝已下載章（同翻譯）。 */

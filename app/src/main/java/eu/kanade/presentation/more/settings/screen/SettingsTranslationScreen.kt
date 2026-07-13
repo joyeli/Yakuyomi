@@ -123,12 +123,13 @@ object SettingsTranslationScreen : SearchableSettings {
         val modelStatusOutdated = stringResource(MR.strings.pref_translation_model_status_outdated)
         val modelStatusChecking = stringResource(MR.strings.pref_translation_model_status_checking)
         val modelStatusSubtitle = modelPresence?.let { mp ->
-            mp.joinToString("・") { (n, ok) -> "$n ${if (ok) "✓" else "✗"}" } +
-                when {
-                    !mp.all { it.second } -> modelStatusMissing
-                    modelsOutdated -> modelStatusOutdated
-                    else -> ""
-                }
+            val roles = mp.joinToString("・") { (n, ok) -> "$n ${if (ok) "✓" else "✗"}" }
+            when {
+                // 過時優先：有舊檔但 v2 引擎載不動（見 modelsResolvable）→ 只顯示 ⚠️ 更新提示，不列「✓✓✓」免誤導「都好了」。
+                modelsOutdated -> modelStatusOutdated
+                !mp.all { it.second } -> "$roles$modelStatusMissing"
+                else -> roles
+            }
         } ?: modelStatusChecking
 
         // 全域翻譯總開關：關閉時下載翻 / 即時翻變灰停用（自動翻譯一律不做）。

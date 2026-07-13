@@ -1279,10 +1279,12 @@
     <string name="pref_translation_model_status">Model status</string>
     <string name="pref_translation_model_status_checking">Checking…</string>
     <string name="pref_translation_model_status_missing"> (missing = put the models in the storage models/ folder, or tap Download models)</string>
-    <string name="pref_translation_model_status_outdated">・outdated — tap Update models below to get the current NCNN set</string>
+    <string name="translation_models_outdated_action">Old-format models — the v2 engine can\'t use them. Go to Settings → Translation and tap “Update models” to re-download.</string>
+    <string name="translation_models_missing_action">No translation models yet. Go to Settings → Translation to download them.</string>
+    <string name="pref_translation_model_status_outdated">⚠️ Old-format models detected — translation is off until you update. The v2 engine needs the NCNN model set: tap “Update models” below to re-download.</string>
     <string name="pref_translation_download_models">Download models</string>
     <string name="pref_translation_update_models">Update models</string>
-    <string name="pref_translation_download_models_idle">Auto-download the models (~96 MB) from the release + sha256 verify</string>
+    <string name="pref_translation_download_models_idle">Auto-download the models (~92 MB) from the release + sha256 verify</string>
     <string name="pref_translation_download_models_done">Download complete</string>
     <string name="pref_translation_download_models_error">Failed: %s (tap to retry)</string>
     <string name="pref_translation_target_lang">Target language</string>

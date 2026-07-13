@@ -96,15 +96,44 @@ object TranslationEngineConfig {
     }
 
     /**
-     * 模型三顆是否齊（detector / ocr / 去字）。給 [PageTranslator.isReady] / [TranslationEngineService.isReady] 共用。
-     * 去字＝AOT（v2＝NCNN `.param`）；殘留的 v1 `.onnx` 也算「存在」（再交給 [modelsOutdated] 判過時）。
-     * 自動下載區 + SAF BYOM 區擇一即可。
+     * NCNN 角色是否**可被引擎載入**（strict）：`.param` ＋同名 `.bin` 都在。鏡射 [resolveNcnnRole] 的 `.bin` 要求，
+     * 但**不做 [ensureLocal] 複製副作用**（純查存在，給 UI 狀態 / isReady 用、可頻繁呼叫）。
+     */
+    private fun ncnnResolvable(context: Context, saf: UniFile?, vararg keywords: String): Boolean {
+        downloadedModel(context, ".param", *keywords)?.let { p ->
+            if (File(p.parentFile, p.name.removeSuffix(".param") + ".bin").exists()) return true
+        }
+        val paramU = saf?.let { findModel(it, ".param", *keywords) } ?: return false
+        val binName = (paramU.name ?: return false).removeSuffix(".param") + ".bin"
+        return saf.findFile(binName) != null
+    }
+
+    /**
+     * 模型是否**真的能被引擎載入**（strict，「可用」的單一真理來源）：偵測/去字要 NCNN `.param`＋同名 `.bin`、OCR 要 `.onnx`。
+     * 與 [resolveModelSet] 的解析要求逐條對齊，但不做複製副作用。
+     *
+     * 這是修「舊模型靜默失敗」的核心：[hasAllModels]/[modelPresence] 是**寬鬆存在**（`.onnx`/舊 LaMa 也算「有檔」），
+     * 但 v2 引擎實際只吃 `.param`——舊 v1（ORT 偵測 + LaMa）→ [modelsResolvable]=false → isReady 據此擋下（不啟動翻譯、§11 安全），
+     * 狀態頁據此把「齊全」改判「舊版·請重新下載」。BYOM 放了 `.param` 卻漏 `.bin` 的半套也會被這裡擋下（堵住「顯示齊全卻 build 失敗」）。
+     */
+    fun modelsResolvable(context: Context): Boolean {
+        val saf = modelsDir(context)
+        return ncnnResolvable(context, saf, "detect", "comictext") &&
+            presentExt(context, saf, ".onnx", "ocr") &&
+            ncnnResolvable(context, saf, "aot")
+    }
+
+    /**
+     * 三個角色是否**各有一個模型檔存在**（寬鬆：`.param` 或 `.onnx`、含退役格式都算）。
+     * ★這只代表「有檔」、**不代表 v2 引擎載得動**——能不能真的翻由 [modelsResolvable]（strict）判、isReady 也吃那個。
+     * 本函式的用途只剩「湊齊了嗎」＋餵給 [modelsOutdated]（有齊全的舊檔但格式過時 → 提示更新）。
+     * 去字認 `aot`（v2）**與** `lama`（退役 v1）→ 舊 LaMa 使用者也算「有去字檔」，過時提示才觸發得了（見 [modelsOutdated]）。
      */
     fun hasAllModels(context: Context): Boolean {
         val saf = modelsDir(context)
         return rolePresent(context, saf, "detect", "comictext") &&
             rolePresent(context, saf, "ocr") &&
-            rolePresent(context, saf, "aot")
+            rolePresent(context, saf, "aot", "lama")
     }
 
     /**
@@ -125,27 +154,20 @@ object TranslationEngineConfig {
         return listOf(
             context.stringResource(MR.strings.model_role_detect) to rolePresent(context, saf, "detect", "comictext"),
             context.stringResource(MR.strings.model_role_ocr) to rolePresent(context, saf, "ocr"),
-            context.stringResource(MR.strings.model_role_inpaint) to rolePresent(context, saf, "aot"),
+            context.stringResource(MR.strings.model_role_inpaint) to rolePresent(context, saf, "aot", "lama"),
         )
     }
 
     /**
-     * 模型「齊但過時」＝v1 舊模型（ORT 偵測 + LaMa `.onnx`）還在、但缺 v2 的 NCNN 交付（偵測/去字 `.param`）。
+     * 模型「齊但過時」＝三個角色**各有檔**（[hasAllModels] 寬鬆為真）**但引擎載不動**（[modelsResolvable] 為假）。
+     * 典型＝升級到引擎 v2 後沿用舊 v1 模型（ORT 偵測 + LaMa `.onnx`，無 NCNN `.param`）——這正是本次「靜默失敗」要救的情境。
      *
-     * 為何重要：升級 app（引擎 v2）後若沿用舊模型，[modelPresence] 仍全 ✓（關鍵字 + `.onnx` fallback 命中舊檔），
-     * 但引擎 v2 只認 NCNN `.param`（偵測/去字）→ [resolveModelSet] 回 null、翻譯根本不啟動，使用者卻不知要換。
-     * 用這個旗標在設定頁把「模型齊全」改成「舊版·請重新下載」，並把下載鈕標成「更新模型」。
-     *
-     * 判準＝偵測與去字**都**要有 NCNN `.param`（v2 唯一交付）。舊 v1 兩者皆無 → 過時。
-     * BYOM 進階者刻意用 ONNX 也會被提示更新（可接受：v2 主推 NCNN，重下載即取得正確集）。
+     * 為何這樣寫（改由可解析性驅動、不再自己重查 `.param`）：舊版把判準綁在「hasAllModels 且缺 `.param`」，
+     * 但去字角色以前只認 `aot`、認不到舊 `lama` → hasAllModels 恆 false → 這個旗標對它唯一該救的族群**永遠不觸發**（死碼）。
+     * 現在 hasAllModels 補認 `lama`、判準改成「有檔(loose) 但 build 不出來(strict)」，任何「看得到卻用不了」的組合
+     * （v1 LaMa、v1 ONNX 偵測、BYOM 缺 `.bin`）都會被判過時 → 設定頁顯示「舊版·請重新下載」、下載鈕標「更新模型」。
      */
-    fun modelsOutdated(context: Context): Boolean {
-        if (!hasAllModels(context)) return false // 缺模型自有「missing」提示、不重複
-        val saf = modelsDir(context)
-        val detectorNcnn = presentExt(context, saf, ".param", "detect", "comictext")
-        val aotNcnn = presentExt(context, saf, ".param", "aot")
-        return !(detectorNcnn && aotNcnn)
-    }
+    fun modelsOutdated(context: Context): Boolean = hasAllModels(context) && !modelsResolvable(context)
 
     /**
      * 解析三顆模型 → 本機路徑 [ModelSet] + 載入 OCR 字元表。缺任一顆模型回 null（呼叫端應略過翻譯）。

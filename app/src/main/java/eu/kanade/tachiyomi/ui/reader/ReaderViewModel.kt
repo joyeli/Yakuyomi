@@ -23,6 +23,7 @@ import eu.kanade.tachiyomi.data.saver.Image
 import eu.kanade.tachiyomi.data.saver.ImageSaver
 import eu.kanade.tachiyomi.data.saver.Location
 import eu.kanade.tachiyomi.data.translation.PageTranslator
+import eu.kanade.tachiyomi.data.translation.TranslationEngineConfig
 import eu.kanade.tachiyomi.data.translation.TranslationEngineService
 import eu.kanade.tachiyomi.data.translation.TranslationManager
 import eu.kanade.tachiyomi.data.translation.model.TranslationItem
@@ -1358,6 +1359,12 @@ class ReaderViewModel @JvmOverloads constructor(
         val method = translationPreferences.inpaintMethod.get()
 
         viewModelScope.launchIO {
+            // 模型不可用（缺 / 舊版 v1）→ 明確提示去設定更新，別轉圈圈後用 generic「翻譯失敗」冒充網路錯（修 0.16.0 舊模型靜默）。
+            val ctx = Injekt.get<Application>()
+            if (!TranslationEngineConfig.modelsResolvable(ctx)) {
+                eventChannel.send(Event.TranslateModelsUnavailable(TranslationEngineConfig.modelsOutdated(ctx)))
+                return@launchIO
+            }
             // 收尾：回 UI thread 刷新該頁（retryPage → Ready → holder 重 decode，把 spinner 換回圖）並回報成敗。
             suspend fun finish(ok: Boolean) {
                 withUIContext { page.chapter.pageLoader?.retryPage(page) }
@@ -1423,6 +1430,12 @@ class ReaderViewModel @JvmOverloads constructor(
         val domainChapter = readerChapter.chapter.toDomainChapter() ?: return
 
         viewModelScope.launchIO {
+            // 模型不可用（缺 / 舊版 v1）→ 明確提示去設定更新，別送假「已開始」再默默變紅（修 0.16.0 舊模型靜默）。
+            val ctx = Injekt.get<Application>()
+            if (!TranslationEngineConfig.modelsResolvable(ctx)) {
+                eventChannel.send(Event.TranslateModelsUnavailable(TranslationEngineConfig.modelsOutdated(ctx)))
+                return@launchIO
+            }
             try {
                 val isDownloaded = downloadManager.isChapterDownloaded(
                     readerChapter.chapter.name,
@@ -1610,6 +1623,9 @@ class ReaderViewModel @JvmOverloads constructor(
 
         /** 已中止當前章翻譯（取消佇列項 / 中止進行中），給 UI 提示「已中止」。 */
         data object ChapterTranslateStopped : Event
+
+        /** 模型不可用（缺 / 舊版 v1 → v2 引擎載不動）→ 提示去設定下載/更新，別靜默或用 generic 失敗冒充。outdated=true＝有舊檔待更新。 */
+        data class TranslateModelsUnavailable(val outdated: Boolean) : Event
     }
 
     companion object {

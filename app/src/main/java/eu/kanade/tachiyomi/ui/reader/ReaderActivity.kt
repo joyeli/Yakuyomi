@@ -294,6 +294,18 @@ class ReaderActivity : BaseActivity() {
                     ReaderViewModel.Event.ChapterTranslateStopped -> {
                         toast(stringResource(MR.strings.reader_translate_chapter_stopped))
                     }
+                    is ReaderViewModel.Event.TranslateModelsUnavailable -> {
+                        // 模型缺 / 舊版 → 明確引導去設定下載/更新，不再靜默或用 generic 失敗冒充。
+                        toast(
+                            stringResource(
+                                if (event.outdated) {
+                                    MR.strings.translation_models_outdated_action
+                                } else {
+                                    MR.strings.translation_models_missing_action
+                                },
+                            ),
+                        )
+                    }
                 }
             }
             .launchIn(lifecycleScope)

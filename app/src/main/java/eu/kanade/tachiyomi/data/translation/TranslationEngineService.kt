@@ -93,7 +93,7 @@ class TranslationEngineService(private val context: Context) {
     fun isReady(): Boolean {
         if (apiKey().isBlank()) return false
         if (TranslationEngineConfig.isProviderBaseMissing(translationPreferences)) return false
-        return TranslationEngineConfig.hasAllModels(context)
+        return TranslationEngineConfig.modelsResolvable(context)
     }
 
     /**
