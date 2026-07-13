@@ -111,18 +111,28 @@ class BrowseSourceScreenModel(
                 listing = Listing.Search(query, source.getFilterList())
             }
 
-            // Yakuyomi：預設最新——點來源主體（Popular）進來時，若開關開且來源支援最新，改用「最新」。
-            if (listing is Listing.Popular &&
-                sourcePreferences.browseDefaultToLatest.get() &&
-                source.supportsLatest
-            ) {
-                listing = Listing.Latest
+            // Yakuyomi：預設清單＝設定（browseDefaultToLatest 開 + 來源支援最新 → 最新，否則熱門）。
+            val defaultListListing = if (sourcePreferences.browseDefaultToLatest.get() && source.supportsLatest) {
+                Listing.Latest
+            } else {
+                Listing.Popular
+            }
+            // 點來源主體（Popular）進來 → 套預設清單（開關開 + 支援最新則變最新）。
+            if (listing is Listing.Popular) {
+                listing = defaultListListing
             }
 
             it.copy(
                 listing = listing,
                 filters = source.getFilterList(),
                 toolbarQuery = query,
+                // 「回到列表」鈕的目標：起手就是列表清單（熱門/最新）就記它；快照/搜尋起手則記**預設清單**
+                // （非硬編熱門）→ 修「從快照進來時，左邊清單鈕永遠顯示熱門、無視預設設定為最新」。
+                lastListListing = if (listing is Listing.Popular || listing is Listing.Latest) {
+                    listing
+                } else {
+                    defaultListListing
+                },
             )
         }
 
