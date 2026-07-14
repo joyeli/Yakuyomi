@@ -78,6 +78,8 @@ import eu.kanade.presentation.more.settings.screen.browse.ExtensionStoresScreen
 import eu.kanade.presentation.more.settings.screen.data.RestoreBackupScreen
 import eu.kanade.presentation.util.AssistContentScreen
 import eu.kanade.presentation.util.DefaultNavigatorScreenTransition
+import eu.kanade.tachiyomi.crash.CrashActivity
+import eu.kanade.tachiyomi.crash.NativeCrashReporter
 import eu.kanade.tachiyomi.data.cache.ChapterCache
 import eu.kanade.tachiyomi.data.download.DownloadCache
 import eu.kanade.tachiyomi.data.notification.NotificationReceiver
@@ -155,6 +157,13 @@ class MainActivity : BaseActivity() {
 
         // Do not let the launcher create a new activity http://stackoverflow.com/questions/16283079
         if (!isTaskRoot) {
+            finish()
+            return
+        }
+
+        // Yakuyomi：上次若是原生 crash（SIGSEGV 等，繞過 Kotlin crash 畫面、直接閃退）→ 用 ApplicationExitInfo
+        // 把 tombstone 塞進同一個崩潰畫面（含分享鈕），讓使用者不用 adb 就能回報。只在 fresh launch 查一次。
+        if (isLaunch && NativeCrashReporter.checkAndReport(this, CrashActivity::class.java)) {
             finish()
             return
         }

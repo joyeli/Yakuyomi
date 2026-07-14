@@ -71,5 +71,18 @@ class GlobalExceptionHandler private constructor(
                 null
             }
         }
+
+        /**
+         * 用同一套崩潰畫面（含分享鈕）顯示任意 [throwable]，不需真的觸發未捕捉例外。
+         * 給 [NativeCrashReporter] 開機還原上次**原生** crash 用——原生 crash 繞過本 handler、不會有畫面，
+         * 靠這條把 ApplicationExitInfo 的 tombstone 塞進同一個畫面讓使用者分享。
+         */
+        fun showCrashScreen(context: Context, activity: Class<*>, throwable: Throwable) {
+            val intent = Intent(context, activity).apply {
+                putExtra(INTENT_EXTRA, Json.encodeToString(ThrowableSerializer, throwable))
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+            }
+            context.startActivity(intent)
+        }
     }
 }
