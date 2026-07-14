@@ -59,6 +59,14 @@ class TranslationEngineService(private val context: Context) {
     /** 目前在引擎內飛的頁數（跨頁併發下 >1）。關閉前等它歸零，避免關掉正在用的 native session（use-after-close）。 */
     private val inFlight = AtomicInteger(0)
 
+    /**
+     * 目前這個 build 是否已完成過**至少一次**推論（各原生 session 的首次 lazy 初始化都在單緒跑過了）。
+     * false＝冷引擎（剛建好、還沒推論過）→ 第一頁**持鎖單緒**跑完再放行併發，避免多頁同時打進未初始化的
+     * NCNN/ORT session → 原生 SIGSEGV（「開 app 後第一本翻譯就閃退」的真凶）。重建（[closeEngine]）會重置成 false。
+     * 只在 [mutex] 下讀寫。
+     */
+    private var warmedUp = false
+
     /** 暖機/關閉的背景 scope（IO）：給 UI（即時翻開關）fire-and-forget，**絕不**在主執行緒上跑 ~100MB 載入/關閉或等鎖（會 ANR）。 */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -112,14 +120,35 @@ class TranslationEngineService(private val context: Context) {
      *   同一章逐頁去字法相同 → 首頁後 [ensureEngine] 是 no-op、不重建（重建只在章邊界、此時 [inFlight]=0）。
      */
     suspend fun translatePage(src: Bitmap, methodRaw: String): PageResult {
-        val engine = mutex.withLock {
+        // 在鎖下：確保引擎已建、註冊在飛頁，並判定「這是不是這個 build 的第一次推論」（[warmedUp]，鎖下讀無 TOCTOU）。
+        // 冷引擎的第一頁 → **持鎖單緒**跑完（讓 NCNN/ORT 各 session 首次 lazy 初始化在單緒完成），之後才放行併發。
+        // 修「開 app 後第一本翻譯（下載/即時皆是），多頁同時打進剛載好、還沒推論過的原生 session → SIGSEGV 閃退」。
+        var engineForConcurrent: TranslationEngine? = null
+        val handled: PageResult? = mutex.withLock {
             val e = ensureEngine(methodRaw)
-                ?: return PageResult.Failed(context.stringResource(MR.strings.engine_unavailable))
+                ?: return@withLock PageResult.Failed(context.stringResource(MR.strings.engine_unavailable))
             inFlight.incrementAndGet() // 在鎖下註冊 → 關閉不會在註冊中途插入而漏算在飛頁
-            e
+            if (!warmedUp) {
+                // 冷引擎首次推論：整段持鎖跑（其他頁在 mutex.withLock 上等），暖完設 warmedUp=true 才放行併發。
+                // 代價＝只有冷啟動後第一本的第一頁不被跨頁重疊（含一次網路往返）；換得不再撞冷 session。
+                try {
+                    e.translatePage(src).also { warmedUp = true }
+                } catch (ex: Throwable) {
+                    logcat(LogPriority.ERROR, ex) { "warm 引擎翻譯單頁失敗（冷引擎首次）" }
+                    PageResult.Failed(ex.message ?: context.stringResource(MR.strings.translate_exception))
+                } finally {
+                    inFlight.decrementAndGet()
+                }
+            } else {
+                engineForConcurrent = e // 已暖 → 放鎖後併發跑
+                null
+            }
         }
+        if (handled != null) return handled
+        // 已暖 → 放鎖、多頁並發進引擎（跨頁流水線）。
+        val engine = engineForConcurrent!!
         return try {
-            engine.translatePage(src) // 不持鎖：多頁可並發進引擎
+            engine.translatePage(src)
         } catch (e: Throwable) {
             logcat(LogPriority.ERROR, e) { "warm 引擎翻譯單頁失敗" }
             PageResult.Failed(e.message ?: context.stringResource(MR.strings.translate_exception))
@@ -219,6 +248,7 @@ class TranslationEngineService(private val context: Context) {
         engine = null
         builtSignature = null
         _warm.value = false
+        warmedUp = false // 新引擎的 session 又是冷的 → 下次首頁重新單緒暖過再放行併發
     }
 
     /**
