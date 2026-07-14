@@ -198,10 +198,16 @@ class TranslationEngineService(private val context: Context) {
             val bundle = TranslationEngineConfig.resolveModelSet(context) ?: return null
             // 去字法照呼叫端傳入（佇列逐章帶來的去字法），其餘參數（語言/緒數/排版…）照使用者設定。
             val cfg = TranslationEngineConfig.buildEngineConfig(translationPreferences, methodRaw)
-            engine = Yakuyomi.create(bundle.models, bundle.alphabet, apiKey(), cfg)
+            val built = Yakuyomi.create(bundle.models, bundle.alphabet, apiKey(), cfg)
+            engine = built
             builtSignature = signature
             _warm.value = true
-            engine
+            // 建構後**單緒**暖各原生 session（detector/OCR/去字 各空跑一次推論）→ 首次真推論不再撞冷 session。
+            // 成功 → warmedUp=true：第一頁即可全併發、零損失。失敗 → 留 false，退回 translatePage 的第一頁序列化保險。
+            runCatching { built.warmUp() }
+                .onSuccess { warmedUp = true }
+                .onFailure { logcat(LogPriority.WARN, it) { "引擎暖機失敗，退回第一頁序列化保險" } }
+            built
         } catch (e: Throwable) {
             logcat(LogPriority.ERROR, e) { "建翻譯引擎失敗" }
             closeEngine()
