@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.data.translation
 import android.content.Context
 import android.graphics.Bitmap
 import eu.kanade.tachiyomi.BuildConfig
+import eu.kanade.tachiyomi.crash.TraceLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -123,6 +124,10 @@ class TranslationEngineService(private val context: Context) {
         // 在鎖下：確保引擎已建、註冊在飛頁，並判定「這是不是這個 build 的第一次推論」（[warmedUp]，鎖下讀無 TOCTOU）。
         // 冷引擎的第一頁 → **持鎖單緒**跑完（讓 NCNN/ORT 各 session 首次 lazy 初始化在單緒完成），之後才放行併發。
         // 修「開 app 後第一本翻譯（下載/即時皆是），多頁同時打進剛載好、還沒推論過的原生 session → SIGSEGV 閃退」。
+        TraceLog.log(
+            "svc",
+            "translatePage.enter ${src.width}x${src.height} method=$methodRaw warm=$warmedUp if=${inFlight.get()}",
+        )
         var engineForConcurrent: TranslationEngine? = null
         val handled: PageResult? = mutex.withLock {
             val e = ensureEngine(methodRaw)
@@ -147,6 +152,7 @@ class TranslationEngineService(private val context: Context) {
         if (handled != null) return handled
         // 已暖 → 放鎖、多頁並發進引擎（跨頁流水線）。
         val engine = engineForConcurrent!!
+        TraceLog.log("svc", "translatePage.concurrent.call inFlight=${inFlight.get()}")
         return try {
             engine.translatePage(src)
         } catch (e: Throwable) {
@@ -154,6 +160,7 @@ class TranslationEngineService(private val context: Context) {
             PageResult.Failed(e.message ?: context.stringResource(MR.strings.translate_exception))
         } finally {
             inFlight.decrementAndGet()
+            TraceLog.log("svc", "translatePage.concurrent.done inFlight=${inFlight.get()}")
         }
     }
 
@@ -189,16 +196,20 @@ class TranslationEngineService(private val context: Context) {
             return current
         }
         // inFlight==0（或還沒建過）→ 安全關舊重建（釋放舊 native session 才不疊加 ~100MB）。
+        TraceLog.log("svc", "ensureEngine.rebuild sig=$signature hadEngine=${current != null}")
         closeEngine()
 
         // 真正建構（載入 ~100MB）期間 → loading=true，給 reader 指示器顯示「引擎載入中…」。finally 確保任何出口都歸位。
         _loading.value = true
         return try {
             // 模型解析 + 字元表（SAF→filesDir 複製在此；缺模型回 null）。與離線翻共用同一份解析。
+            TraceLog.log("svc", "ensureEngine.resolveModels")
             val bundle = TranslationEngineConfig.resolveModelSet(context) ?: return null
             // 去字法照呼叫端傳入（佇列逐章帶來的去字法），其餘參數（語言/緒數/排版…）照使用者設定。
             val cfg = TranslationEngineConfig.buildEngineConfig(translationPreferences, methodRaw)
+            TraceLog.log("svc", "ensureEngine.create.start")
             val built = Yakuyomi.create(bundle.models, bundle.alphabet, apiKey(), cfg)
+            TraceLog.log("svc", "ensureEngine.create.done")
             engine = built
             builtSignature = signature
             _warm.value = true

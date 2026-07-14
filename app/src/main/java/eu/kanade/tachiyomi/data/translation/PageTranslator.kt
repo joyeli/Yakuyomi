@@ -8,6 +8,7 @@ import android.os.Build
 import android.util.Base64
 import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.BuildConfig
+import eu.kanade.tachiyomi.crash.TraceLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
@@ -149,6 +150,11 @@ class PageTranslator(private val context: Context) {
         // 跨頁流水線深度（§8 二層併發之「跨頁」）：頁 N 的網路翻譯疊上頁 N+1 的裝置端偵測/OCR。
         // 去字便宜（boxfill/即時）→ 網路綁定、深 4 達約 2×；去字貴（aot）→ CPU 綁定、深 2（再深不加速且吃記憶體）。
         val gate = Semaphore(pipelineDepth(inpaintMethodRaw))
+        TraceLog.log(
+            "chap",
+            "translateChapter.start ${chapterDir.name} pages=$total pending=${pending.size} " +
+                "depth=${pipelineDepth(inpaintMethodRaw)} method=$inpaintMethodRaw keepMat=$keepMaterials",
+        )
         try {
             coroutineScope {
                 for (img in pending) {
@@ -158,14 +164,17 @@ class PageTranslator(private val context: Context) {
                         try {
                             if (shouldStop()) return@launch
                             val name = img.name ?: return@launch
+                            TraceLog.log("page", "$name decode.start")
                             val bmp = context.contentResolver.openInputStream(img.uri)
                                 ?.use { BitmapFactory.decodeStream(it) } ?: return@launch
+                            TraceLog.log("page", "$name decoded ${bmp.width}x${bmp.height} -> engine")
                             try {
                                 // 併發進引擎（EngineService 已放鬆成可並發；同章去字法相同、不重建）。§11 三態處理與循序版完全一致。
                                 when (val r = engineService.translatePage(bmp, inpaintMethodRaw)) {
                                     is PageResult.Translated -> {
                                         writeBack(img, r.page) // 各頁寫各自檔、鎖外並發
                                         r.page.recycle() // 譯圖已落檔、後面用不到 → 立即回收（跨頁併發下少堆一張 bitmap，降記憶體峰值）
+                                        TraceLog.log("page", "$name translated.done")
                                         // 保留重繪素材（best-effort、不擋翻譯）：bmp 為剛解碼的原圖（引擎不 mutate 輸入、回新 bitmap）。鎖外並發。
                                         val matErr = if (keepMaterials && r.analysis != null) {
                                             saveMaterials(chapterDir, name, bmp, r.analysis!!, inpaintMethodRaw)
@@ -191,12 +200,14 @@ class PageTranslator(private val context: Context) {
                                     is PageResult.Skipped -> stateMutex.withLock {
                                         promptTokens += r.stats.promptTokens // 全數過濾的略過仍耗了 token（其餘 Skipped＝0）
                                         completionTokens += r.stats.completionTokens
+                                        TraceLog.log("page", "$name skipped")
                                         logcat { "翻譯略過 $name：${r.reason}" }
                                         done.add(name)
                                         writeManifest(chapterDir, done) // 略過＝沒字可翻、算處理過、不重試
                                     }
                                     is PageResult.Failed -> stateMutex.withLock {
                                         // 該頁失敗 → 跳過、留原圖、續翻下一頁；記原因供查（不標記、下次重試）。
+                                        TraceLog.log("page", "$name failed: ${r.reason.take(60)}")
                                         logcat(LogPriority.WARN) { "翻譯失敗 $name：${r.reason}" }
                                         errors.appendLine("$name\t${r.reason}")
                                     }
@@ -205,6 +216,7 @@ class PageTranslator(private val context: Context) {
                                 throw c // 尊重結構化併發取消（整個 drain 被 cancel）——不吞（下面 Throwable catch 才不會誤吃）
                             } catch (t: Throwable) {
                                 // ★ 單頁例外隔離（OOM／解碼／IO／native）：記錯、留原圖待重試，**不 cross-cancel** 其他在飛頁、不炸整章。
+                                TraceLog.log("page", "$name EXCEPTION ${t.javaClass.simpleName}: ${t.message}")
                                 logcat(LogPriority.ERROR, t) { "翻譯頁例外（已隔離、續其他頁）$name" }
                                 stateMutex.withLock {
                                     errors.appendLine("$name\t例外 ${t.javaClass.simpleName}: ${t.message}")
