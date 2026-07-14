@@ -33,6 +33,9 @@ class TranslationCache(
     private val sourceManager: SourceManager = Injekt.get(),
     private val translationPreferences: TranslationPreferences = Injekt.get(),
 ) {
+    // 「整章翻完」判準委派 PageTranslator.isChapterTranslated（單一真理來源）；lazy＝多數本徽章=0、根本不建。
+    private val pageTranslator by lazy { PageTranslator(context) }
+
     private val counts = ConcurrentHashMap<Long, Int>()
 
     // 正在背景掃描的 mangaId（避免重複排程）。
@@ -80,11 +83,13 @@ class TranslationCache(
     private fun isTranslatable(manga: Manga): Boolean =
         manga.source.toString() !in translationPreferences.translationSourcesExclude.get()
 
+    // ★ 判「整章翻完」而非「marker 存在」：中斷/部分翻的章 manifest 只含已翻的部分頁 → marker 在但 isChapterTranslated=false
+    //   → 徽章/篩選不再把「翻到一半就中止」的章算成已翻（對齊章指示器 TranslationManager.isTranslated）。
     private fun hasMarker(file: UniFile): Boolean = if (file.isDirectory) {
-        file.findFile(MARKER) != null // 鬆散資料夾：夾內有 manifest
+        pageTranslator.isChapterTranslated(file) // 鬆散資料夾：manifest 需涵蓋所有現有圖頁
     } else {
         runCatching {
-            // CBZ：archive 內有 marker entry
+            // CBZ：archive 內有 marker entry（整章判準需解壓、CBZ 已預設關/罕見，維持 marker 存在判準）
             file.archiveReader(context).use { reader ->
                 reader.useEntries { seq -> seq.any { File(it.name).name == MARKER } }
             }
