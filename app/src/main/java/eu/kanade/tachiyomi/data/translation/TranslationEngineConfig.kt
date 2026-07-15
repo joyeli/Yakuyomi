@@ -263,7 +263,6 @@ object TranslationEngineConfig {
         return EngineConfig(
             detector = DetectorConfig(
                 segThreshold = pf(prefs.segThreshold.get(), 0f, 1f, 0.12f),
-                useDbnet = true, // DBNet 偵測器取代 comic-text-detector（引擎預設 dbnetInputSize=1024；真機驗過再升級設定開關 + 移 ctd）
             ),
             ocr = OcrConfig(
                 minProb = pf(prefs.minProb.get(), 0f, 1f, 0.5f),
