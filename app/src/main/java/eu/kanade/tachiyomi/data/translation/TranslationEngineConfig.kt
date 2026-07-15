@@ -118,7 +118,7 @@ object TranslationEngineConfig {
      */
     fun modelsResolvable(context: Context): Boolean {
         val saf = modelsDir(context)
-        return ncnnResolvable(context, saf, "detect", "comictext") &&
+        return ncnnResolvable(context, saf, "dbnet") &&
             presentExt(context, saf, ".onnx", "ocr") &&
             ncnnResolvable(context, saf, "aot")
     }
@@ -131,7 +131,7 @@ object TranslationEngineConfig {
      */
     fun hasAllModels(context: Context): Boolean {
         val saf = modelsDir(context)
-        return rolePresent(context, saf, "detect", "comictext") &&
+        return rolePresent(context, saf, "dbnet") &&
             rolePresent(context, saf, "ocr") &&
             rolePresent(context, saf, "aot", "lama")
     }
@@ -152,7 +152,7 @@ object TranslationEngineConfig {
     fun modelPresence(context: Context): List<Pair<String, Boolean>> {
         val saf = modelsDir(context)
         return listOf(
-            context.stringResource(MR.strings.model_role_detect) to rolePresent(context, saf, "detect", "comictext"),
+            context.stringResource(MR.strings.model_role_detect) to rolePresent(context, saf, "dbnet"),
             context.stringResource(MR.strings.model_role_ocr) to rolePresent(context, saf, "ocr"),
             context.stringResource(MR.strings.model_role_inpaint) to rolePresent(context, saf, "aot", "lama"),
         )
@@ -179,7 +179,7 @@ object TranslationEngineConfig {
         val saf = modelsDir(context)
         // 引擎已收斂成純 NCNN 偵測 + int8 OCR + NCNN AOT 去字（ORT 偵測/去字備援與 LaMa 皆退役移除）。
         val ocr = resolveOnnxRole(context, saf, "ocr") ?: return null
-        val detNcnn = resolveNcnnRole(context, saf, "detect", "comictext") ?: return null
+        val detNcnn = resolveNcnnRole(context, saf, "dbnet") ?: return null
         val aotNcnn = resolveNcnnRole(context, saf, "aot") ?: return null
         val alphabet = context.assets.open(ALPHABET).bufferedReader().use { it.readLines() }
         return ModelSetBundle(
@@ -263,6 +263,7 @@ object TranslationEngineConfig {
         return EngineConfig(
             detector = DetectorConfig(
                 segThreshold = pf(prefs.segThreshold.get(), 0f, 1f, 0.12f),
+                useDbnet = true, // DBNet 偵測器取代 comic-text-detector（引擎預設 dbnetInputSize=1024；真機驗過再升級設定開關 + 移 ctd）
             ),
             ocr = OcrConfig(
                 minProb = pf(prefs.minProb.get(), 0f, 1f, 0.5f),
