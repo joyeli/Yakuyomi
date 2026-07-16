@@ -27,7 +27,7 @@ Yakuyomi 是 [mihon](https://github.com/mihonapp/mihon) 的 fork，邊下載 / �
 
 **翻譯**
 - **真去字重建，不是疊字** — 其他翻譯 fork 是在文字上蓋一塊色塊、或把新字疊上去；Yakuyomi 是把原文**擦掉、重建畫面**（AOT-GAN 去字），再把譯文排回氣泡裡。
-- **裝置端 pipeline（v2 — NCNN + int8）** — 偵測、去字跑 **NCNN** 行動核心，OCR 跑 **int8 量化**模型。從 ONNX Runtime 換過來後，模型集從 **~470 MB 縮到 ~200 MB**、也更快——偵測 ~2.9×、OCR ~3.6×——Snapdragon 8 Gen 3 上約 **5 秒一頁**。純 CPU（GPU/NPU 試過、對這些模型沒幫助）。只有 LLM 翻譯那步離開裝置，圖片永遠不出手機。
+- **裝置端 pipeline（NCNN + int8）** — 偵測（DBNet 模型）、去字跑 **NCNN** 行動核心，OCR 跑 **int8 量化**模型（比 fp32 快 ~3.6×、96.7% 一致）。從 ONNX Runtime 換過來後，模型集從 **~470 MB 縮到 ~200 MB**，而 DBNet 偵測器比它取代的舊偵測器多讀對 ~1.6–2.5× 的文字。Snapdragon 8 Gen 3 上，偵測 + OCR 跑 6 張代表頁（161 個文字框）約 **10.3 秒**、讀回 **99.4%** 的文字。純 CPU（GPU/NPU 試過、對這些模型沒幫助）。只有 LLM 翻譯那步離開裝置，圖片永遠不出手機。
 - **跨頁流水線（~2× 快）** — 多頁併發翻：某頁在等雲端 LLM 時，下一頁的裝置端偵測 / OCR / 去字已經在跑。淺併發下撞到網路上限——即時 / 快速去字翻譯約**加倍**吞吐。
 - **兩種工作流** — 下載時翻（整章背景翻）與邊讀邊翻；只有翻成功才覆蓋該頁，絕不用更糟的東西蓋掉原圖。
 - **自備服務商與金鑰** — 任何 OpenAI 相容 LLM（預設 DeepSeek；OpenAI、Gemini、Groq、Qwen、OpenRouter、自架 Sakura、自訂），金鑰每家一格加密、模型清單即時撈（[服務商說明](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/PROVIDERS_zh.md)）。
@@ -159,8 +159,6 @@ flowchart TD
     class Do,Oo,To,Io,Ro opt;
 ```
 
-去字（④）跟翻譯請求（③）並發跑——一頁只付兩者中較長的那個、不是相加。
-
 **兩層併發撐住速度。** *頁內*：去字（CPU）在翻譯請求飛在網路上時同時跑——一頁只付兩者中較長的那個、不是相加。*跨頁*：引擎流水線化——第 N 頁在等 LLM 時，第 N+1 頁的偵測 / OCR / 去字已經在裝置上跑。搭配快速的平塗去字就撞到網路上限——約 **2× 循序速率**。
 
 ## 為什麼翻譯走雲端
@@ -222,4 +220,4 @@ Yakuyomi 是真正的 mihon fork：跟著 mihon 的閱讀器走，只加整合�
 - [mihon](https://github.com/mihonapp/mihon) — 本專案 fork 的閱讀器（Apache-2.0）
 - [yakuyomi-engine](https://github.com/joyeli/yakuyomi-engine) — 裝置端翻譯引擎
 - [manga-image-translator](https://github.com/zyddnys/manga-image-translator) — prompt 與行為參考
-- 模型作者 — [comic-text-detector](https://github.com/dmMaze/comic-text-detector)，以及 OCR + AOT-GAN 去字權重來自 [manga-image-translator](https://github.com/zyddnys/manga-image-translator)
+- 模型權重 — DBNet 偵測、OCR、AOT-GAN 去字，全部來自 [manga-image-translator](https://github.com/zyddnys/manga-image-translator)

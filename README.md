@@ -27,7 +27,7 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 
 **Translation**
 - **Real inpainting, not overlays** — other translation forks paint a box over the text or stamp new text on top. Yakuyomi *erases* the original and **reconstructs the artwork** (AOT-GAN inpainting) before typesetting the translation back into the bubble.
-- **On-device pipeline (v2 — NCNN + int8)** — detection and text removal run on **NCNN**'s mobile kernels, OCR on an **int8-quantized** model. Moving off ONNX Runtime shrank the model set from **~470 MB to ~200 MB** and sped it up — ~2.9× at detection, ~3.6× at OCR — for about **5 s per page** on a Snapdragon 8 Gen 3. Pure CPU (GPU/NPU was tried and doesn't help these models). Only the LLM translation call leaves your device; no image ever leaves the phone.
+- **On-device pipeline (NCNN + int8)** — detection (a DBNet model) and text removal run on **NCNN**'s mobile kernels, OCR on an **int8-quantized** model (~3.6× faster than fp32 at 96.7% parity). Moving off ONNX Runtime shrank the model set from **~470 MB to ~200 MB**, and the DBNet detector reads ~1.6–2.5× more text correctly than the one it replaced. On a Snapdragon 8 Gen 3, detection + OCR over 6 representative pages (161 text boxes) run in **~10.3 s** and read back **99.4%** of the text. Pure CPU (GPU/NPU was tried and doesn't help these models). Only the LLM translation call leaves your device; no image ever leaves the phone.
 - **Cross-page pipeline (~2× faster)** — pages translate concurrently: while one page waits on the cloud LLM, the next page's on-device detection / OCR / removal is already running. At a shallow depth this reaches the network-bound ceiling — roughly **double** the throughput of live / fast-removal translation.
 - **Two workflows** — translate-on-download (whole chapters in the background) and live translation while you read. A page is overwritten only when its translation succeeds; nothing is ever replaced with something worse.
 - **Your provider, your key** — any OpenAI-compatible LLM (DeepSeek by default; OpenAI, Gemini, Groq, Qwen, OpenRouter, self-hosted Sakura, custom), per-provider encrypted keys, live model list ([providers doc](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/PROVIDERS.md)).
@@ -159,8 +159,6 @@ flowchart TD
     class Do,Oo,To,Io,Ro opt;
 ```
 
-Text removal (④) runs concurrently with the translation request (③) — the page pays only the longer of the two, not their sum.
-
 **Two layers of concurrency keep it fast.** *Within a page*, text removal (CPU) runs while the translation request is in flight (network) — the page pays only the longer of the two, not their sum. *Across pages*, the engine pipelines: while page N waits on the LLM, page N+1's detection / OCR / removal already run on-device. With the fast box-fill removal this reaches the network-bound ceiling — about **2× the sequential rate**.
 
 ## Why the LLM runs in the cloud
@@ -222,4 +220,4 @@ The developers of this application do not have any affiliation with the content 
 - [mihon](https://github.com/mihonapp/mihon) — the reader this forks (Apache-2.0)
 - [yakuyomi-engine](https://github.com/joyeli/yakuyomi-engine) — the on-device translation engine
 - [manga-image-translator](https://github.com/zyddnys/manga-image-translator) — prompt and behaviour reference
-- model authors — [comic-text-detector](https://github.com/dmMaze/comic-text-detector), and the OCR + AOT-GAN inpaint weights from [manga-image-translator](https://github.com/zyddnys/manga-image-translator)
+- model weights — DBNet detection, OCR, and AOT-GAN inpaint, all from [manga-image-translator](https://github.com/zyddnys/manga-image-translator)
