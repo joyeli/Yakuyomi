@@ -136,6 +136,12 @@ class TranslationPreferences(
     /** 譯文字描邊，對應 RenderConfig.fontBorder。 */
     val fontBorder = preferenceStore.getBoolean("translation_font_border", true)
 
+    /**
+     * 跳過狀聲詞 SFX（預設關）：開啟後 OCR 跳過偵測到的彩色/裝飾性非氣泡狀聲詞、不翻譯它們（保留原味）。
+     * 對應引擎 OcrConfig.ignoreBubble——開＝給內建門檻值（buildEngineConfig 填 24）、關＝0。這是「跳過翻譯」非「積極去除」。
+     */
+    val ignoreSfx = preferenceStore.getBoolean("translation_ignore_sfx", false)
+
     /** 設定頁是否顯示進階選項（純 UI 開關，不進引擎）。 */
     val showAdvanced = preferenceStore.getBoolean("translation_show_advanced", false)
 

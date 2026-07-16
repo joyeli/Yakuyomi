@@ -371,16 +371,6 @@ object SettingsTranslationScreen : SearchableSettings {
                             }
                         },
                     ),
-                    Preference.PreferenceItem.TextPreference(
-                        title = stringResource(MR.strings.pref_translation_live_categories),
-                        subtitle = getCategoriesLabel(
-                            allCategories = allCategories,
-                            included = liveIncluded,
-                            excluded = liveExcluded,
-                        ),
-                        enabled = masterEnabled,
-                        onClick = { showLiveCategoryDialog = true },
-                    ),
                     Preference.PreferenceItem.MultiSelectListPreference(
                         preference = prefs.translationSourcesExclude,
                         entries = librarySources,
@@ -388,8 +378,25 @@ object SettingsTranslationScreen : SearchableSettings {
                         subtitle = stringResource(MR.strings.pref_translation_excluded_sources_summary),
                         enabled = masterEnabled,
                     ),
+                ).toImmutableList(),
+            ),
+            // —— 即時翻譯 ——（翻譯總開關關時整組收起，比照去字/排版/效能組）
+            Preference.PreferenceGroup(
+                title = stringResource(MR.strings.pref_translation_group_live),
+                enabled = masterEnabled,
+                preferenceItems = listOfNotNull<Item>(
+                    Preference.PreferenceItem.TextPreference(
+                        title = stringResource(MR.strings.pref_translation_live_categories),
+                        subtitle = getCategoriesLabel(
+                            allCategories = allCategories,
+                            included = liveIncluded,
+                            excluded = liveExcluded,
+                        ),
+                        onClick = { showLiveCategoryDialog = true },
+                    ),
                     // 即時翻去字方法（與下載/手動翻的去字法分開）：預設 boxfill 求低延遲、想即時看 AI 去字可選 auto_whole(aot)。
                     // 值沿用去字設定的字串（boxfill / auto_whole），標籤複用；引擎 mapInpaintMethod 把非 boxfill 一律當 aot。
+                    // 收進進階：一般使用者分不出即時翻去字法差異。
                     Preference.PreferenceItem.ListPreference(
                         preference = prefs.liveInpaintMethod,
                         entries = persistentMapOf(
@@ -398,8 +405,8 @@ object SettingsTranslationScreen : SearchableSettings {
                         ),
                         title = stringResource(MR.strings.pref_translation_live_inpaint_method),
                         subtitle = stringResource(MR.strings.pref_translation_live_inpaint_summary),
-                        enabled = masterEnabled,
-                    ),
+                    ).takeIf { showAdvanced },
+                    // 「閱讀後刪除」與下載偏好同一個 pref（downloadPrefs.removeAfterReadSlots）→ 改這也改下載行為（刻意的）。
                     Preference.PreferenceItem.ListPreference(
                         preference = downloadPrefs.removeAfterReadSlots,
                         entries = persistentMapOf(
@@ -597,6 +604,7 @@ object SettingsTranslationScreen : SearchableSettings {
                             true
                         },
                     ),
+                    // 文字顏色 / 描邊收進進階：一般使用者用預設 auto + 描邊即可。
                     Preference.PreferenceItem.ListPreference(
                         preference = prefs.colorMode,
                         entries = persistentMapOf(
@@ -612,7 +620,7 @@ object SettingsTranslationScreen : SearchableSettings {
                             }
                             true
                         },
-                    ),
+                    ).takeIf { showAdvanced },
                     Preference.PreferenceItem.SwitchPreference(
                         preference = prefs.fontBorder,
                         title = stringResource(MR.strings.pref_translation_font_border),
@@ -625,7 +633,7 @@ object SettingsTranslationScreen : SearchableSettings {
                             }
                             true
                         },
-                    ),
+                    ).takeIf { showAdvanced },
                     adv(
                         showAdvanced,
                         prefs.fontSizeMax,
@@ -664,17 +672,17 @@ object SettingsTranslationScreen : SearchableSettings {
                     ),
                 ).toImmutableList(),
             ),
-            // —— 效能 ——（翻譯總開關關時整組收起）
+            // —— 效能（進階）——（翻譯總開關關時整組收起；非進階時空 group 隱藏，比照辨識/診斷組）
             Preference.PreferenceGroup(
                 title = stringResource(MR.strings.pref_translation_group_performance),
-                enabled = masterEnabled,
+                enabled = showAdvanced && masterEnabled,
                 preferenceItems = listOfNotNull<Item>(
                     Preference.PreferenceItem.ListPreference(
                         preference = prefs.ocrConcurrency,
                         entries = threadEntries,
                         title = stringResource(MR.strings.pref_translation_ocr_concurrency),
                         subtitle = stringResource(MR.strings.pref_translation_ocr_concurrency_summary),
-                    ),
+                    ).takeIf { showAdvanced },
                     // 推論緒數選單已移除：NCNN 偵測/去字的緒數改由引擎原生設定（big.LITTLE 大核甜蜜點），非使用者可調。
                 ).toImmutableList(),
             ),
@@ -695,6 +703,13 @@ object SettingsTranslationScreen : SearchableSettings {
                         stringResource(MR.strings.pref_translation_min_prob),
                         stringResource(MR.strings.pref_translation_min_prob_desc) + curSuffix,
                     ),
+                    // 跳過狀聲詞 SFX：開→OcrConfig.ignoreBubble 給內建門檻（buildEngineConfig 填 24）跳過彩色/裝飾性
+                    // 非氣泡狀聲詞、不翻它們（保留原味）。這是「跳過翻譯」非「積極去除」——SFX 仍留在原圖上。
+                    Preference.PreferenceItem.SwitchPreference(
+                        preference = prefs.ignoreSfx,
+                        title = stringResource(MR.strings.pref_translation_ignore_sfx),
+                        subtitle = stringResource(MR.strings.pref_translation_ignore_sfx_summary),
+                    ).takeIf { showAdvanced },
                 ).toImmutableList(),
             ),
             // —— 診斷（進階）——（抓 logcat / 內建 crash log 都抓不到的原生/OOM crash；預設關、影響效能，只需要時開）

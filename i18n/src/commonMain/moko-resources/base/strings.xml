@@ -1244,6 +1244,7 @@
     <string name="pref_translation_group_typeset">Typesetting</string>
     <string name="pref_translation_group_performance">Performance (device-dependent)</string>
     <string name="pref_translation_group_recognition">Recognition (detection / OCR)</string>
+    <string name="pref_translation_group_live">Live translation</string>
     <string name="pref_translation_show_advanced">Show advanced options</string>
     <string name="pref_translation_show_advanced_summary">Expand all fine-tuning parameters (most users can skip)</string>
     <string name="pref_translation_master">Enable translation</string>
@@ -1324,6 +1325,8 @@
     <string name="pref_translation_seg_threshold_desc">0–1. Lower catches more strokes (fixes kana left beside kanji), higher misses fine strokes</string>
     <string name="pref_translation_min_prob">OCR confidence threshold</string>
     <string name="pref_translation_min_prob_desc">0–1. Lines below this are dropped; too low keeps noise/garbage, too high drops text</string>
+    <string name="pref_translation_ignore_sfx">Skip sound effects (SFX)</string>
+    <string name="pref_translation_ignore_sfx_summary">Skips coloured / decorative sound effects and leaves them untranslated (keeps the original flavour). It only skips translating them — they stay on the page, they aren\'t erased.</string>
     <string name="pref_translation_group_diagnostics">Diagnostics (advanced)</string>
     <string name="pref_translation_diagnostic_log">Diagnostic log</string>
     <string name="pref_translation_diagnostic_log_summary">Record each translation-engine stage to a private file, to catch native or out-of-memory crashes that logcat and the built-in crash log miss. Affects performance — only turn on when you need to diagnose.</string>

@@ -266,6 +266,8 @@ object TranslationEngineConfig {
             ),
             ocr = OcrConfig(
                 minProb = pf(prefs.minProb.get(), 0f, 1f, 0.5f),
+                // 跳過狀聲詞 SFX：開→給內建門檻 24（1–50 中段，不讓使用者調數字）、關→0。
+                ignoreBubble = if (prefs.ignoreSfx.get()) 24 else 0,
                 concurrent = true,
                 concurrency = ocrConcurrency,
             ),

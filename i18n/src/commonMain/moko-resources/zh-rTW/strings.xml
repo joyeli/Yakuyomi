@@ -953,6 +953,7 @@
     <string name="pref_translation_group_typeset">排版</string>
     <string name="pref_translation_group_performance">效能（裝置相依）</string>
     <string name="pref_translation_group_recognition">辨識（偵測 / OCR）</string>
+    <string name="pref_translation_group_live">即時翻譯</string>
     <string name="pref_translation_show_advanced">顯示進階選項</string>
     <string name="pref_translation_show_advanced_summary">展開所有微調參數（一般使用者免動）</string>
     <string name="pref_translation_master">啟用翻譯</string>
@@ -1033,6 +1034,8 @@
     <string name="pref_translation_seg_threshold_desc">0–1，越低抓越多筆畫(救漢字旁假名殘留)、越高漏細筆畫</string>
     <string name="pref_translation_min_prob">OCR 信心門檻</string>
     <string name="pref_translation_min_prob_desc">0–1，低於此丟該行；太低收雜訊亂碼、太高漏字</string>
+    <string name="pref_translation_ignore_sfx">跳過狀聲詞 SFX</string>
+    <string name="pref_translation_ignore_sfx_summary">開啟後跳過彩色/裝飾性狀聲詞、不翻譯它們（保留原味）。只是不翻，不會把它們擦掉、仍留在原圖上。</string>
     <string name="pref_translation_group_diagnostics">診斷（進階）</string>
     <string name="pref_translation_diagnostic_log">診斷紀錄</string>
     <string name="pref_translation_diagnostic_log_summary">把翻譯引擎各階段記錄到私有檔案，用來抓 logcat 與內建 crash log 都抓不到的原生或記憶體不足（OOM）閃退。會影響效能，只在需要診斷時開啟。</string>
