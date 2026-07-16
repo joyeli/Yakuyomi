@@ -213,11 +213,11 @@ The developers of this application do not have any affiliation with the content 
 
 ## License
 
-**GPL-3.0** — see [LICENSE-YAKUYOMI.md](LICENSE-YAKUYOMI.md). Yakuyomi combines mihon (Apache-2.0, see [LICENSE](LICENSE)) with the translation engine, which ports manga-image-translator's prompt/parameters/grouping and uses GPL-3.0 models; the combined app is therefore GPL-3.0. mihon's Apache-2.0 license and attribution are retained.
+**GPL-3.0** — see [LICENSE-YAKUYOMI.md](LICENSE-YAKUYOMI.md). Yakuyomi combines mihon (Apache-2.0, see [LICENSE](LICENSE)) with the translation engine, which ports manga-image-translator's prompt, parameter schema, and grouping, and uses GPL-3.0 model weights; the combined app is therefore GPL-3.0. mihon's Apache-2.0 license and attribution are retained.
 
 ## Credits
 
 - [mihon](https://github.com/mihonapp/mihon) — the reader this forks (Apache-2.0)
 - [yakuyomi-engine](https://github.com/joyeli/yakuyomi-engine) — the on-device translation engine
 - [manga-image-translator](https://github.com/zyddnys/manga-image-translator) — prompt and behaviour reference
-- model weights — DBNet detection, OCR, and AOT-GAN inpaint, all from [manga-image-translator](https://github.com/zyddnys/manga-image-translator)
+- model weights — DBNet detection, 48px CTC OCR, and AOT-GAN inpaint — from [manga-image-translator](https://github.com/zyddnys/manga-image-translator); the on-device files are our own builds of those weights (NCNN conversions for detection and inpaint, an int8-quantized ONNX export for OCR)

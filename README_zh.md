@@ -213,11 +213,11 @@ Yakuyomi 是真正的 mihon fork：跟著 mihon 的閱讀器走，只加整合�
 
 ## 授權
 
-**GPL-3.0** — 見 [LICENSE-YAKUYOMI.md](LICENSE-YAKUYOMI.md)。Yakuyomi 把 mihon（Apache-2.0，見 [LICENSE](LICENSE)）與翻譯引擎結合；引擎移植了 manga-image-translator 的 prompt / 參數 / 分組、並用 GPL-3.0 模型，故組合後的 app 為 GPL-3.0。mihon 的 Apache-2.0 授權與歸屬予以保留。
+**GPL-3.0** — 見 [LICENSE-YAKUYOMI.md](LICENSE-YAKUYOMI.md)。Yakuyomi 把 mihon（Apache-2.0，見 [LICENSE](LICENSE)）與翻譯引擎結合；引擎移植了 manga-image-translator 的 prompt / 參數 schema / 分組、並用 GPL-3.0 模型權重，故組合後的 app 為 GPL-3.0。mihon 的 Apache-2.0 授權與歸屬予以保留。
 
 ## 致謝
 
 - [mihon](https://github.com/mihonapp/mihon) — 本專案 fork 的閱讀器（Apache-2.0）
 - [yakuyomi-engine](https://github.com/joyeli/yakuyomi-engine) — 裝置端翻譯引擎
 - [manga-image-translator](https://github.com/zyddnys/manga-image-translator) — prompt 與行為參考
-- 模型權重 — DBNet 偵測、OCR、AOT-GAN 去字，全部來自 [manga-image-translator](https://github.com/zyddnys/manga-image-translator)
+- 模型權重 — DBNet 偵測、48px CTC OCR、AOT-GAN 去字 — 來自 [manga-image-translator](https://github.com/zyddnys/manga-image-translator)；裝置端的模型檔是我們自己拿這些權重轉的（偵測與去字轉成 NCNN、OCR 是 int8 量化的 ONNX export）
