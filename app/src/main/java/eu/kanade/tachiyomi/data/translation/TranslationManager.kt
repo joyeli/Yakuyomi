@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.PowerManager
 import com.hippo.unifile.UniFile
 import eu.kanade.domain.chapter.model.toSChapter
+import eu.kanade.tachiyomi.crash.TraceLog
 import eu.kanade.tachiyomi.data.download.DownloadProvider
 import eu.kanade.tachiyomi.data.translation.model.TranslationItem
 import eu.kanade.tachiyomi.util.system.powerManager
@@ -703,12 +704,14 @@ class TranslationManager(private val context: Context) {
                     stopActive = false // 開始新章前清旗標
                 }
                 publish()
+                TraceLog.log("queue", "chapter start m=${entry.manga.id} c=${entry.chapter.id} ${entry.chapter.name}")
                 val translated = try {
                     translateOne(entry)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Throwable) {
                     logcat(LogPriority.ERROR, e) { "翻譯章失敗 ${entry.chapter.name}（原檔保留）" }
+                    TraceLog.log("queue", "chapter fail m=${entry.manga.id} c=${entry.chapter.id} ${e.message}")
                     synchronized(lock) { entry.status = TranslationItem.Status.ERROR } // 失敗 → 留佇列可重試
                     publish()
                     persist()
@@ -727,6 +730,7 @@ class TranslationManager(private val context: Context) {
                     synchronized(lock) { entries.remove(entry) } // 真的翻成 → 離開佇列
                     _translatedIds.value = _translatedIds.value + entry.chapter.id
                     translationCache.invalidate(entry.manga.id) // 已翻章數變 → 失效該本、刷新書庫徽章
+                    TraceLog.log("queue", "chapter done m=${entry.manga.id} c=${entry.chapter.id}")
                 } else {
                     // 沒下載 / 沒翻成（部分失敗）→ 標 ERROR 留佇列可重試，不誤標「已翻」
                     synchronized(lock) { entry.status = TranslationItem.Status.ERROR }

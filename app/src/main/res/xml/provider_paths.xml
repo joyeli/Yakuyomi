@@ -3,6 +3,10 @@
     <cache-path
         name="cache_files"
         path="." />
+    <!-- Yakuyomi: 分享 filesDir/diagnostics/ 下的診斷紀錄（TraceLog.shareLog）需要 files-path -->
+    <files-path
+        name="int_files"
+        path="." />
     <external-path
         name="ext"
         path="." />

@@ -30,6 +30,7 @@ import eu.kanade.domain.source.interactor.GetSourcesWithFavoriteCount
 import eu.kanade.presentation.category.visualName
 import eu.kanade.presentation.more.settings.Preference
 import eu.kanade.presentation.more.settings.widget.TriStateListDialog
+import eu.kanade.tachiyomi.crash.TraceLog
 import eu.kanade.tachiyomi.data.translation.ModelDownloadManager
 import eu.kanade.tachiyomi.data.translation.TranslationEngineConfig
 import eu.kanade.tachiyomi.data.translation.TranslationEngineService
@@ -694,6 +695,33 @@ object SettingsTranslationScreen : SearchableSettings {
                         stringResource(MR.strings.pref_translation_min_prob),
                         stringResource(MR.strings.pref_translation_min_prob_desc) + curSuffix,
                     ),
+                ).toImmutableList(),
+            ),
+            // —— 診斷（進階）——（抓 logcat / 內建 crash log 都抓不到的原生/OOM crash；預設關、影響效能，只需要時開）
+            Preference.PreferenceGroup(
+                title = stringResource(MR.strings.pref_translation_group_diagnostics),
+                preferenceItems = listOfNotNull<Item>(
+                    // 執行時切換：開→TraceLog.init（接引擎 hook + 寫檔）、關→TraceLog.stop（斷 hook + 清 buffer），不必重啟 app。
+                    Preference.PreferenceItem.SwitchPreference(
+                        preference = prefs.diagnosticLog,
+                        title = stringResource(MR.strings.pref_translation_diagnostic_log),
+                        subtitle = stringResource(MR.strings.pref_translation_diagnostic_log_summary),
+                        onValueChanged = { enabled ->
+                            if (enabled) TraceLog.init(context) else TraceLog.stop()
+                            true
+                        },
+                    ).takeIf { showAdvanced },
+                    Preference.PreferenceItem.TextPreference(
+                        title = stringResource(MR.strings.pref_translation_share_diagnostic_log),
+                        subtitle = stringResource(MR.strings.pref_translation_share_diagnostic_log_summary),
+                        onClick = {
+                            if (!TraceLog.shareLog(context)) {
+                                context.toast(
+                                    context.ctxStringResource(MR.strings.pref_translation_diagnostic_log_empty),
+                                )
+                            }
+                        },
+                    ).takeIf { showAdvanced },
                 ).toImmutableList(),
             ),
         ).filter { it !is Preference.PreferenceGroup || it.preferenceItems.isNotEmpty() }

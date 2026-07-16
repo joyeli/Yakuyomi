@@ -139,6 +139,13 @@ class TranslationPreferences(
     /** 設定頁是否顯示進階選項（純 UI 開關，不進引擎）。 */
     val showAdvanced = preferenceStore.getBoolean("translation_show_advanced", false)
 
+    /**
+     * 進階診斷紀錄（預設關）：開啟後 :app 的 TraceLog 把翻譯引擎各階段寫進 app 私有檔，
+     * 用來抓 logcat / 內建 crash log 都抓不到的原生（SIGSEGV/abort）或 OOM（lowmemorykiller SIGKILL）crash。
+     * 關閉時完全不執行、零效能負擔（App 不 init、EngineTrace.sink 維持 null）。只在需要診斷時開。
+     */
+    val diagnosticLog = preferenceStore.getBoolean("translation_diagnostic_log", false)
+
     // —— 進階數值（存字串、消費端 PageTranslator parse + clamp 到值域）——
     val segThreshold = preferenceStore.getString("translation_seg_threshold", "0.12") // 0.0–1.0
     val minProb = preferenceStore.getString("translation_min_prob", "0.5") // 0.0–1.0

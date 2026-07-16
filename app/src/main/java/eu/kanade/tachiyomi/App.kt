@@ -105,8 +105,12 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         Injekt.importModule(AppModule(this))
         Injekt.importModule(DomainModule())
 
-        // 診斷（暫時）：接上翻譯 trace 記錄器（寫下載夾/OneDrive 同步夾、抓「送翻譯後閃退無崩潰畫面」的原生/OOM crash）。
-        TraceLog.init(applicationContext)
+        // 進階診斷（預設關）：只有開啟「翻譯設定 → 診斷紀錄」開關才接上 trace 記錄器。
+        // 關閉時完全不 init → EngineTrace.sink 維持 null（引擎零開銷）、TraceLog.log() 因 enabled=false no-op。
+        // 抓的是 logcat / 內建 crash log 都抓不到的原生（SIGSEGV/abort）與 OOM（lowmemorykiller SIGKILL）crash。
+        if (Injekt.get<TranslationPreferences>().diagnosticLog.get()) {
+            TraceLog.init(applicationContext)
+        }
 
         setupNotificationChannels()
 

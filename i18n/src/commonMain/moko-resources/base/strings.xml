@@ -1324,6 +1324,12 @@
     <string name="pref_translation_seg_threshold_desc">0–1. Lower catches more strokes (fixes kana left beside kanji), higher misses fine strokes</string>
     <string name="pref_translation_min_prob">OCR confidence threshold</string>
     <string name="pref_translation_min_prob_desc">0–1. Lines below this are dropped; too low keeps noise/garbage, too high drops text</string>
+    <string name="pref_translation_group_diagnostics">Diagnostics (advanced)</string>
+    <string name="pref_translation_diagnostic_log">Diagnostic log</string>
+    <string name="pref_translation_diagnostic_log_summary">Record each translation-engine stage to a private file, to catch native or out-of-memory crashes that logcat and the built-in crash log miss. Affects performance — only turn on when you need to diagnose.</string>
+    <string name="pref_translation_share_diagnostic_log">Share diagnostic log</string>
+    <string name="pref_translation_share_diagnostic_log_summary">Send the recorded log so the crash can be investigated</string>
+    <string name="pref_translation_diagnostic_log_empty">No diagnostic log yet</string>
     <string name="model_role_detect">Detect</string>
     <string name="model_role_ocr">OCR</string>
     <string name="model_role_inpaint">Remove</string>
