@@ -4,10 +4,7 @@
 
 - **mihon 原始碼**：Apache-2.0 — 保留原 [`LICENSE`](LICENSE) 與其著作權 / attribution。
 - **Yakuyomi 整合層 + 內含的翻譯引擎 + 組合後的 app 整體**：**GPL-3.0**（因含 GPL-3.0 引擎；Apache-2.0 與 GPL-3.0 相容 → 組合作品為 GPL-3.0）。
-- **模型（BYOM，使用者自源頭取，本專案不散布權重）**：
-  - comic-text-detector（[dmMaze](https://github.com/dmMaze/comic-text-detector)）— GPL-3.0（偵測模型）
-  - 48px CTC OCR（[manga-image-translator](https://github.com/zyddnys/manga-image-translator)）— GPL-3.0
-  - lama-manga（[Koharu](https://github.com/mayocream/koharu)）— GPL-3.0；底層 LaMa（[advimman/lama](https://github.com/advimman/lama)）— Apache-2.0
+- **模型權重（GPL-3.0）**：三顆全部來自 [manga-image-translator](https://github.com/zyddnys/manga-image-translator)，裝置端檔是我方轉／量化——DBNet 偵測（NCNN 轉換）、48px CTC OCR（int8 量化 ONNX export）、AOT-GAN 去字（NCNN 轉換）。可 BYOM 手動放，或透過 engine repo 的 release 一鍵自動下載（本專案散布這些 GPL-3.0 權重供下載）。
 - **字型**：未 bundle（系統 CJK fallback）。
 
 ---
@@ -16,7 +13,7 @@ This repository is a fork of [mihon](https://github.com/mihonapp/mihon) (Apache-
 
 - **mihon's original code**: Apache-2.0 — its [`LICENSE`](LICENSE) and attribution are preserved.
 - **Yakuyomi's integration layer + the bundled engine + the combined app as a whole**: **GPL-3.0** (it includes the GPL-3.0 engine; Apache-2.0 is GPL-3.0-compatible, so the combined work is GPL-3.0).
-- **Model weights** are **not redistributed** here (bring-your-own); obtain them from the sources above under their respective licenses.
+- **Model weights** (GPL-3.0): all three come from [manga-image-translator](https://github.com/zyddnys/manga-image-translator) — DBNet detection (our NCNN conversion), 48px CTC OCR (our int8-quantized ONNX export), and AOT-GAN inpaint (our NCNN conversion). Bring your own, or one-tap auto-download from the engine repo's releases, which redistributes these GPL-3.0 weights.
 - **Fonts** are not bundled (system CJK fallback).
 
 When distributing: keep this notice, mihon's `LICENSE` (Apache-2.0), and the engine's `LICENSE` (GPL-3.0) together.
