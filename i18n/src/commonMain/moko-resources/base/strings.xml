@@ -1307,11 +1307,11 @@
     <string name="pref_translation_ocr_concurrency">OCR concurrency</string>
     <string name="pref_translation_ocr_concurrency_summary">How many OCR lines run at once (auto = cores); higher is faster up to the core count. %s</string>
     <string name="pref_translation_adv_current">. Current: %s</string>
-    <string name="pref_translation_bbox_pad">Removal padding (px)</string>
+    <string name="pref_translation_bbox_pad">Removal padding px</string>
     <string name="pref_translation_bbox_pad_desc">Expands the removal area to cover edge kana; 0–64. Too small misses edge kana, too large eats into nearby art</string>
-    <string name="pref_translation_font_size_max">Max font size (px)</string>
+    <string name="pref_translation_font_size_max">Max font size px</string>
     <string name="pref_translation_font_size_max_desc">20–120. Too small leaves big bubbles unfilled, too large blows up short lines</string>
-    <string name="pref_translation_font_size_min">Min font size (px)</string>
+    <string name="pref_translation_font_size_min">Min font size px</string>
     <string name="pref_translation_font_size_min_desc">6–40. Below this it overflows rather than shrinking</string>
     <string name="pref_translation_art_stroke">On-art outline width ratio</string>
     <string name="pref_translation_art_stroke_desc">Font size × this; 0–0.5. Too small is hard to read, too large the outline eats the glyph</string>
@@ -1329,7 +1329,7 @@
     <string name="pref_translation_ignore_sfx_summary">Skips coloured / decorative sound effects and leaves them untranslated (keeps the original flavour). It only skips translating them — they stay on the page, they aren\'t erased.</string>
     <!-- Yakuyomi: advanced badge + advanced recognition params (OCR crop / detector) -->
     <string name="pref_advanced_badge">Advanced</string>
-    <string name="pref_translation_strip_pad">OCR crop padding (px)</string>
+    <string name="pref_translation_strip_pad">OCR crop padding px</string>
     <string name="pref_translation_strip_pad_desc">Expands the detection box by N px before the OCR crop, to fix \"box too thin → CTC reads blank → bubble skipped\". 0–12; 4 is the measured sweet spot, 8+ regresses</string>
     <string name="pref_translation_detect_unsharp">Sharpen detector input</string>
     <string name="pref_translation_detect_unsharp_summary">Sharpens the image fed to detection. Marginal benefit and worse on some pages; off by default</string>
@@ -1337,12 +1337,12 @@
     <string name="pref_translation_use_bicubic_desc">How the OCR crop is resampled. Bicubic recovers small kana (so sentence-final negation isn\'t translated as the opposite); slightly slower than bilinear</string>
     <string name="pref_translation_interp_bicubic">Bicubic (recommended)</string>
     <string name="pref_translation_interp_bilinear">Bilinear</string>
-    <string name="pref_translation_dbnet_size">Detection size (px)</string>
+    <string name="pref_translation_dbnet_size">Detection size px</string>
     <string name="pref_translation_dbnet_size_desc">Detection resolution; 768–1536. 1024 is the sweet spot; 960 is rough, 1280+ is slower and mis-reads, 768 misses text</string>
     <!-- Yakuyomi: more advanced params (OCR sharpen / removal resolution+dilation / tate-chu-yoko / LLM temperature) -->
     <string name="pref_translation_ocr_unsharp">Sharpen OCR crop</string>
     <string name="pref_translation_ocr_unsharp_summary">Sharpens the OCR crop to counter the blur from upscaling narrow columns, recovering small kana that would otherwise be misread. On by default (no downside on lines that already read cleanly); off falls back to no sharpening, which is blurrier and can miss small kana.</string>
-    <string name="pref_translation_tile_size">Removal resolution (px)</string>
+    <string name="pref_translation_tile_size">Removal resolution px</string>
     <string name="pref_translation_tile_size_desc">Resolution of the whole-image AI text removal. 768 is the quality / memory sweet spot; 512 blurs busy areas; 1024 doubles memory and hits the ceiling that translation already sets.</string>
     <string name="pref_translation_mask_dilate">Mask dilation</string>
     <string name="pref_translation_mask_dilate_desc">How far the removal mask grows (value ÷ 2 = radius in px); 8–40. Manga text drawn over faces or hair has a white outline the mask must swallow, or removal leaves a white patch. Too small leaves white patches; 24 is the measured value.</string>

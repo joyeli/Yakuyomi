@@ -1016,11 +1016,11 @@
     <string name="pref_translation_ocr_concurrency">OCR 並發度</string>
     <string name="pref_translation_ocr_concurrency_summary">同時跑幾行 OCR（自動=核數）；越高越快到核數為止。%s</string>
     <string name="pref_translation_adv_current">。現值：%s</string>
-    <string name="pref_translation_bbox_pad">去字外擴 (px)</string>
+    <string name="pref_translation_bbox_pad">去字外擴 px</string>
     <string name="pref_translation_bbox_pad_desc">去字範圍外擴、涵蓋貼邊假名；0–64，太小漏邊假名、太大挖到鄰近畫面</string>
-    <string name="pref_translation_font_size_max">字級上限 (px)</string>
+    <string name="pref_translation_font_size_max">字級上限 px</string>
     <string name="pref_translation_font_size_max_desc">20–120，太小大泡撐不滿、太大短句爆大</string>
-    <string name="pref_translation_font_size_min">字級下限 (px)</string>
+    <string name="pref_translation_font_size_min">字級下限 px</string>
     <string name="pref_translation_font_size_min_desc">6–40，再小寧可溢出也不縮</string>
     <string name="pref_translation_art_stroke">壓畫面描邊寬比例</string>
     <string name="pref_translation_art_stroke_desc">字級×此；0–0.5，太小難讀、太大白邊吃字</string>

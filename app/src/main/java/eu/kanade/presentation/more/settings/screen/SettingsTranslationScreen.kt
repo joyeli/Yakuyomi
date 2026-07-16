@@ -435,6 +435,17 @@ object SettingsTranslationScreen : SearchableSettings {
                             true
                         },
                     ),
+                    // 即時翻去字方法（原獨立「即時翻譯」組移入）：與下載/手動翻的去字法分開，預設 boxfill 求低延遲、
+                    // 想即時看 AI 去字可選 auto_whole。引擎 mapInpaintMethod 把非 boxfill 一律當 aot。常駐（緊接去字方法下）。
+                    Preference.PreferenceItem.ListPreference(
+                        preference = prefs.liveInpaintMethod,
+                        entries = persistentMapOf(
+                            "boxfill" to stringResource(MR.strings.pref_translation_inpaint_boxfill),
+                            "auto_whole" to stringResource(MR.strings.pref_translation_inpaint_auto_whole),
+                        ),
+                        title = stringResource(MR.strings.pref_translation_live_inpaint_method),
+                        subtitle = stringResource(MR.strings.pref_translation_live_inpaint_summary),
+                    ),
                     adv(
                         showAdvanced,
                         prefs.bboxPad,
@@ -468,18 +479,6 @@ object SettingsTranslationScreen : SearchableSettings {
                         title = stringResource(MR.strings.pref_translation_keep_materials),
                         subtitle = stringResource(MR.strings.pref_translation_keep_materials_summary),
                     ),
-                    // 即時翻去字方法（原獨立「即時翻譯」組移入本組）：與下載/手動翻的去字法分開，預設 boxfill 求低延遲、
-                    // 想即時看 AI 去字可選 auto_whole(aot)。值沿用去字設定字串、引擎 mapInpaintMethod 把非 boxfill 一律當 aot。收進進階。
-                    Preference.PreferenceItem.ListPreference(
-                        preference = prefs.liveInpaintMethod,
-                        entries = persistentMapOf(
-                            "boxfill" to stringResource(MR.strings.pref_translation_inpaint_boxfill),
-                            "auto_whole" to stringResource(MR.strings.pref_translation_inpaint_auto_whole),
-                        ),
-                        title = stringResource(MR.strings.pref_translation_live_inpaint_method),
-                        subtitle = stringResource(MR.strings.pref_translation_live_inpaint_summary),
-                        titleBadge = advBadge,
-                    ).takeIf { showAdvanced },
                 ).toImmutableList(),
             ),
             // —— 供應商（LLM）——
