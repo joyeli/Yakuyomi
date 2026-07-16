@@ -27,11 +27,11 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 
 **Translation**
 - **Real inpainting, not overlays** — other translation forks paint a box over the text or stamp new text on top. Yakuyomi *erases* the original and **reconstructs the artwork** (AOT-GAN inpainting) before typesetting the translation back into the bubble.
-- **On-device pipeline (v2 — NCNN + int8)** — detection and text removal run on **NCNN**'s mobile kernels, OCR on an **int8-quantized** model. Moving off ONNX Runtime shrank the model set from **~470 MB to ~92 MB** and sped it up — ~2.9× at detection, ~3.6× at OCR — for about **5 s per page** on a Snapdragon 8 Gen 3. Pure CPU (GPU/NPU was tried and doesn't help these models). Only the LLM translation call leaves your device; no image ever leaves the phone.
+- **On-device pipeline (v2 — NCNN + int8)** — detection and text removal run on **NCNN**'s mobile kernels, OCR on an **int8-quantized** model. Moving off ONNX Runtime shrank the model set from **~470 MB to ~200 MB** and sped it up — ~2.9× at detection, ~3.6× at OCR — for about **5 s per page** on a Snapdragon 8 Gen 3. Pure CPU (GPU/NPU was tried and doesn't help these models). Only the LLM translation call leaves your device; no image ever leaves the phone.
 - **Cross-page pipeline (~2× faster)** — pages translate concurrently: while one page waits on the cloud LLM, the next page's on-device detection / OCR / removal is already running. At a shallow depth this reaches the network-bound ceiling — roughly **double** the throughput of live / fast-removal translation.
 - **Two workflows** — translate-on-download (whole chapters in the background) and live translation while you read. A page is overwritten only when its translation succeeds; nothing is ever replaced with something worse.
 - **Your provider, your key** — any OpenAI-compatible LLM (DeepSeek by default; OpenAI, Gemini, Groq, Qwen, OpenRouter, self-hosted Sakura, custom), per-provider encrypted keys, live model list ([providers doc](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/PROVIDERS.md)).
-- **Your models** — the model set (NCNN detector + inpaint pairs, int8 OCR, ~92 MB) downloads in one tap with sha256 verification, or you supply them manually ([models doc](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/MODELS.md)).
+- **Your models** — the model set (NCNN detector + inpaint pairs, int8 OCR, ~200 MB) downloads in one tap with sha256 verification, or you supply them manually ([models doc](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/MODELS.md)).
 - **Quality knobs** — two text-removal modes (fast flat-fill / AI inpainting), vertical/horizontal typesetting, ~20 tunable parameters. No telemetry.
 
 <div align="center">
@@ -137,11 +137,29 @@ Grab the latest **signed APK** from the [**Releases page**](https://github.com/j
 
 ## How translation works
 
-```
-page → detect (NCNN) → OCR (int8 ONNX) → group → translate (LLM) → remove text (NCNN) → typeset → translated page
+Four of the five stages run on the device; only translation leaves it. Each stage below carries the settings that tune it, so you know which knob affects which step (full list in [PARAMETERS](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/PARAMETERS.md); the pipeline design lives in [yakuyomi-engine](https://github.com/joyeli/yakuyomi-engine)).
+
+```mermaid
+flowchart TD
+    P["漫畫頁 · Manga page"] --> DET
+    DET["① 偵測 Detection · NCNN"] --> OCR["② OCR · int8 ONNX"]
+    OCR --> TR["③ 翻譯 Translate · ☁ cloud LLM"]
+    OCR --> INP["④ 去字 Text removal · NCNN AOT-GAN"]
+    TR --> RND
+    INP --> RND["⑤ 排版 Typeset"]
+    RND --> OUT["翻好的頁 · Translated page"]
+
+    DET -. 設定 settings .-> Do["辨識尺寸 · 偵測銳利化<br/>Detection size · Sharpen input"]
+    OCR -.-> Oo["OCR 外擴 · 內插法 · 銳利化 · 信心門檻 · 跳過 SFX<br/>Crop pad · Interpolation · Sharpen · Min confidence · Skip SFX"]
+    TR -.-> To["供應商·金鑰·模型 · 語言 · 溫度 · 下載翻/即時翻<br/>Provider·key·model · Languages · Temperature · On-download/Live"]
+    INP -.-> Io["去字方法 · 解析度 · 遮罩膨脹 · 外擴<br/>Method · Resolution · Mask dilation · Padding"]
+    RND -.-> Ro["方向 · 文字色 · 描邊 · 字級 · 縱中橫<br/>Orientation · Colour · Outline · Font size · Tate-chu-yoko"]
+
+    classDef opt fill:#f6f8fa,stroke:#d0d7de,color:#57606a;
+    class Do,Oo,To,Io,Ro opt;
 ```
 
-Four of the five stages run on the device; only translation leaves it. The pipeline and its design live in [yakuyomi-engine](https://github.com/joyeli/yakuyomi-engine).
+Text removal (④) runs concurrently with the translation request (③) — the page pays only the longer of the two, not their sum.
 
 **Two layers of concurrency keep it fast.** *Within a page*, text removal (CPU) runs while the translation request is in flight (network) — the page pays only the longer of the two, not their sum. *Across pages*, the engine pipelines: while page N waits on the LLM, page N+1's detection / OCR / removal already run on-device. With the fast box-fill removal this reaches the network-bound ceiling — about **2× the sequential rate**.
 
