@@ -212,6 +212,8 @@ fun BaseSliderItem(
     titleStyle: TextStyle = MaterialTheme.typography.titleLarge,
     subtitleStyle: TextStyle = MaterialTheme.typography.bodySmall,
     pillColor: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    // Yakuyomi：進階選項標題旁的小 badge（如「進階」）；null＝不顯示。滑桿不走 BasePreferenceWidget，故在此就地畫。
+    titleBadge: String? = null,
 ) {
     val haptic = LocalHapticFeedback.current
     Column(
@@ -225,10 +227,29 @@ fun BaseSliderItem(
             horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small),
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    style = titleStyle,
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        text = title,
+                        style = titleStyle,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (titleBadge != null) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            shape = MaterialTheme.shapes.small,
+                        ) {
+                            Text(
+                                text = titleBadge,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            )
+                        }
+                    }
+                }
                 if (subtitle != null) {
                     Text(
                         text = subtitle,

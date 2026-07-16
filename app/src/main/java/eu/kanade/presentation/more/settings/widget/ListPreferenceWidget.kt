@@ -38,11 +38,13 @@ fun <T> ListPreferenceWidget(
     onValueChange: (T) -> Unit,
     // Yakuyomi：選擇對話框內、清單上方顯示的說明（非空才顯示）。
     description: String? = null,
+    titleBadge: String? = null,
 ) {
     var isDialogShown by remember { mutableStateOf(false) }
 
     TextPreferenceWidget(
         title = title,
+        titleBadge = titleBadge,
         subtitle = subtitle,
         icon = icon,
         onPreferenceClick = { isDialogShown = true },

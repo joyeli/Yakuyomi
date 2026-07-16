@@ -26,6 +26,7 @@ fun MultiSelectListPreferenceWidget(
 
     TextPreferenceWidget(
         title = preference.title,
+        titleBadge = preference.titleBadge,
         subtitle = preference.subtitleProvider(values, preference.entries),
         icon = preference.icon,
         onPreferenceClick = { isDialogShown = true },

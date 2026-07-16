@@ -69,6 +69,7 @@ internal fun PreferenceItem(
                 val value by item.preference.collectAsState()
                 SwitchPreferenceWidget(
                     title = item.title,
+                    titleBadge = item.titleBadge,
                     subtitle = item.subtitle,
                     icon = item.icon,
                     checked = value,
@@ -87,6 +88,7 @@ internal fun PreferenceItem(
                     valueRange = item.valueRange,
                     steps = item.steps,
                     title = item.title,
+                    titleBadge = item.titleBadge,
                     subtitle = item.subtitle,
                     valueString = item.valueString.takeUnless { it.isNullOrEmpty() } ?: item.value.toString(),
                     onChange = {
@@ -106,6 +108,7 @@ internal fun PreferenceItem(
                 ListPreferenceWidget(
                     value = value,
                     title = item.title,
+                    titleBadge = item.titleBadge,
                     subtitle = item.internalSubtitleProvider(value, item.entries),
                     description = item.description,
                     icon = item.icon,
@@ -146,6 +149,7 @@ internal fun PreferenceItem(
             is Preference.PreferenceItem.TextPreference -> {
                 TextPreferenceWidget(
                     title = item.title,
+                    titleBadge = item.titleBadge,
                     subtitle = item.subtitle,
                     icon = item.icon,
                     widget = item.widget,
@@ -156,6 +160,7 @@ internal fun PreferenceItem(
                 val values by item.preference.collectAsState()
                 EditTextPreferenceWidget(
                     title = item.title,
+                    titleBadge = item.titleBadge,
                     subtitle = item.subtitle,
                     icon = item.icon,
                     value = values,

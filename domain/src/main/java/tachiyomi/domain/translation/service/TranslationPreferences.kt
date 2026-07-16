@@ -163,6 +163,37 @@ class TranslationPreferences(
     val rowTrim = preferenceStore.getString("translation_row_trim", "3") // 0–10
     val fontScale = preferenceStore.getString("translation_font_scale", "0.85") // 0.3–1.5
 
+    // —— 進階辨識（OCR 裁切 / 偵測器）：各自對應引擎欄位、buildEngineConfig 讀取並 clamp ——
+
+    /** OCR 裁切前把偵測框外擴 N px（救框太瘦切字→CTC 空讀→漏氣泡）；對應引擎 OcrConfig.stripPad。0–12，實測甜蜜點 4。 */
+    val stripPad = preferenceStore.getInt("translation_strip_pad", 4)
+
+    /** OCR 裁切內插法：bicubic（救小假名句尾否定）／bilinear；對應引擎 OcrConfig.useBicubic（==「bicubic」）。 */
+    val useBicubic = preferenceStore.getString("translation_use_bicubic", "bicubic")
+
+    /** 偵測輸入銳利化（marginal + OOD，預設關）；對應引擎 DetectorConfig.detectUnsharp。 */
+    val detectUnsharp = preferenceStore.getBoolean("translation_detect_unsharp", false)
+
+    /** 偵測辨識尺寸 px（甜蜜點 1024）；對應引擎 DetectorConfig.dbnetInputSize。768–1536（步進 128）。 */
+    val dbnetSize = preferenceStore.getInt("translation_dbnet_size", 1024)
+
+    /** OCR 裁切前銳化 strip（抵銷 warp 縮放模糊、救小假名漏讀）；對應引擎 OcrConfig.ocrUnsharp。★預設開（與 detectUnsharp 相反）。 */
+    val ocrUnsharp = preferenceStore.getBoolean("translation_ocr_unsharp", true)
+
+    // —— 進階去字（解析度 / 遮罩）——
+
+    /** 整頁 AOT 去字解析度（512/768/1024，甜蜜點 768）；對應引擎 InpainterConfig.tileSize。存 Int，只三檔有意義。 */
+    val tileSize = preferenceStore.getInt("translation_tile_size", 768)
+
+    /** 去字遮罩膨脹（值/2＝半徑 px，實測 24）；對應引擎 InpainterConfig.maskDilate（Float）。存 Int，8–40。調小會殘白塊。 */
+    val maskDilate = preferenceStore.getInt("translation_mask_dilate", 24)
+
+    /** 縱中橫：直排時把連續短 ASCII 串水平並排一格（預設開）；對應引擎 RenderConfig.tateChuYoko。 */
+    val tateChuYoko = preferenceStore.getBoolean("translation_tate_chu_yoko", true)
+
+    /** LLM 取樣溫度（0.0–1.0，預設 0.3）；對應引擎 TranslatorConfig.temperature。存字串、buildEngineConfig parse+clamp（對齊其餘數值參數）。 */
+    val temperature = preferenceStore.getString("translation_temperature", "0.3")
+
     companion object {
         // ⚠️ 與引擎 TranslatorConfig.toLangName / fromLangName 預設「逐字一致」（引擎＝真理來源）。
         //   鏡像而非共用：本類在 :domain，:domain 不依賴引擎（只 :app 依賴）→ 不能 import 引擎常數。

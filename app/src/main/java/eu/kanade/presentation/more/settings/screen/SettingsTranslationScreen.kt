@@ -98,6 +98,12 @@ object SettingsTranslationScreen : SearchableSettings {
         val cores = remember { Runtime.getRuntime().availableProcessors() }
         // 進階參數 subtitle 的「。現值：%s」尾綴（%s 由 EditTextPreference 框架填現值）。
         val curSuffix = stringResource(MR.strings.pref_translation_adv_current)
+        // 進階 badge 文字（每個進階選項標題旁顯示、與一般選項區分）。
+        val advBadge = stringResource(MR.strings.pref_advanced_badge)
+        // 進階滑桿現值（Int pref → SliderPreference 需要 value + onValueChanged）。
+        val stripPadVal by prefs.stripPad.collectAsState()
+        val dbnetSizeVal by prefs.dbnetSize.collectAsState()
+        val maskDilateVal by prefs.maskDilate.collectAsState()
 
         // —— 多 LLM 供應商（m-i-t 全部 + OpenRouter）+ 自動撈模型清單 ——
         val providerId by prefs.provider.collectAsState()
@@ -133,7 +139,7 @@ object SettingsTranslationScreen : SearchableSettings {
             }
         } ?: modelStatusChecking
 
-        // 全域翻譯總開關：關閉時下載翻 / 即時翻變灰停用（自動翻譯一律不做）。
+        // 全域翻譯總開關：關閉時整頁只剩「快速上手 + 啟用翻譯」兩項、其餘（顯示進階 + 所有組）全部隱藏（自動翻譯一律不做）。
         val masterEnabled by prefs.translationMasterEnabled.collectAsState()
 
         // 即時翻譯分類過濾。
@@ -310,12 +316,28 @@ object SettingsTranslationScreen : SearchableSettings {
             "Russian" to stringResource(MR.strings.pref_translation_lang_russian),
         )
 
+        // 常駐頂層（不受總開關隱藏）：快速上手導覽 + 啟用翻譯總開關（從「翻譯」組移到頂層）。
+        val quickstartItem = Preference.PreferenceItem.TextPreference(
+            title = stringResource(MR.strings.pref_translation_quickstart),
+            subtitle = stringResource(MR.strings.pref_translation_quickstart_summary),
+            onClick = { navigator.push(TranslationQuickstartScreen()) },
+        )
+        val masterItem = Preference.PreferenceItem.SwitchPreference(
+            preference = prefs.translationMasterEnabled,
+            title = stringResource(MR.strings.pref_translation_master),
+            subtitle = stringResource(MR.strings.pref_translation_master_summary),
+            onValueChanged = { enabled ->
+                // 副作用抽進 manager（與 More 頁快捷開關共用、連動）。
+                translationManager.onMasterEnabledChanged(enabled)
+                true
+            },
+        )
+        // 總開關關閉 → 只顯示上面兩項，其餘（顯示進階 + 所有組）全部不 render。
+        if (!masterEnabled) return listOf(quickstartItem, masterItem)
+
         return listOf(
-            Preference.PreferenceItem.TextPreference(
-                title = stringResource(MR.strings.pref_translation_quickstart),
-                subtitle = stringResource(MR.strings.pref_translation_quickstart_summary),
-                onClick = { navigator.push(TranslationQuickstartScreen()) },
-            ),
+            quickstartItem,
+            masterItem,
             Preference.PreferenceItem.SwitchPreference(
                 preference = prefs.showAdvanced,
                 title = stringResource(MR.strings.pref_translation_show_advanced),
@@ -326,20 +348,9 @@ object SettingsTranslationScreen : SearchableSettings {
                 title = stringResource(MR.strings.pref_category_translation),
                 preferenceItems = listOfNotNull<Item>(
                     Preference.PreferenceItem.SwitchPreference(
-                        preference = prefs.translationMasterEnabled,
-                        title = stringResource(MR.strings.pref_translation_master),
-                        subtitle = stringResource(MR.strings.pref_translation_master_summary),
-                        onValueChanged = { enabled ->
-                            // 副作用抽進 manager（與 More 頁快捷開關共用、連動）。
-                            translationManager.onMasterEnabledChanged(enabled)
-                            true
-                        },
-                    ),
-                    Preference.PreferenceItem.SwitchPreference(
                         preference = prefs.translationEnabled,
                         title = stringResource(MR.strings.pref_translation_on_download),
                         subtitle = stringResource(MR.strings.pref_translation_on_download_summary),
-                        enabled = masterEnabled,
                         onValueChanged = { enabled ->
                             if (enabled && !privacyAck) {
                                 pendingEnableSwitch = prefs.translationEnabled
@@ -353,7 +364,6 @@ object SettingsTranslationScreen : SearchableSettings {
                         preference = prefs.liveTranslate,
                         title = stringResource(MR.strings.pref_translation_live),
                         subtitle = stringResource(MR.strings.pref_translation_live_summary),
-                        enabled = masterEnabled,
                         onValueChanged = { enabled ->
                             when {
                                 enabled && !privacyAck -> {
@@ -376,15 +386,8 @@ object SettingsTranslationScreen : SearchableSettings {
                         entries = librarySources,
                         title = stringResource(MR.strings.pref_translation_excluded_sources),
                         subtitle = stringResource(MR.strings.pref_translation_excluded_sources_summary),
-                        enabled = masterEnabled,
                     ),
-                ).toImmutableList(),
-            ),
-            // —— 即時翻譯 ——（翻譯總開關關時整組收起，比照去字/排版/效能組）
-            Preference.PreferenceGroup(
-                title = stringResource(MR.strings.pref_translation_group_live),
-                enabled = masterEnabled,
-                preferenceItems = listOfNotNull<Item>(
+                    // 即時翻譯分類（原獨立「即時翻譯」組移入本組）：tri-state include/exclude 過濾即時翻的書。
                     Preference.PreferenceItem.TextPreference(
                         title = stringResource(MR.strings.pref_translation_live_categories),
                         subtitle = getCategoriesLabel(
@@ -394,19 +397,8 @@ object SettingsTranslationScreen : SearchableSettings {
                         ),
                         onClick = { showLiveCategoryDialog = true },
                     ),
-                    // 即時翻去字方法（與下載/手動翻的去字法分開）：預設 boxfill 求低延遲、想即時看 AI 去字可選 auto_whole(aot)。
-                    // 值沿用去字設定的字串（boxfill / auto_whole），標籤複用；引擎 mapInpaintMethod 把非 boxfill 一律當 aot。
-                    // 收進進階：一般使用者分不出即時翻去字法差異。
-                    Preference.PreferenceItem.ListPreference(
-                        preference = prefs.liveInpaintMethod,
-                        entries = persistentMapOf(
-                            "boxfill" to stringResource(MR.strings.pref_translation_inpaint_boxfill),
-                            "auto_whole" to stringResource(MR.strings.pref_translation_inpaint_auto_whole),
-                        ),
-                        title = stringResource(MR.strings.pref_translation_live_inpaint_method),
-                        subtitle = stringResource(MR.strings.pref_translation_live_inpaint_summary),
-                    ).takeIf { showAdvanced },
-                    // 「閱讀後刪除」與下載偏好同一個 pref（downloadPrefs.removeAfterReadSlots）→ 改這也改下載行為（刻意的）。
+                    // 「閱讀後刪除」（原「即時翻譯」組移入本組）：與下載偏好同一個 pref
+                    // （downloadPrefs.removeAfterReadSlots）→ 改這也改下載行為（刻意的）。
                     Preference.PreferenceItem.ListPreference(
                         preference = downloadPrefs.removeAfterReadSlots,
                         entries = persistentMapOf(
@@ -420,6 +412,74 @@ object SettingsTranslationScreen : SearchableSettings {
                         title = stringResource(MR.strings.pref_remove_after_read),
                         subtitle = stringResource(MR.strings.pref_translation_remove_after_read_summary),
                     ),
+                ).toImmutableList(),
+            ),
+            // —— 去字 ——（緊接翻譯組上移；翻譯總開關關時整組收起：純渲染參數、關閉時無意義）
+            Preference.PreferenceGroup(
+                title = stringResource(MR.strings.pref_translation_group_inpaint),
+                preferenceItems = listOfNotNull<Item>(
+                    Preference.PreferenceItem.ListPreference(
+                        preference = prefs.inpaintMethod,
+                        entries = persistentMapOf(
+                            // 2 門別（快速去字 / AI 去字）；auto_tile（逐格）已退役，stored auto_whole 仍選中
+                            "boxfill" to stringResource(MR.strings.pref_translation_inpaint_boxfill),
+                            "auto_whole" to stringResource(MR.strings.pref_translation_inpaint_auto_whole),
+                        ),
+                        title = stringResource(MR.strings.pref_translation_inpaint_method),
+                        onValueChanged = { _ ->
+                            if (prefs.translationMasterEnabled.get() &&
+                                (prefs.translationEnabled.get() || prefs.liveTranslate.get())
+                            ) {
+                                pendingRenderUpdate = RenderUpdateKind.UPGRADE
+                            }
+                            true
+                        },
+                    ),
+                    adv(
+                        showAdvanced,
+                        prefs.bboxPad,
+                        stringResource(MR.strings.pref_translation_bbox_pad),
+                        stringResource(MR.strings.pref_translation_bbox_pad_desc) + curSuffix,
+                        advBadge,
+                    ),
+                    // 整頁 AI 去字解析度：三檔 512/768/1024（存 Int，只三值有意義）。subtitle 顯示現值、說明進對話框。
+                    Preference.PreferenceItem.ListPreference(
+                        preference = prefs.tileSize,
+                        entries = persistentMapOf(
+                            512 to "512",
+                            768 to "768",
+                            1024 to "1024",
+                        ),
+                        title = stringResource(MR.strings.pref_translation_tile_size),
+                        description = stringResource(MR.strings.pref_translation_tile_size_desc),
+                        titleBadge = advBadge,
+                    ).takeIf { showAdvanced },
+                    // 遮罩膨脹半徑（值/2）：吞掉文字白邊、否則去字後殘白塊；8–40，實測 24。
+                    Preference.PreferenceItem.SliderPreference(
+                        value = maskDilateVal,
+                        valueRange = 8..40,
+                        title = stringResource(MR.strings.pref_translation_mask_dilate),
+                        subtitle = stringResource(MR.strings.pref_translation_mask_dilate_desc),
+                        titleBadge = advBadge,
+                        onValueChanged = { prefs.maskDilate.set(it) },
+                    ).takeIf { showAdvanced },
+                    Preference.PreferenceItem.SwitchPreference(
+                        preference = prefs.keepMaterials,
+                        title = stringResource(MR.strings.pref_translation_keep_materials),
+                        subtitle = stringResource(MR.strings.pref_translation_keep_materials_summary),
+                    ),
+                    // 即時翻去字方法（原獨立「即時翻譯」組移入本組）：與下載/手動翻的去字法分開，預設 boxfill 求低延遲、
+                    // 想即時看 AI 去字可選 auto_whole(aot)。值沿用去字設定字串、引擎 mapInpaintMethod 把非 boxfill 一律當 aot。收進進階。
+                    Preference.PreferenceItem.ListPreference(
+                        preference = prefs.liveInpaintMethod,
+                        entries = persistentMapOf(
+                            "boxfill" to stringResource(MR.strings.pref_translation_inpaint_boxfill),
+                            "auto_whole" to stringResource(MR.strings.pref_translation_inpaint_auto_whole),
+                        ),
+                        title = stringResource(MR.strings.pref_translation_live_inpaint_method),
+                        subtitle = stringResource(MR.strings.pref_translation_live_inpaint_summary),
+                        titleBadge = advBadge,
+                    ).takeIf { showAdvanced },
                 ).toImmutableList(),
             ),
             // —— 供應商（LLM）——
@@ -488,6 +548,14 @@ object SettingsTranslationScreen : SearchableSettings {
                             }
                         },
                     ),
+                    // LLM 取樣溫度：低＝更一致貼字直譯、高＝更靈活但可能偏離；多數人不用動（進階、存字串 parse+clamp 0–1）。
+                    adv(
+                        showAdvanced,
+                        prefs.temperature,
+                        stringResource(MR.strings.pref_translation_temperature),
+                        stringResource(MR.strings.pref_translation_temperature_desc) + curSuffix,
+                        advBadge,
+                    ),
                 ).toImmutableList(),
             ),
             // —— 語言 ——
@@ -537,55 +605,9 @@ object SettingsTranslationScreen : SearchableSettings {
                     ),
                 ).toImmutableList(),
             ),
-            // —— 隱私（點開看完整宣告）——
-            Preference.PreferenceGroup(
-                title = stringResource(MR.strings.pref_translation_privacy),
-                preferenceItems = listOfNotNull<Item>(
-                    Preference.PreferenceItem.TextPreference(
-                        title = stringResource(MR.strings.pref_translation_privacy_summary),
-                        onClick = { showPrivacyDialog = true },
-                    ),
-                ).toImmutableList(),
-            ),
-            // —— 去字 ——（翻譯總開關關時整組收起：純渲染參數、關閉時無意義）
-            Preference.PreferenceGroup(
-                title = stringResource(MR.strings.pref_translation_group_inpaint),
-                enabled = masterEnabled,
-                preferenceItems = listOfNotNull<Item>(
-                    Preference.PreferenceItem.ListPreference(
-                        preference = prefs.inpaintMethod,
-                        entries = persistentMapOf(
-                            // 2 門別（快速去字 / AI 去字）；auto_tile（逐格）已退役，stored auto_whole 仍選中
-                            "boxfill" to stringResource(MR.strings.pref_translation_inpaint_boxfill),
-                            "auto_whole" to stringResource(MR.strings.pref_translation_inpaint_auto_whole),
-                        ),
-                        title = stringResource(MR.strings.pref_translation_inpaint_method),
-                        onValueChanged = { _ ->
-                            if (prefs.translationMasterEnabled.get() &&
-                                (prefs.translationEnabled.get() || prefs.liveTranslate.get())
-                            ) {
-                                pendingRenderUpdate = RenderUpdateKind.UPGRADE
-                            }
-                            true
-                        },
-                    ),
-                    adv(
-                        showAdvanced,
-                        prefs.bboxPad,
-                        stringResource(MR.strings.pref_translation_bbox_pad),
-                        stringResource(MR.strings.pref_translation_bbox_pad_desc) + curSuffix,
-                    ),
-                    Preference.PreferenceItem.SwitchPreference(
-                        preference = prefs.keepMaterials,
-                        title = stringResource(MR.strings.pref_translation_keep_materials),
-                        subtitle = stringResource(MR.strings.pref_translation_keep_materials_summary),
-                    ),
-                ).toImmutableList(),
-            ),
             // —— 排版 ——（翻譯總開關關時整組收起）
             Preference.PreferenceGroup(
                 title = stringResource(MR.strings.pref_translation_group_typeset),
-                enabled = masterEnabled,
                 preferenceItems = listOfNotNull<Item>(
                     Preference.PreferenceItem.ListPreference(
                         preference = prefs.orientation,
@@ -612,6 +634,7 @@ object SettingsTranslationScreen : SearchableSettings {
                             "mono" to stringResource(MR.strings.pref_translation_color_mono),
                         ),
                         title = stringResource(MR.strings.pref_translation_color_mode),
+                        titleBadge = advBadge,
                         onValueChanged = { _ ->
                             if (prefs.translationMasterEnabled.get() &&
                                 (prefs.translationEnabled.get() || prefs.liveTranslate.get())
@@ -625,6 +648,22 @@ object SettingsTranslationScreen : SearchableSettings {
                         preference = prefs.fontBorder,
                         title = stringResource(MR.strings.pref_translation_font_border),
                         subtitle = stringResource(MR.strings.pref_translation_font_border_summary),
+                        titleBadge = advBadge,
+                        onValueChanged = { _ ->
+                            if (prefs.translationMasterEnabled.get() &&
+                                (prefs.translationEnabled.get() || prefs.liveTranslate.get())
+                            ) {
+                                pendingRenderUpdate = RenderUpdateKind.LAYOUT
+                            }
+                            true
+                        },
+                    ).takeIf { showAdvanced },
+                    // 縱中橫（直排短 ASCII 串水平並排）：純排版 → 改動觸發 LAYOUT 重繪既有已翻章。
+                    Preference.PreferenceItem.SwitchPreference(
+                        preference = prefs.tateChuYoko,
+                        title = stringResource(MR.strings.pref_translation_tate_chu_yoko),
+                        subtitle = stringResource(MR.strings.pref_translation_tate_chu_yoko_summary),
+                        titleBadge = advBadge,
                         onValueChanged = { _ ->
                             if (prefs.translationMasterEnabled.get() &&
                                 (prefs.translationEnabled.get() || prefs.liveTranslate.get())
@@ -639,77 +678,142 @@ object SettingsTranslationScreen : SearchableSettings {
                         prefs.fontSizeMax,
                         stringResource(MR.strings.pref_translation_font_size_max),
                         stringResource(MR.strings.pref_translation_font_size_max_desc) + curSuffix,
+                        advBadge,
                     ),
                     adv(
                         showAdvanced,
                         prefs.fontSizeMin,
                         stringResource(MR.strings.pref_translation_font_size_min),
                         stringResource(MR.strings.pref_translation_font_size_min_desc) + curSuffix,
+                        advBadge,
                     ),
                     adv(
                         showAdvanced,
                         prefs.artStrokeRatio,
                         stringResource(MR.strings.pref_translation_art_stroke),
                         stringResource(MR.strings.pref_translation_art_stroke_desc) + curSuffix,
+                        advBadge,
                     ),
                     adv(
                         showAdvanced,
                         prefs.colTrim,
                         stringResource(MR.strings.pref_translation_col_trim),
                         stringResource(MR.strings.pref_translation_col_trim_desc) + curSuffix,
+                        advBadge,
                     ),
                     adv(
                         showAdvanced,
                         prefs.rowTrim,
                         stringResource(MR.strings.pref_translation_row_trim),
                         stringResource(MR.strings.pref_translation_row_trim_desc) + curSuffix,
+                        advBadge,
                     ),
                     adv(
                         showAdvanced,
                         prefs.fontScale,
                         stringResource(MR.strings.pref_translation_font_scale),
                         stringResource(MR.strings.pref_translation_font_scale_desc) + curSuffix,
+                        advBadge,
                     ),
                 ).toImmutableList(),
             ),
-            // —— 效能（進階）——（翻譯總開關關時整組收起；非進階時空 group 隱藏，比照辨識/診斷組）
-            Preference.PreferenceGroup(
-                title = stringResource(MR.strings.pref_translation_group_performance),
-                enabled = showAdvanced && masterEnabled,
-                preferenceItems = listOfNotNull<Item>(
-                    Preference.PreferenceItem.ListPreference(
-                        preference = prefs.ocrConcurrency,
-                        entries = threadEntries,
-                        title = stringResource(MR.strings.pref_translation_ocr_concurrency),
-                        subtitle = stringResource(MR.strings.pref_translation_ocr_concurrency_summary),
-                    ).takeIf { showAdvanced },
-                    // 推論緒數選單已移除：NCNN 偵測/去字的緒數改由引擎原生設定（big.LITTLE 大核甜蜜點），非使用者可調。
-                ).toImmutableList(),
-            ),
-            // —— 辨識（進階）——
+            // —— 辨識（進階）——（排版之後、效能之前）
             Preference.PreferenceGroup(
                 title = stringResource(MR.strings.pref_translation_group_recognition),
-                enabled = showAdvanced && masterEnabled,
+                enabled = showAdvanced,
                 preferenceItems = listOfNotNull<Item>(
+                    // —— 偵測 ——
                     adv(
                         showAdvanced,
                         prefs.segThreshold,
                         stringResource(MR.strings.pref_translation_seg_threshold),
                         stringResource(MR.strings.pref_translation_seg_threshold_desc) + curSuffix,
+                        advBadge,
                     ),
+                    // 偵測辨識尺寸（DBNet input）：1024 甜蜜點；步進 128（768–1536，7 檔＝steps 5）。
+                    Preference.PreferenceItem.SliderPreference(
+                        value = dbnetSizeVal,
+                        valueRange = 768..1536,
+                        steps = 5,
+                        title = stringResource(MR.strings.pref_translation_dbnet_size),
+                        subtitle = stringResource(MR.strings.pref_translation_dbnet_size_desc),
+                        titleBadge = advBadge,
+                        onValueChanged = { prefs.dbnetSize.set(it) },
+                    ).takeIf { showAdvanced },
+                    Preference.PreferenceItem.SwitchPreference(
+                        preference = prefs.detectUnsharp,
+                        title = stringResource(MR.strings.pref_translation_detect_unsharp),
+                        subtitle = stringResource(MR.strings.pref_translation_detect_unsharp_summary),
+                        titleBadge = advBadge,
+                    ).takeIf { showAdvanced },
+                    // —— OCR ——
                     adv(
                         showAdvanced,
                         prefs.minProb,
                         stringResource(MR.strings.pref_translation_min_prob),
                         stringResource(MR.strings.pref_translation_min_prob_desc) + curSuffix,
+                        advBadge,
                     ),
+                    // OCR 裁切外擴：救「框太瘦切字→CTC 空讀→漏氣泡」；0–12（每格 1，steps 預設）。
+                    Preference.PreferenceItem.SliderPreference(
+                        value = stripPadVal,
+                        valueRange = 0..12,
+                        title = stringResource(MR.strings.pref_translation_strip_pad),
+                        subtitle = stringResource(MR.strings.pref_translation_strip_pad_desc),
+                        titleBadge = advBadge,
+                        onValueChanged = { prefs.stripPad.set(it) },
+                    ).takeIf { showAdvanced },
+                    // OCR 裁切內插法：bicubic 救小假名（句尾否定不翻反）／bilinear。
+                    Preference.PreferenceItem.ListPreference(
+                        preference = prefs.useBicubic,
+                        entries = persistentMapOf(
+                            "bicubic" to stringResource(MR.strings.pref_translation_interp_bicubic),
+                            "bilinear" to stringResource(MR.strings.pref_translation_interp_bilinear),
+                        ),
+                        title = stringResource(MR.strings.pref_translation_use_bicubic),
+                        subtitle = stringResource(MR.strings.pref_translation_use_bicubic_desc),
+                        titleBadge = advBadge,
+                    ).takeIf { showAdvanced },
+                    // OCR 裁切銳化：抵銷 warp 縮放模糊、救小假名漏讀；預設開（與偵測輸入銳化 detectUnsharp 相反）。
+                    Preference.PreferenceItem.SwitchPreference(
+                        preference = prefs.ocrUnsharp,
+                        title = stringResource(MR.strings.pref_translation_ocr_unsharp),
+                        subtitle = stringResource(MR.strings.pref_translation_ocr_unsharp_summary),
+                        titleBadge = advBadge,
+                    ).takeIf { showAdvanced },
                     // 跳過狀聲詞 SFX：開→OcrConfig.ignoreBubble 給內建門檻（buildEngineConfig 填 24）跳過彩色/裝飾性
                     // 非氣泡狀聲詞、不翻它們（保留原味）。這是「跳過翻譯」非「積極去除」——SFX 仍留在原圖上。
                     Preference.PreferenceItem.SwitchPreference(
                         preference = prefs.ignoreSfx,
                         title = stringResource(MR.strings.pref_translation_ignore_sfx),
                         subtitle = stringResource(MR.strings.pref_translation_ignore_sfx_summary),
+                        titleBadge = advBadge,
                     ).takeIf { showAdvanced },
+                ).toImmutableList(),
+            ),
+            // —— 效能（進階）——（翻譯總開關關時整組收起；非進階時空 group 隱藏，比照辨識/診斷組）
+            Preference.PreferenceGroup(
+                title = stringResource(MR.strings.pref_translation_group_performance),
+                enabled = showAdvanced,
+                preferenceItems = listOfNotNull<Item>(
+                    Preference.PreferenceItem.ListPreference(
+                        preference = prefs.ocrConcurrency,
+                        entries = threadEntries,
+                        title = stringResource(MR.strings.pref_translation_ocr_concurrency),
+                        subtitle = stringResource(MR.strings.pref_translation_ocr_concurrency_summary),
+                        titleBadge = advBadge,
+                    ).takeIf { showAdvanced },
+                    // 推論緒數選單已移除：NCNN 偵測/去字的緒數改由引擎原生設定（big.LITTLE 大核甜蜜點），非使用者可調。
+                ).toImmutableList(),
+            ),
+            // —— 隱私（點開看完整宣告；移到診斷上面）——
+            Preference.PreferenceGroup(
+                title = stringResource(MR.strings.pref_translation_privacy),
+                preferenceItems = listOfNotNull<Item>(
+                    Preference.PreferenceItem.TextPreference(
+                        title = stringResource(MR.strings.pref_translation_privacy_summary),
+                        onClick = { showPrivacyDialog = true },
+                    ),
                 ).toImmutableList(),
             ),
             // —— 診斷（進階）——（抓 logcat / 內建 crash log 都抓不到的原生/OOM crash；預設關、影響效能，只需要時開）
@@ -721,6 +825,7 @@ object SettingsTranslationScreen : SearchableSettings {
                         preference = prefs.diagnosticLog,
                         title = stringResource(MR.strings.pref_translation_diagnostic_log),
                         subtitle = stringResource(MR.strings.pref_translation_diagnostic_log_summary),
+                        titleBadge = advBadge,
                         onValueChanged = { enabled ->
                             if (enabled) TraceLog.init(context) else TraceLog.stop()
                             true
@@ -729,6 +834,7 @@ object SettingsTranslationScreen : SearchableSettings {
                     Preference.PreferenceItem.TextPreference(
                         title = stringResource(MR.strings.pref_translation_share_diagnostic_log),
                         subtitle = stringResource(MR.strings.pref_translation_share_diagnostic_log_summary),
+                        titleBadge = advBadge,
                         onClick = {
                             if (!TraceLog.shareLog(context)) {
                                 context.toast(
@@ -742,11 +848,25 @@ object SettingsTranslationScreen : SearchableSettings {
         ).filter { it !is Preference.PreferenceGroup || it.preferenceItems.isNotEmpty() }
     }
 
-    /** 進階數值輸入：showAdvanced 關時回 null（不顯示）。subtitle 已含說明 + 「。現值：%s」尾綴。 */
-    private fun adv(show: Boolean, pref: PreferenceData<String>, title: String, subtitle: String): Item? =
+    /**
+     * 進階數值輸入：showAdvanced 關時回 null（不顯示）。subtitle 已含說明 + 「。現值：%s」尾綴。
+     * [badge]＝進階標記文字（標題旁小 badge，與一般選項區分；所有 adv() 皆進階故一律傳入）。
+     */
+    private fun adv(
+        show: Boolean,
+        pref: PreferenceData<String>,
+        title: String,
+        subtitle: String,
+        badge: String?,
+    ): Item? =
         if (!show) {
             null
         } else {
-            Preference.PreferenceItem.EditTextPreference(preference = pref, title = title, subtitle = subtitle)
+            Preference.PreferenceItem.EditTextPreference(
+                preference = pref,
+                title = title,
+                subtitle = subtitle,
+                titleBadge = badge,
+            )
         }
 }

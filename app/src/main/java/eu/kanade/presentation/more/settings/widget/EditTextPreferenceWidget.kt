@@ -32,11 +32,13 @@ fun EditTextPreferenceWidget(
     icon: ImageVector?,
     value: String,
     onConfirm: suspend (String) -> Boolean,
+    titleBadge: String? = null,
 ) {
     var isDialogShown by remember { mutableStateOf(false) }
 
     TextPreferenceWidget(
         title = title,
+        titleBadge = titleBadge,
         subtitle = subtitle?.format(value),
         icon = icon,
         onPreferenceClick = { isDialogShown = true },

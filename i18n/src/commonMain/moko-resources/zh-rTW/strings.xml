@@ -1036,6 +1036,29 @@
     <string name="pref_translation_min_prob_desc">0–1，低於此丟該行；太低收雜訊亂碼、太高漏字</string>
     <string name="pref_translation_ignore_sfx">跳過狀聲詞 SFX</string>
     <string name="pref_translation_ignore_sfx_summary">開啟後跳過彩色/裝飾性狀聲詞、不翻譯它們（保留原味）。只是不翻，不會把它們擦掉、仍留在原圖上。</string>
+    <!-- Yakuyomi：進階 badge + 進階辨識參數（OCR 裁切 / 偵測器） -->
+    <string name="pref_advanced_badge">進階</string>
+    <string name="pref_translation_strip_pad">OCR 裁切外擴 px</string>
+    <string name="pref_translation_strip_pad_desc">OCR 裁切前把偵測框外擴 N px，救「框太瘦切字→CTC 空讀→漏氣泡」。0–12；4 是實測甜蜜點，8 以上退步</string>
+    <string name="pref_translation_detect_unsharp">偵測輸入銳利化</string>
+    <string name="pref_translation_detect_unsharp_summary">把送進偵測的影像銳利化。邊際效益、對某些頁反而更差，預設關</string>
+    <string name="pref_translation_use_bicubic">OCR 裁切內插法</string>
+    <string name="pref_translation_use_bicubic_desc">OCR 裁切的重取樣方式。bicubic 救小假名（句尾否定不會翻成相反意思），比 bilinear 略慢</string>
+    <string name="pref_translation_interp_bicubic">bicubic（建議）</string>
+    <string name="pref_translation_interp_bilinear">bilinear</string>
+    <string name="pref_translation_dbnet_size">偵測辨識尺寸 px</string>
+    <string name="pref_translation_dbnet_size_desc">偵測解析度；768–1536。1024 是甜蜜點；960 字糙、1280+ 較慢又字誤、768 漏字</string>
+    <!-- Yakuyomi：更多進階參數（OCR 銳化 / 去字解析度+膨脹 / 縱中橫 / LLM 溫度） -->
+    <string name="pref_translation_ocr_unsharp">OCR 裁切銳利化</string>
+    <string name="pref_translation_ocr_unsharp_summary">OCR 裁切前銳化 strip，抵銷把窄直行上採樣的模糊、救回本會被糊掉漏讀的小假名。預設開（對本就讀對的乾淨行無副作用）；關掉退回無銳化，較糊、小假名可能漏讀。</string>
+    <string name="pref_translation_tile_size">去字解析度 px</string>
+    <string name="pref_translation_tile_size_desc">整頁 AI 去字的解析度。768 是畫質/記憶體的甜蜜點；512 忙碌區會糊；1024 記憶體 2× 且貼到翻譯本就設下的天花板。</string>
+    <string name="pref_translation_mask_dilate">遮罩膨脹</string>
+    <string name="pref_translation_mask_dilate_desc">去字遮罩往外長多少（值 ÷ 2＝半徑 px）；8–40。漫畫壓在臉/頭髮上的字有白邊，遮罩要夠厚才吞得掉、否則去字後留白塊。調太小會殘白塊；24 是實測值。</string>
+    <string name="pref_translation_tate_chu_yoko">縱中橫</string>
+    <string name="pref_translation_tate_chu_yoko_summary">直排時把連續短 ASCII 串（2–4 字的數字/字母，或「!?」）在一格內水平並排，年齡「20」或「!?」不再上下堆疊歪頭讀。只影響直排內的 ASCII、CJK 不變。</string>
+    <string name="pref_translation_temperature">LLM 溫度</string>
+    <string name="pref_translation_temperature_desc">LLM 取樣溫度；0.0–1.0。低（往 0）＝更一致、更貼字直譯；高（往 1）＝更靈活但可能偏離原意。多數人不用動</string>
     <string name="pref_translation_group_diagnostics">診斷（進階）</string>
     <string name="pref_translation_diagnostic_log">診斷紀錄</string>
     <string name="pref_translation_diagnostic_log_summary">把翻譯引擎各階段記錄到私有檔案，用來抓 logcat 與內建 crash log 都抓不到的原生或記憶體不足（OOM）閃退。會影響效能，只在需要診斷時開啟。</string>
@@ -1062,11 +1085,11 @@
     <string name="quickstart_what_title">在裝置上跑、自帶金鑰</string>
     <string name="quickstart_what_body">偵測、OCR、去字全在你的手機上完成。只有 OCR 後的文字會送到你選的 LLM 服務商——用你自己的 API key 與端點。你的圖片，以及偵測／OCR／去字這幾步，都不會離開裝置。本 app 不加任何分析／遙測。\n\n雲端翻譯可能產生費用，由你的服務商計費。按下最後的「了解」即表示你了解這點。</string>
     <string name="quickstart_setup_title">準備好三件事</string>
-    <string name="quickstart_setup_body">1. 選一個服務商並貼上 API key。\n設定 → 翻譯 → 供應商。預設是 DeepSeek；OpenAI、Gemini、Groq、Qwen、OpenRouter 與自架（Sakura／自訂）也都可用。把服務商後台的金鑰貼進來——它會在這台裝置上加密。若是自架／自訂服務商，還要填「API base」。\n\n2. 取得模型（偵測、OCR、去字）。\n設定 → 翻譯 → 模型 → 下載翻譯模型（約 92 MB，會驗證）。或自備模型：把模型檔放到你儲存位置裡的 models 資料夾。「翻譯模型狀態」列會顯示每顆的 ✓／✗。\n\n3. 選語言。\n預設是日文 → 繁體中文（台灣）。目標／來源語言隨時可改。</string>
+    <string name="quickstart_setup_body">1. 選一個服務商並貼上 API key。\n設定 → 翻譯 → 供應商。預設是 DeepSeek；OpenAI、Gemini、Groq、Qwen、OpenRouter 與自架（Sakura／自訂）也都可用。把服務商後台的金鑰貼進來——它會在這台裝置上加密。若是自架／自訂服務商，還要填「API base」。\n\n2. 取得模型（偵測、OCR、去字）。\n設定 → 翻譯 → 模型 → 下載翻譯模型（約 200 MB，會驗證）。或自備模型：把模型檔放到你儲存位置裡的 models 資料夾。「翻譯模型狀態」列會顯示每顆的 ✓／✗。\n\n3. 選語言。\n預設是日文 → 繁體中文（台灣）。目標／來源語言隨時可改。</string>
     <string name="quickstart_workflows_title">兩種翻譯方式</string>
-    <string name="quickstart_workflows_body">下載時翻譯——打開「下載時翻譯章節」。之後每一話下載完，就會在背景自動翻譯，頁面圖片就地置換。適合先下載、晚點再讀。\n\n即時翻譯（邊讀邊翻）——打開「即時翻譯」這個獨立開關。當你開啟未翻的章節時，它會在背景翻譯，頁面翻好就換上（左上角會有「翻譯中 X/Y」的小標）。開啟未下載的章節會先下載再翻。用「即時翻譯分類」把它限定在（或排除）某些書庫分類。\n\n這兩個開關彼此獨立：可只用一個、兩個都用、或都不用。</string>
+    <string name="quickstart_workflows_body">下載時翻譯——打開「下載時翻譯章節」。之後每一話下載完，就會在背景自動翻譯，頁面圖片就地置換。適合先下載、晚點再讀。\n\n即時翻譯（邊讀邊翻）——打開「即時翻譯」這個獨立開關。當你開啟未翻的章節時，它會在背景翻譯，頁面翻好就換上（左上角會有「翻譯中 X/Y」的小標）。開啟未下載的章節會先下載再翻。用「即時翻譯分類」把它限定在（或排除）某些書庫分類。\n\n這兩個開關彼此獨立：可只用一個、兩個都用、或都不用——而且兩者都受頁面最上方的「啟用翻譯」總開關管控，總開關關掉就完全不翻。</string>
     <string name="quickstart_manual_title">手動翻譯與管理</string>
-    <string name="quickstart_manual_body">手動翻譯——在某本漫畫的章節清單，已下載的章節會顯示翻譯鈕。翻譯時圖示轉圈，完成變成主色，出錯變紅色。長按可多選，再按底部的「翻譯」。\n\n翻譯佇列——更多 →「翻譯佇列」列出所有進行中的項目與狀態。可在那裡暫停／繼續、取消，或重試失敗的章節。\n\n重繪——已經翻好某章、但想要更乾淨的去字？在設定改去字方法（會問你要不要更新既有章節），或長按頁面 →「重繪」。不需重新 OCR 或重新翻譯。</string>
+    <string name="quickstart_manual_body">手動翻譯——在某本漫畫的章節清單，已下載的章節會顯示翻譯鈕。翻譯時圖示轉圈，完成變成主色，出錯變紅色。長按可多選，再按底部的「翻譯」。\n\n翻譯佇列——底部導覽列的「翻譯」分頁列出所有進行中的項目與狀態。可在那裡暫停／繼續、取消，或重試失敗的章節。\n\n重繪——已經翻好某章、但想要更乾淨的去字？在設定改去字方法（會問你要不要更新既有章節），或長按頁面 →「重繪」。不需重新 OCR 或重新翻譯。</string>
     <string name="quickstart_action_done">了解</string>
     <string name="label_translation_queue">翻譯佇列</string>
     <string name="label_translation">翻譯</string>

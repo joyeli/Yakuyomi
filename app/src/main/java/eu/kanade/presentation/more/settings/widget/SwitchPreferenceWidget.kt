@@ -16,6 +16,7 @@ import eu.kanade.presentation.theme.TachiyomiPreviewTheme
 fun SwitchPreferenceWidget(
     modifier: Modifier = Modifier,
     title: String,
+    titleBadge: String? = null,
     subtitle: String? = null,
     icon: ImageVector? = null,
     checked: Boolean = false,
@@ -24,6 +25,7 @@ fun SwitchPreferenceWidget(
     TextPreferenceWidget(
         modifier = modifier,
         title = title,
+        titleBadge = titleBadge,
         subtitle = subtitle,
         icon = icon,
         widget = {

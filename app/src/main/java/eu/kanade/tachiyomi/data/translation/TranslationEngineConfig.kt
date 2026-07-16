@@ -227,6 +227,8 @@ object TranslationEngineConfig {
         val chatUrl = LlmProviders.chatUrlOf(preset, prefs.apiBase.get())
         // 語言對（預設日→繁中）。改目標語言就清掉引擎內建的日→繁中 few-shot，免得範例語言跟新目標衝突、把輸出帶偏。
         val target = prefs.targetLangName.get()
+        // LLM 取樣溫度（存字串、parse + clamp 到 0.0–1.0；預設 0.3）。
+        val temperature = prefs.temperature.get().toDoubleOrNull()?.coerceIn(0.0, 1.0) ?: 0.3
         var translatorCfg = TranslatorConfig(
             provider = preset.id,
             model = prefs.model.get().ifBlank { preset.defaultModel },
@@ -234,6 +236,7 @@ object TranslationEngineConfig {
             apiBase = chatUrl,
             toLangName = target,
             fromLangName = prefs.sourceLangName.get(),
+            temperature = temperature,
         )
         if (target != TranslationPreferences.DEFAULT_TARGET_LANG) {
             translatorCfg = translatorCfg.copy(sampleSource = "", sampleTarget = "")
@@ -263,11 +266,18 @@ object TranslationEngineConfig {
         return EngineConfig(
             detector = DetectorConfig(
                 segThreshold = pf(prefs.segThreshold.get(), 0f, 1f, 0.12f),
+                // 進階辨識：偵測輸入銳利化（預設關）+ DBNet 辨識尺寸（768–1536，clamp）。
+                detectUnsharp = prefs.detectUnsharp.get(),
+                dbnetInputSize = prefs.dbnetSize.get().coerceIn(768, 1536),
             ),
             ocr = OcrConfig(
                 minProb = pf(prefs.minProb.get(), 0f, 1f, 0.5f),
                 // 跳過狀聲詞 SFX：開→給內建門檻 24（1–50 中段，不讓使用者調數字）、關→0。
                 ignoreBubble = if (prefs.ignoreSfx.get()) 24 else 0,
+                // 進階辨識：OCR 裁切外擴（0–12，clamp）+ 內插法（bicubic/bilinear）+ strip 銳化（預設開）。
+                stripPad = prefs.stripPad.get().coerceIn(0, 12),
+                useBicubic = prefs.useBicubic.get() == "bicubic",
+                ocrUnsharp = prefs.ocrUnsharp.get(),
                 concurrent = true,
                 concurrency = ocrConcurrency,
             ),
@@ -275,6 +285,9 @@ object TranslationEngineConfig {
             inpainter = InpainterConfig(
                 method = method,
                 bboxPad = pi(prefs.bboxPad.get(), 0, 64, 16),
+                // 進階去字：整頁去字解析度（三檔 512/768/1024，clamp 保險）+ 遮罩膨脹（8–40，存 Int→Float）。
+                tileSize = prefs.tileSize.get().coerceIn(512, 1024),
+                maskDilate = prefs.maskDilate.get().coerceIn(8, 40).toFloat(),
             ),
             render = RenderConfig(
                 orientation = orient,
@@ -286,6 +299,8 @@ object TranslationEngineConfig {
                 colTrim = pi(prefs.colTrim.get(), 0, 10, 3),
                 rowTrim = pi(prefs.rowTrim.get(), 0, 10, 3),
                 fontScale = pf(prefs.fontScale.get(), 0.3f, 1.5f, 0.85f),
+                // 進階排版：縱中橫（直排短 ASCII 串水平並排，預設開）。
+                tateChuYoko = prefs.tateChuYoko.get(),
             ),
         )
     }

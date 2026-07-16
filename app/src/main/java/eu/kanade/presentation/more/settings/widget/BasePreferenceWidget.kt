@@ -8,6 +8,7 @@ import androidx.compose.animation.core.repeatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -38,6 +40,7 @@ import kotlin.time.Duration.Companion.seconds
 internal fun BasePreferenceWidget(
     modifier: Modifier = Modifier,
     title: String? = null,
+    titleBadge: String? = null,
     subcomponent: @Composable (ColumnScope.() -> Unit)? = null,
     icon: @Composable (() -> Unit)? = null,
     onClick: (() -> Unit)? = null,
@@ -65,14 +68,23 @@ internal fun BasePreferenceWidget(
                 .padding(vertical = PrefsVerticalPadding),
         ) {
             if (!title.isNullOrBlank()) {
-                Text(
+                Row(
                     modifier = Modifier.padding(horizontal = PrefsHorizontalPadding),
-                    text = title,
-                    overflow = TextOverflow.Ellipsis,
-                    maxLines = 2,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontSize = TitleFontSize,
-                )
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        modifier = Modifier.weight(1f, fill = false),
+                        text = title,
+                        overflow = TextOverflow.Ellipsis,
+                        maxLines = 2,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontSize = TitleFontSize,
+                    )
+                    if (titleBadge != null) {
+                        AdvancedBadge(text = titleBadge)
+                    }
+                }
             }
             subcomponent?.invoke(this)
         }
@@ -82,6 +94,22 @@ internal fun BasePreferenceWidget(
                 content = { widget() },
             )
         }
+    }
+}
+
+/** Yakuyomi：進階選項標題旁的小 badge（區分進階與一般選項，避免展開進階時混淆）。 */
+@Composable
+private fun AdvancedBadge(text: String) {
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        shape = MaterialTheme.shapes.small,
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+        )
     }
 }
 

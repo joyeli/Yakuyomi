@@ -18,6 +18,10 @@ sealed class Preference {
         abstract val icon: ImageVector?
         abstract val onValueChanged: suspend (value: T) -> R
 
+        // Yakuyomi：進階選項標題旁的小 badge 文字（如「進階」）。null＝一般選項不顯示。
+        // 各子類在建構子 override 此欄（default null 不影響現有所有 preference）。
+        open val titleBadge: String? = null
+
         /**
          * A basic [PreferenceItem] that only displays texts.
          */
@@ -25,6 +29,7 @@ sealed class Preference {
             override val title: String,
             override val subtitle: String? = null,
             override val enabled: Boolean = true,
+            override val titleBadge: String? = null,
             val widget: @Composable (() -> Unit)? = null,
             val onClick: (() -> Unit)? = null,
         ) : PreferenceItem<String, Unit>() {
@@ -40,6 +45,7 @@ sealed class Preference {
             override val title: String,
             override val subtitle: String? = null,
             override val enabled: Boolean = true,
+            override val titleBadge: String? = null,
             override val onValueChanged: suspend (value: Boolean) -> Boolean = { true },
         ) : PreferenceItem<Boolean, Boolean>() {
             override val icon: ImageVector? = null
@@ -56,6 +62,7 @@ sealed class Preference {
             val valueRange: IntProgression = 0..1,
             @IntRange(from = 0) val steps: Int = with(valueRange) { (last - first) - 1 },
             override val enabled: Boolean = true,
+            override val titleBadge: String? = null,
             override val onValueChanged: suspend (value: Int) -> Unit = {},
         ) : PreferenceItem<Int, Unit>() {
             override val icon: ImageVector? = null
@@ -76,6 +83,7 @@ sealed class Preference {
             val description: String? = null,
             override val icon: ImageVector? = null,
             override val enabled: Boolean = true,
+            override val titleBadge: String? = null,
             override val onValueChanged: suspend (value: T) -> Boolean = { true },
         ) : PreferenceItem<T, Boolean>() {
             internal fun internalSet(value: Any) = preference.set(value as T)
@@ -122,6 +130,7 @@ sealed class Preference {
                 },
             override val icon: ImageVector? = null,
             override val enabled: Boolean = true,
+            override val titleBadge: String? = null,
             override val onValueChanged: suspend (value: Set<String>) -> Boolean = { true },
         ) : PreferenceItem<Set<String>, Boolean>()
 
@@ -133,6 +142,7 @@ sealed class Preference {
             override val title: String,
             override val subtitle: String? = "%s",
             override val enabled: Boolean = true,
+            override val titleBadge: String? = null,
             override val onValueChanged: suspend (value: String) -> Boolean = { true },
         ) : PreferenceItem<String, Boolean>() {
             override val icon: ImageVector? = null
