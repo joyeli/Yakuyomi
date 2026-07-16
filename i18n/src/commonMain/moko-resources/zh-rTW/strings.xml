@@ -1091,6 +1091,73 @@
     <string name="quickstart_manual_title">手動翻譯與管理</string>
     <string name="quickstart_manual_body">手動翻譯——在某本漫畫的章節清單，已下載的章節會顯示翻譯鈕。翻譯時圖示轉圈，完成變成主色，出錯變紅色。長按可多選，再按底部的「翻譯」。\n\n翻譯佇列——底部導覽列的「翻譯」分頁列出所有進行中的項目與狀態。可在那裡暫停／繼續、取消，或重試失敗的章節。\n\n重繪——已經翻好某章、但想要更乾淨的去字？在設定改去字方法（會問你要不要更新既有章節），或長按頁面 →「重繪」。不需重新 OCR 或重新翻譯。</string>
     <string name="quickstart_action_done">了解</string>
+    <!-- 整體增強導覽（相對 mihon 的所有強化，可滑動瀏覽） -->
+    <string name="enhancements_guide_title">Yakuyomi 增強功能</string>
+    <string name="enhancements_guide_about_summary">探索相對 mihon 的所有強化</string>
+    <string name="enhancements_guide_open">查看全部增強</string>
+    <string name="enhancements_guide_action_done">完成</string>
+    <!-- 頁 1：翻譯 -->
+    <string name="enhancements_guide_translation_title">翻譯</string>
+    <string name="enhancements_guide_tr_inpaint_title">真去字重建，不是疊字</string>
+    <string name="enhancements_guide_tr_inpaint_desc">其他 fork 是在文字上蓋一塊色塊、或把新字疊上去；Yakuyomi 把原文擦掉、重建畫面，再把譯文排回氣泡裡。</string>
+    <string name="enhancements_guide_tr_ondevice_title">全裝置端，只有 LLM 離裝置</string>
+    <string name="enhancements_guide_tr_ondevice_desc">偵測、OCR、去字全在你的手機上跑；只有 OCR 出來的文字送到雲端 LLM。你的圖片永遠不出手機。</string>
+    <string name="enhancements_guide_tr_workflows_title">兩種工作流</string>
+    <string name="enhancements_guide_tr_workflows_desc">下載時整章在背景翻，或邊讀邊即時翻。</string>
+    <string name="enhancements_guide_tr_byok_title">自備服務商與金鑰</string>
+    <string name="enhancements_guide_tr_byok_desc">任何 OpenAI 相容 LLM（預設 DeepSeek；OpenAI、Gemini、Groq、Qwen、OpenRouter、自架），金鑰每家一格加密。</string>
+    <string name="enhancements_guide_tr_safe_title">絕不比原圖更糟</string>
+    <string name="enhancements_guide_tr_safe_desc">只有翻成功才覆蓋該頁——絕不用更糟的東西蓋掉原圖。</string>
+    <!-- 頁 2：閱讀器 -->
+    <string name="enhancements_guide_reader_title">閱讀器</string>
+    <string name="enhancements_guide_rd_webtoon_title">自動 webtoon 偵測</string>
+    <string name="enhancements_guide_rd_webtoon_desc">長條直幅自動切成垂直連貫閱讀；per-manga 的選擇永遠優先。</string>
+    <string name="enhancements_guide_rd_chapters_title">閱讀器內章節清單</string>
+    <string name="enhancements_guide_rd_chapters_desc">在閱讀器裡從清單跳到任一章，不必退回詳情頁。</string>
+    <string name="enhancements_guide_rd_eink_title">墨水屏模式</string>
+    <string name="enhancements_guide_rd_eink_desc">一鍵開啟灰階、白底主題、與翻頁白閃刷新，給電子閱讀器用。</string>
+    <string name="enhancements_guide_rd_notif_title">進度通知帶封面</string>
+    <string name="enhancements_guide_rd_notif_desc">背景翻譯的通知顯示該章完整封面，不只是個小圖示。</string>
+    <!-- 頁 3：書庫 -->
+    <string name="enhancements_guide_library_title">書庫</string>
+    <string name="enhancements_guide_lb_reorder_title">拖放排序</string>
+    <string name="enhancements_guide_lb_reorder_desc">「手動」排序：長按封面拖曳設定自己的順序，每分類各記。</string>
+    <string name="enhancements_guide_lb_collapse_title">單清單可摺疊分類</string>
+    <string name="enhancements_guide_lb_collapse_desc">把整個書庫顯示成單一清單，分類標頭黏性置頂、點一下收合。</string>
+    <string name="enhancements_guide_lb_covertheme_title">依封面配色主題</string>
+    <string name="enhancements_guide_lb_covertheme_desc">可選用漫畫封面的顏色為其詳情頁上色。</string>
+    <string name="enhancements_guide_lb_badge_title">已翻徽章與篩選</string>
+    <string name="enhancements_guide_lb_badge_desc">封面徽章計每本已翻章數；可依翻譯狀態篩選書庫。</string>
+    <string name="enhancements_guide_lb_stats_title">閱讀與翻譯統計</string>
+    <string name="enhancements_guide_lb_stats_desc">每日閱讀活動與翻譯用量，皆可切今天／近 7 天／近 30 天／全部。</string>
+    <!-- 頁 4：瀏覽與追進度 -->
+    <string name="enhancements_guide_browse_title">瀏覽與追進度</string>
+    <string name="enhancements_guide_br_filter_title">全域瀏覽篩選</string>
+    <string name="enhancements_guide_br_filter_desc">把任一來源的結果依「已收藏／已開卷」就地過濾，不重抓、即時生效。</string>
+    <string name="enhancements_guide_br_anchor_title">每來源追更新錨點</string>
+    <string name="enhancements_guide_br_anchor_desc">標記上次處理到哪，背景任務就把「最新」清單一路爬到錨點——防 ban、跨被殺／重開機都能續傳——把錨點以上全部存成離線快照。</string>
+    <string name="enhancements_guide_br_snapshot_title">離線快照</string>
+    <string name="enhancements_guide_br_snapshot_desc">把某來源當下載入的清單存起來，之後零連線離線重看。</string>
+    <string name="enhancements_guide_br_bansafe_title">防 ban 節奏</string>
+    <string name="enhancements_guide_br_bansafe_desc">不提前連抓下一頁，並用隨機抖動延遲取代固定間隔，讓敏感來源不封你。</string>
+    <!-- 頁 5：搜尋 -->
+    <string name="enhancements_guide_search_title">搜尋</string>
+    <string name="enhancements_guide_se_floating_title">浮動搜尋</string>
+    <string name="enhancements_guide_se_floating_desc">單手搜尋膠囊，閒置時縮成小球；長壓小球彈出快捷選單。</string>
+    <string name="enhancements_guide_se_saved_title">已存搜尋與進階語法</string>
+    <string name="enhancements_guide_se_saved_desc">把搜尋存起來日後重用；「,」= AND、「-」= 排除，並有 genre: / author: / artist: 前綴做精準查詢。</string>
+    <string name="enhancements_guide_se_compactnav_title">精簡導覽列</string>
+    <string name="enhancements_guide_se_compactnav_desc">可選僅圖示、更緊緻的底部導覽列。</string>
+    <!-- 頁 6：大螢幕與折疊機 -->
+    <string name="enhancements_guide_largescreen_title">大螢幕與折疊機</string>
+    <string name="enhancements_guide_ls_grid_title">自適應網格封面大小</string>
+    <string name="enhancements_guide_ls_grid_desc">書庫與探索的欄數依實際螢幕寬度自動調整（手機、平板、折疊機折／展、分割畫面）。</string>
+    <string name="enhancements_guide_ls_doublepage_title">對開閱讀</string>
+    <string name="enhancements_guide_ls_doublepage_desc">大螢幕兩頁並排；跨頁大圖單獨佔整版，並有手動「位移」鈕。</string>
+    <string name="enhancements_guide_ls_tablet_title">平板閱讀模式</string>
+    <string name="enhancements_guide_ls_tablet_desc">在大螢幕／展開時可套用另一種閱讀模式，跟著系統「平板介面」設定切換。</string>
+    <string name="enhancements_guide_ls_desc_title">可摺疊簡介</string>
+    <string name="enhancements_guide_ls_desc_desc">可選漫畫簡介預設展開或摺疊。</string>
     <string name="label_translation_queue">翻譯佇列</string>
     <string name="label_translation">翻譯</string>
     <string name="translation_retap_paused_unloaded">已暫停佇列並卸載翻譯引擎</string>

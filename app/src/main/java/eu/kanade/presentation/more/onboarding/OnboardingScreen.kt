@@ -29,6 +29,7 @@ fun OnboardingScreen(
     onComplete: () -> Unit,
     onRestoreBackup: () -> Unit,
     onOpenTranslation: () -> Unit,
+    onOpenGuide: () -> Unit,
 ) {
     val slideDistance = rememberSlideDistance()
 
@@ -39,7 +40,7 @@ fun OnboardingScreen(
             StorageStep(),
             PermissionStep(),
             TranslationStep(onOpenTranslation = onOpenTranslation),
-            HighlightsStep(),
+            HighlightsStep(onOpenGuide = onOpenGuide),
             GuidesStep(onRestoreBackup = onRestoreBackup),
         )
     }

@@ -3,6 +3,7 @@ package eu.kanade.presentation.more.onboarding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
@@ -12,6 +13,7 @@ import androidx.compose.material.icons.outlined.QueryStats
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -30,7 +32,9 @@ import tachiyomi.presentation.core.i18n.stringResource
  * 翻譯有自己的專頁（[TranslationStep]），這裡只放非翻譯類的招牌功能。
  * [isComplete]=true → 純資訊、不擋「下一步」。
  */
-internal class HighlightsStep : OnboardingStep {
+internal class HighlightsStep(
+    private val onOpenGuide: () -> Unit,
+) : OnboardingStep {
 
     override val isComplete: Boolean = true
 
@@ -64,6 +68,12 @@ internal class HighlightsStep : OnboardingStep {
                 title = MR.strings.onboarding_highlights_stats_title,
                 desc = MR.strings.onboarding_highlights_stats_desc,
             )
+            OutlinedButton(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = onOpenGuide,
+            ) {
+                Text(stringResource(MR.strings.enhancements_guide_open))
+            }
         }
     }
 
@@ -98,6 +108,6 @@ internal class HighlightsStep : OnboardingStep {
 @Composable
 private fun HighlightsStepPreview() {
     TachiyomiPreviewTheme {
-        HighlightsStep().Content()
+        HighlightsStep(onOpenGuide = {}).Content()
     }
 }

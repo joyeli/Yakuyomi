@@ -315,6 +315,73 @@
     <string name="quickstart_manual_title">By hand, and keeping it tidy</string>
     <string name="quickstart_manual_body">Manual translate — on a manga\'s chapter list, downloaded chapters show a translate button. The icon spins while running, turns the accent colour when done, and red on error. Long-press to multi-select, then tap Translate in the bottom bar.\n\nTranslation queue — the Translation tab in the bottom navigation bar lists everything in progress with its status. Pause or resume, cancel, or retry failed chapters there.\n\nRe-render — already translated a chapter but want cleaner text removal? Change the method in Settings (you will be asked to update existing chapters), or long-press a page → Re-render. No re-OCR or re-translation needed.</string>
     <string name="quickstart_action_done">Got it</string>
+    <!-- Enhancements guide (a swipeable tour of everything this fork adds on top of mihon) -->
+    <string name="enhancements_guide_title">Yakuyomi enhancements</string>
+    <string name="enhancements_guide_about_summary">Everything this fork adds on top of mihon</string>
+    <string name="enhancements_guide_open">See all enhancements</string>
+    <string name="enhancements_guide_action_done">Done</string>
+    <!-- Page 1: Translation -->
+    <string name="enhancements_guide_translation_title">Translation</string>
+    <string name="enhancements_guide_tr_inpaint_title">Real inpainting, not overlays</string>
+    <string name="enhancements_guide_tr_inpaint_desc">Other forks paint a box over the text or stamp new text on top. Yakuyomi erases the original art, reconstructs it, then typesets the translation back into the bubble.</string>
+    <string name="enhancements_guide_tr_ondevice_title">On-device, only the LLM leaves</string>
+    <string name="enhancements_guide_tr_ondevice_desc">Detection, OCR and text removal all run on your phone; only the OCR\'d text is sent to the cloud LLM. Your images never leave the device.</string>
+    <string name="enhancements_guide_tr_workflows_title">Two workflows</string>
+    <string name="enhancements_guide_tr_workflows_desc">Translate whole chapters in the background on download, or live as you read.</string>
+    <string name="enhancements_guide_tr_byok_title">Your provider, your key</string>
+    <string name="enhancements_guide_tr_byok_desc">Any OpenAI-compatible LLM (DeepSeek by default; OpenAI, Gemini, Groq, Qwen, OpenRouter, self-hosted), with per-provider encrypted keys.</string>
+    <string name="enhancements_guide_tr_safe_title">Never worse than the original</string>
+    <string name="enhancements_guide_tr_safe_desc">A page is overwritten only when its translation succeeds — nothing is ever replaced with something worse.</string>
+    <!-- Page 2: Reader -->
+    <string name="enhancements_guide_reader_title">Reader</string>
+    <string name="enhancements_guide_rd_webtoon_title">Auto webtoon detection</string>
+    <string name="enhancements_guide_rd_webtoon_desc">Long vertical strips switch to continuous-vertical reading on their own; a per-manga choice always wins.</string>
+    <string name="enhancements_guide_rd_chapters_title">In-reader chapter list</string>
+    <string name="enhancements_guide_rd_chapters_desc">Jump to any chapter from a list inside the reader, without backing out to the details page.</string>
+    <string name="enhancements_guide_rd_eink_title">E-ink mode</string>
+    <string name="enhancements_guide_rd_eink_desc">One tap turns on grayscale, a white theme, and white-flash page refresh for e-readers.</string>
+    <string name="enhancements_guide_rd_notif_title">Cover in progress notifications</string>
+    <string name="enhancements_guide_rd_notif_desc">The background-translation notification shows the chapter\'s full cover, not just an icon.</string>
+    <!-- Page 3: Library -->
+    <string name="enhancements_guide_library_title">Library</string>
+    <string name="enhancements_guide_lb_reorder_title">Drag to reorder</string>
+    <string name="enhancements_guide_lb_reorder_desc">A \"Manual\" sort: long-press a cover and drag to set your own order, saved per category.</string>
+    <string name="enhancements_guide_lb_collapse_title">Single-list collapsible categories</string>
+    <string name="enhancements_guide_lb_collapse_desc">Show the whole library as one scrolling list with sticky, tap-to-collapse category headers.</string>
+    <string name="enhancements_guide_lb_covertheme_title">Cover-based theme</string>
+    <string name="enhancements_guide_lb_covertheme_desc">Optionally tint a manga\'s detail screen with colours pulled from its cover.</string>
+    <string name="enhancements_guide_lb_badge_title">Translated badge &amp; filter</string>
+    <string name="enhancements_guide_lb_badge_desc">A cover badge counts translated chapters; filter the library by translation state.</string>
+    <string name="enhancements_guide_lb_stats_title">Reading &amp; translation statistics</string>
+    <string name="enhancements_guide_lb_stats_desc">Per-day reading activity and translation usage, each with today / 7-day / 30-day / all views.</string>
+    <!-- Page 4: Browse & catch-up -->
+    <string name="enhancements_guide_browse_title">Browse &amp; catch-up</string>
+    <string name="enhancements_guide_br_filter_title">Global browse filter</string>
+    <string name="enhancements_guide_br_filter_desc">Filter any source\'s results by in-library / started reading, applied instantly without re-fetching.</string>
+    <string name="enhancements_guide_br_anchor_title">Per-source catch-up anchor</string>
+    <string name="enhancements_guide_br_anchor_desc">Mark your last-processed point; a background task crawls the Latest feed down to it — ban-safe and resumable across kills / reboots — saving everything above it as an offline snapshot.</string>
+    <string name="enhancements_guide_br_snapshot_title">Offline snapshot</string>
+    <string name="enhancements_guide_br_snapshot_desc">Save a source\'s loaded list and browse it later with zero network.</string>
+    <string name="enhancements_guide_br_bansafe_title">Ban-safe pacing</string>
+    <string name="enhancements_guide_br_bansafe_desc">No prefetching pages ahead, plus randomized jitter instead of a robotic fixed interval, so sensitive sources don\'t ban you.</string>
+    <!-- Page 5: Search -->
+    <string name="enhancements_guide_search_title">Search</string>
+    <string name="enhancements_guide_se_floating_title">Floating search</string>
+    <string name="enhancements_guide_se_floating_desc">A one-handed search pill that collapses to a ball when idle; long-press it for a quick menu.</string>
+    <string name="enhancements_guide_se_saved_title">Saved searches &amp; advanced syntax</string>
+    <string name="enhancements_guide_se_saved_desc">Save a search to recall later; \",\" = AND, \"-\" = exclude, and genre: / author: / artist: prefixes for precise queries.</string>
+    <string name="enhancements_guide_se_compactnav_title">Compact navigation bar</string>
+    <string name="enhancements_guide_se_compactnav_desc">An icons-only, tighter bottom navigation bar option.</string>
+    <!-- Page 6: Large screens & foldables -->
+    <string name="enhancements_guide_largescreen_title">Large screens &amp; foldables</string>
+    <string name="enhancements_guide_ls_grid_title">Adaptive grid cover size</string>
+    <string name="enhancements_guide_ls_grid_desc">Library and browse columns auto-fit the actual screen width — phone, tablet, folded / unfolded, split-screen.</string>
+    <string name="enhancements_guide_ls_doublepage_title">Double-page spread</string>
+    <string name="enhancements_guide_ls_doublepage_desc">Read two pages side by side on large screens; wide/spread pages get their own full-width page, with a manual shift button.</string>
+    <string name="enhancements_guide_ls_tablet_title">Tablet reading mode</string>
+    <string name="enhancements_guide_ls_tablet_desc">A separate reading mode for large screens / unfolded, following the system Tablet UI setting.</string>
+    <string name="enhancements_guide_ls_desc_title">Collapsible description</string>
+    <string name="enhancements_guide_ls_desc_desc">Choose whether a manga\'s description opens expanded or collapsed.</string>
     <string name="pref_translation_orientation">Text direction</string>
     <string name="pref_translation_orientation_auto">Auto (follow source)</string>
     <string name="pref_translation_orientation_vertical">Vertical (vertical-first)</string>

@@ -48,6 +48,10 @@ class OnboardingScreen : Screen() {
                 finishOnboarding()
                 navigator.push(SettingsScreen(SettingsScreen.Destination.Translation))
             },
+            onOpenGuide = {
+                finishOnboarding()
+                navigator.push(EnhancementsGuideScreen())
+            },
         )
     }
 }

@@ -32,6 +32,7 @@ import eu.kanade.presentation.util.Screen
 import eu.kanade.tachiyomi.BuildConfig
 import eu.kanade.tachiyomi.data.updater.AppUpdateChecker
 import eu.kanade.tachiyomi.data.updater.RELEASE_URL
+import eu.kanade.tachiyomi.ui.more.EnhancementsGuideScreen
 import eu.kanade.tachiyomi.ui.more.NewUpdateScreen
 import eu.kanade.tachiyomi.util.CrashLogUtil
 import eu.kanade.tachiyomi.util.lang.toDateTimestampString
@@ -100,6 +101,14 @@ object AboutScreen : Screen() {
                             val deviceInfo = CrashLogUtil(context).getDebugInfo()
                             context.copyToClipboard("Debug information", deviceInfo)
                         },
+                    )
+                }
+
+                item {
+                    TextPreferenceWidget(
+                        title = stringResource(MR.strings.enhancements_guide_title),
+                        subtitle = stringResource(MR.strings.enhancements_guide_about_summary),
+                        onPreferenceClick = { navigator.push(EnhancementsGuideScreen()) },
                     )
                 }
 
