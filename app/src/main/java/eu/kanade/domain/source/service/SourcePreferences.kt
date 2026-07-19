@@ -79,6 +79,12 @@ class SourcePreferences(
     // 探索「快照」：每 source 一份離線清單（JSON：時間戳 + 書本 url 順序）。空＝無快照。詳見 BrowseSnapshotStore 用法。
     fun browseSnapshot(sourceId: Long): Preference<String> = preferenceStore.getString("browse_snapshot_$sourceId", "")
 
+    // Yakuyomi：每 source 一份「已擷取的書本 url 集合」（單調累積、擷取過就永久記住）。
+    // 用 url 當 key（每來源穩定）→ 免疫 DB initialized 被來源清單重載打回 false（SManga.initialized 恆 false）+
+    // 免疫 ClearDatabase 換 mangaId。探索「已擷取」篩選（browseFilterFetched）讀此集合作持久判準。
+    fun browseFetchedUrls(sourceId: Long): Preference<Set<String>> =
+        preferenceStore.getStringSet("browse_fetched_$sourceId", emptySet())
+
     // Yakuyomi：自動載入到錨點的「續傳頁碼」（每 source）。>0＝上次抓到第幾頁、還沒到錨點，可續；0＝無/已完成（到錨點或到底）。
     fun browseAnchorResumePage(sourceId: Long): Preference<Int> =
         preferenceStore.getInt("browse_anchor_resume_page_$sourceId", 0)

@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.data.browse
 
 import android.content.Context
+import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.tachiyomi.data.notification.Notifications
 import eu.kanade.tachiyomi.util.system.notify
 import kotlinx.coroutines.CoroutineScope
@@ -16,6 +17,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import mihon.domain.source.interactor.UpdateMangaFromRemote
 import tachiyomi.core.common.i18n.stringResource
+import tachiyomi.core.common.preference.getAndSet
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.i18n.MR
@@ -37,6 +39,7 @@ class BrowseFetchManager(private val context: Context) {
 
     private val updateMangaFromRemote: UpdateMangaFromRemote = Injekt.get()
     private val sourceManager: SourceManager = Injekt.get()
+    private val sourcePreferences: SourcePreferences = Injekt.get()
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -71,6 +74,8 @@ class BrowseFetchManager(private val context: Context) {
         _state.value = State(running = true, sourceId = sourceId, done = 0, total = mangaList.size)
         job = scope.launch {
             val failed = mutableListOf<Long>()
+            // Yakuyomi：本批成功擷取的 url（存進 browseFetchedUrls 作「已擷取」篩選的持久判準；用 url 免疫 initialized clobber）。
+            val succeededUrls = mutableSetOf<String>()
             try {
                 mangaList.forEachIndexed { i, manga ->
                     if (!isActive) return@forEachIndexed
@@ -78,7 +83,7 @@ class BrowseFetchManager(private val context: Context) {
                         updateMangaFromRemote(manga, fetchDetails = true, fetchChapters = true, manualFetch = false)
                             .isSuccess
                     }.getOrDefault(false)
-                    if (!ok) failed.add(manga.id)
+                    if (ok) succeededUrls.add(manga.url) else failed.add(manga.id)
                     _state.update { it.copy(done = i + 1) }
                     // 節流防 ban：每本 2.0–4.0s（base 2s + 抖動 0–2s）。背景跑、不阻前景 ⇒ 取安全節奏（每本一個
                     // 詳情+章節請求、長清單可達數百，是最該放慢的路徑）。最後一筆不等。
@@ -91,6 +96,10 @@ class BrowseFetchManager(private val context: Context) {
                     }
                 }
             } finally {
+                // 持久累積本批成功的 url（併集，含被中止時已抓好的部分）。用 getAndSet 併入、不覆蓋既有集合。
+                if (succeededUrls.isNotEmpty()) {
+                    sourcePreferences.browseFetchedUrls(sourceId).getAndSet { it + succeededUrls }
+                }
                 val cancelled = !isActive
                 val doneCount = _state.value.done
                 val totalCount = _state.value.total

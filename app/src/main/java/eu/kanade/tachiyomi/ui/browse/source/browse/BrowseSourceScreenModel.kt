@@ -151,6 +151,10 @@ class BrowseSourceScreenModel(
     val browseFilterRead = sourcePreferences.browseFilterRead
     val browseFilterFetched = sourcePreferences.browseFilterFetched
 
+    // Yakuyomi：每 source「已擷取的書本 url 集合」（持久判準，見 SourcePreferences.browseFetchedUrls）。
+    // 擷取寫進來的 initialized=true 會被來源清單重載打回 false → 改以此集合作「已擷取」的可靠來源。
+    private val browseFetchedUrls = sourcePreferences.browseFetchedUrls(sourceId)
+
     // Yakuyomi：全局浮動搜尋開關（與書庫同一顆）。開＝探索頁改用頂部窄 bar＋右下浮動球。
     val floatingSearchBar = libraryPreferences.floatingSearchBar
 
@@ -237,7 +241,8 @@ class BrowseSourceScreenModel(
                 browseFilterFavorite.changes(),
                 browseFilterRead.changes(),
                 browseFilterFetched.changes(),
-            ) { pagingData, favFilter, readFilter, fetchedFilter ->
+                browseFetchedUrls.changes(),
+            ) { pagingData, favFilter, readFilter, fetchedFilter, fetchedUrls ->
                 pagingData.filter { stateFlow ->
                     val m = stateFlow.value
                     val passes = run passes@{
@@ -258,7 +263,9 @@ class BrowseSourceScreenModel(
                         // **不**用分頁項的 m.initialized——後者是「當前來源清單解析出的最新資訊」，對「剛擷取完但分頁快照未同步/
                         // 來源清單只回基本資訊」的情形會是舊的 false → 造成「明明擷取過卻濾不掉」。開卷過必定已擷取 → 併入 started。
                         if (fetchedFilter != TriState.DISABLED) {
+                            // fetchedUrls＝本 source 的持久「已擷取」集合（免疫 initialized 被來源清單重載打回 false）。
                             val fetched = started ||
+                                fetchedUrls.contains(m.url) ||
                                 m.initialized ||
                                 (m.id > 0L && getManga.await(m.id)?.initialized == true)
                             if (fetchedFilter == TriState.ENABLED_IS && !fetched) return@passes false
