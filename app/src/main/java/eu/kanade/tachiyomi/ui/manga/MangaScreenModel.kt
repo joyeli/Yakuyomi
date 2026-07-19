@@ -58,6 +58,7 @@ import mihon.domain.source.interactor.UpdateMangaFromRemote
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.preference.CheckboxState
 import tachiyomi.core.common.preference.TriState
+import tachiyomi.core.common.preference.getAndSet
 import tachiyomi.core.common.preference.mapAsCheckboxState
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.lang.launchNonCancellable
@@ -302,6 +303,15 @@ class MangaScreenModel(
                     manualFetch = manualFetch,
                 )
                     .getOrThrow()
+
+                // Yakuyomi：成功抓到詳情（updateMangaFromRemote 已把 manga.initialized 設 true）→ 把本書 url 記進所屬
+                // source 的「已擷取」持久集合，讓探索「已擷取」篩選對「只點進詳情頁看一眼」的書也永久成立（免疫 re-browse
+                // 把 DB initialized 打回 false，與 BrowseFetchManager 批次擷取同一機制）。只在真的抓詳情時記（fetchDetails）、
+                // 排除 local（本地漫畫無探索篩選意義）；集合單調累積、getAndSet 併集冪等（重複點同一本不出問題）。
+                if (fetchDetails && !state.manga.isLocal()) {
+                    sourcePreferences.browseFetchedUrls(state.manga.source)
+                        .getAndSet { it + state.manga.url }
+                }
 
                 if (manualFetch) {
                     downloadNewChapters(update.newChapters)
