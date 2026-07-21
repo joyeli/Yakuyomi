@@ -46,6 +46,9 @@ class UiPreferences(
     // Yakuyomi：漫畫詳情頁依封面取色的動態主題（預設關閉，避免影響全 app 觀感）。
     val coverBasedTheme: Preference<Boolean> = preferenceStore.getBoolean("pref_cover_based_theme", false)
 
+    // Yakuyomi：「以 WebView 開啟網址」的輸入歷史（JSON 字串陣列，最近的在最前、去重、上限見 MoreScreenModel）。
+    val lastWebViewUrls: Preference<String> = preferenceStore.getString("last_webview_urls", "[]")
+
     companion object {
         fun dateFormat(format: String): DateTimeFormatter = when (format) {
             "" -> DateTimeFormatter.ofLocalizedDate(FormatStyle.SHORT)
