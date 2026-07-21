@@ -25,7 +25,10 @@ fun DeleteLibraryMangaDialog(
         mutableStateOf(
             buildList<CheckboxState.State<StringResource>> {
                 add(CheckboxState.State.None(MR.strings.manga_from_library))
-                if (!containsLocalManga) {
+                if (containsLocalManga) {
+                    // Yakuyomi：local 漫畫可選「連同本機檔案一起刪除」（第二項語意＝刪該來源檔案）
+                    add(CheckboxState.State.None(MR.strings.delete_local_files))
+                } else {
                     add(CheckboxState.State.None(MR.strings.downloaded_chapters))
                 }
             },

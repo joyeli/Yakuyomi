@@ -65,6 +65,7 @@ import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.manga.model.MangaUpdate
 import tachiyomi.domain.manga.model.applyFilter
 import tachiyomi.domain.source.service.SourceManager
+import tachiyomi.domain.storage.service.StorageManager
 import tachiyomi.domain.track.interactor.GetTracksPerManga
 import tachiyomi.domain.track.model.Track
 import tachiyomi.source.local.isLocal
@@ -93,6 +94,7 @@ class LibraryScreenModel(
     private val downloadManager: DownloadManager = Injekt.get(),
     private val downloadCache: DownloadCache = Injekt.get(),
     private val translationCache: TranslationCache = Injekt.get(),
+    private val storageManager: StorageManager = Injekt.get(),
     private val trackerManager: TrackerManager = Injekt.get(),
 ) : StateScreenModel<LibraryScreenModel.State>(State()) {
 
@@ -614,9 +616,20 @@ class LibraryScreenModel(
 
             if (deleteChapters) {
                 mangas.forEach { manga ->
-                    val source = sourceManager.get(manga.source) as? HttpSource
-                    if (source != null) {
+                    val source = sourceManager.get(manga.source)
+                    if (source is HttpSource) {
                         downloadManager.deleteManga(manga, source)
+                    } else if (manga.isLocal() && manga.url.isNotBlank()) {
+                        // Yakuyomi：擷取存 local 的漫畫 → 刪 <local>/<manga.url> 整夾。
+                        // manga.url 對 local 來源＝該漫畫資料夾名（見 LocalSource.getSearchManga）。
+                        // UniFile.delete() 對目錄為遞迴刪除；null-safe + 非空 url 防誤刪 local 根。
+                        val mangaDir = storageManager.getLocalSourceDirectory()
+                            ?.findFile(manga.url)
+                            ?.takeIf { it.isDirectory }
+                        if (mangaDir != null) {
+                            mangaDir.delete()
+                            translationCache.invalidate(manga.id)
+                        }
                     }
                 }
             }

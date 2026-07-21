@@ -476,6 +476,7 @@
     <string name="action_display_single_list_collapsible">將所有分類顯示為單一可摺疊清單</string>
     <string name="manga_from_library">書櫃上的作品</string>
     <string name="downloaded_chapters">已下載的章節</string>
+    <string name="delete_local_files">連同本機檔案一起刪除</string>
     <string name="pref_dual_page_split">分割寬頁</string>
     <string name="pref_category_double_page">對開（展開）</string>
     <string name="pref_double_page_fill">對開填滿方式</string>
