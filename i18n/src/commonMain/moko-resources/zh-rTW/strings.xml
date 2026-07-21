@@ -307,6 +307,9 @@
     <string name="capture_continuous_start">連續擷取</string>
     <string name="capture_continuous_stop">停止</string>
     <string name="capture_continuous_count">已截 %1$d 頁</string>
+    <string name="capture_review_title">確認截圖</string>
+    <string name="capture_review_delete_selected">刪除 (%1$d)</string>
+    <string name="capture_review_empty">這一章沒有截圖</string>
     <string name="pref_category_library">書櫃</string>
     <string name="ext_obsolete">過舊</string>
     <string name="obsolete_extension_message">這個擴充套件已無法使用，其可能無法正確運作或導致本程式發生問題，建議解除安裝</string>

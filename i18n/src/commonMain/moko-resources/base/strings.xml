@@ -262,6 +262,9 @@
     <string name="capture_continuous_start">Continuous</string>
     <string name="capture_continuous_stop">Stop</string>
     <string name="capture_continuous_count">Captured %1$d</string>
+    <string name="capture_review_title">Review capture</string>
+    <string name="capture_review_delete_selected">Delete (%1$d)</string>
+    <string name="capture_review_empty">No captures in this chapter</string>
     <string name="action_start_downloading_now">Start downloading now</string>
     <string name="action_not_now">Not now</string>
     <string name="action_add_anyway">Add anyway</string>

@@ -43,6 +43,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import cafe.adriel.voyager.navigator.LocalNavigator
+import cafe.adriel.voyager.navigator.currentOrThrow
 import com.kevinnzou.web.AccompanistWebViewClient
 import com.kevinnzou.web.WebContent
 import com.kevinnzou.web.WebView
@@ -51,6 +53,7 @@ import com.kevinnzou.web.WebViewState
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.webview.captureWebView
 import eu.kanade.presentation.webview.findActivity
+import eu.kanade.tachiyomi.ui.capture.CaptureReviewScreen
 import eu.kanade.tachiyomi.ui.capture.CaptureSaveResult
 import eu.kanade.tachiyomi.ui.capture.FrameGrabber
 import eu.kanade.tachiyomi.util.system.setDefaultSettings
@@ -83,6 +86,7 @@ fun CaptureScreenContent(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val screenNavigator = LocalNavigator.currentOrThrow
 
     val navigator = remember { WebViewNavigator(scope) }
     val state = remember { WebViewState(WebContent.Url(initialUrl.ifBlank { "about:blank" })) }
@@ -139,10 +143,13 @@ fun CaptureScreenContent(
         }
     }
 
-    // 連續截圖 toggle：進行中→停止；否則檢查書名/章名後把「抓幀器」交給 ScreenModel 驅動迴圈。
+    // 連續截圖 toggle：進行中→停止（停止後跳確認頁檢視/剔除/儲存這次的截圖）；
+    // 否則檢查書名/章名後把「抓幀器」交給 ScreenModel 驅動迴圈。
+    // 只有使用者「按停止」才跳確認頁；生命週期 ON_STOP / onDispose 直接呼叫 onStopContinuous、不跳。
     fun toggleContinuous() {
         if (continuousRunning) {
             onStopContinuous()
+            screenNavigator.push(CaptureReviewScreen(bookName.trim(), chapterName.trim()))
             return
         }
         if (bookName.isBlank() || chapterName.isBlank()) {
