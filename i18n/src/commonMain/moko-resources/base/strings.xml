@@ -252,6 +252,13 @@
     <string name="action_capture_page">Capture page</string>
     <string name="webview_capture_dialog_title">Page capture</string>
     <string name="webview_capture_failed">Capture failed</string>
+    <!-- Yakuyomi: capture manga (screenshot -> local source) -->
+    <string name="capture_manga">Capture manga</string>
+    <string name="capture_book_name">Manga title</string>
+    <string name="capture_chapter_name">Chapter</string>
+    <string name="capture_missing_name">Enter a manga title and chapter first</string>
+    <string name="capture_go">Go</string>
+    <string name="capture_saved">Saved page %1$d</string>
     <string name="action_start_downloading_now">Start downloading now</string>
     <string name="action_not_now">Not now</string>
     <string name="action_add_anyway">Add anyway</string>

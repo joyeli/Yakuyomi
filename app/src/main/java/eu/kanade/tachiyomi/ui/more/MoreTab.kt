@@ -24,6 +24,7 @@ import eu.kanade.presentation.util.Tab
 import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.translation.TranslationManager
+import eu.kanade.tachiyomi.ui.capture.CaptureScreen
 import eu.kanade.tachiyomi.ui.category.CategoryScreen
 import eu.kanade.tachiyomi.ui.download.DownloadQueueScreen
 import eu.kanade.tachiyomi.ui.home.HomeScreen
@@ -95,6 +96,8 @@ data object MoreTab : Tab {
             onOpenUrlInWebView = { url ->
                 navigator.push(WebViewScreen(url = url, initialTitle = null, sourceId = null))
             },
+            // Yakuyomi：擷取漫畫入口（截 WebView 頁 → 存 LocalSource）。
+            onOpenCapture = { navigator.push(CaptureScreen()) },
             // Yakuyomi：網址輸入歷史（帶出歷史清單 + 逐筆刪除）。
             webViewUrlHistoryProvider = { screenModel.webViewUrlHistory() },
             onAddWebViewUrl = { screenModel.addWebViewUrl(it) },

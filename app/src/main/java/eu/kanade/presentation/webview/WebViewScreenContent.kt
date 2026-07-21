@@ -1,17 +1,9 @@
 package eu.kanade.presentation.webview
 
-import android.app.Activity
 import android.content.Context
-import android.content.ContextWrapper
 import android.content.pm.ApplicationInfo
 import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Rect
-import android.os.Handler
-import android.os.Looper
 import android.os.Message
-import android.view.PixelCopy
-import android.view.Window
 import android.webkit.CookieManager
 import android.webkit.JsPromptResult
 import android.webkit.JsResult
@@ -490,75 +482,7 @@ fun WebViewScreenContent(
  */
 private class CaptureResult(val bitmap: Bitmap, val file: File?)
 
-/**
- * Yakuyomi B0 spike：從 Compose 的 [Context] 往上找 [Activity]（PixelCopy 需要 Activity 的 window）。
- */
-private fun Context.findActivity(): Activity? {
-    var ctx: Context? = this
-    while (ctx is ContextWrapper) {
-        if (ctx is Activity) return ctx
-        ctx = ctx.baseContext
-    }
-    return null
-}
-
-/**
- * Yakuyomi B0 spike：截 WebView 內容。首選 [PixelCopy]（抓合成後的實際像素、含硬體加速層），
- * 失敗或拿不到 window 時退回 [WebView.draw]。回呼一律在主執行緒；截不到回傳 null。
- */
-private fun captureWebView(
-    webView: WebView?,
-    window: Window?,
-    onResult: (Bitmap?) -> Unit,
-) {
-    if (webView == null || webView.width <= 0 || webView.height <= 0) {
-        onResult(null)
-        return
-    }
-    val width = webView.width
-    val height = webView.height
-    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-
-    fun drawFallback(): Bitmap? = try {
-        webView.draw(Canvas(bitmap))
-        bitmap
-    } catch (e: Throwable) {
-        if (!bitmap.isRecycled) bitmap.recycle()
-        null
-    }
-
-    if (window != null) {
-        val location = IntArray(2)
-        webView.getLocationInWindow(location)
-        val srcRect = Rect(
-            location[0],
-            location[1],
-            location[0] + width,
-            location[1] + height,
-        )
-        try {
-            PixelCopy.request(
-                window,
-                srcRect,
-                bitmap,
-                { copyResult ->
-                    if (copyResult == PixelCopy.SUCCESS) {
-                        onResult(bitmap)
-                    } else {
-                        onResult(drawFallback())
-                    }
-                },
-                Handler(Looper.getMainLooper()),
-            )
-            return
-        } catch (e: Throwable) {
-            // PixelCopy 對沒有 backing surface 的 window 會丟 IllegalArgumentException
-            onResult(drawFallback())
-            return
-        }
-    }
-    onResult(drawFallback())
-}
+// findActivity() / captureWebView() 已抽到模組內共用的 WebViewCapture.kt（同 package，internal）。
 
 /**
  * Yakuyomi B0 spike：把截圖存到 getExternalFilesDir("captures")（免權限、檔案管理看得到）下

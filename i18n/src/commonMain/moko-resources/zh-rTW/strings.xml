@@ -297,6 +297,13 @@
     <string name="action_capture_page">截這頁</string>
     <string name="webview_capture_dialog_title">頁面截圖</string>
     <string name="webview_capture_failed">截圖失敗</string>
+    <!-- Yakuyomi：擷取漫畫（截圖 → local 來源） -->
+    <string name="capture_manga">擷取漫畫</string>
+    <string name="capture_book_name">書名</string>
+    <string name="capture_chapter_name">章名</string>
+    <string name="capture_missing_name">請先填書名與章名</string>
+    <string name="capture_go">前往</string>
+    <string name="capture_saved">已存第 %1$d 頁</string>
     <string name="pref_category_library">書櫃</string>
     <string name="ext_obsolete">過舊</string>
     <string name="obsolete_extension_message">這個擴充套件已無法使用，其可能無法正確運作或導致本程式發生問題，建議解除安裝</string>

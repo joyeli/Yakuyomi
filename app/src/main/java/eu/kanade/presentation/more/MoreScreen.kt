@@ -22,6 +22,7 @@ import androidx.compose.material.icons.outlined.Contrast
 import androidx.compose.material.icons.outlined.GetApp
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.NewReleases
+import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.QueryStats
 import androidx.compose.material.icons.outlined.Settings
@@ -79,6 +80,7 @@ fun MoreScreen(
     onClickSupport: () -> Unit,
     onClickAbout: () -> Unit,
     onOpenUrlInWebView: (String) -> Unit,
+    onOpenCapture: () -> Unit,
     webViewUrlHistoryProvider: () -> List<String>,
     onAddWebViewUrl: (String) -> Unit,
     onRemoveWebViewUrl: (String) -> Unit,
@@ -216,6 +218,14 @@ fun MoreScreen(
                     title = stringResource(MR.strings.action_open_url_in_webview),
                     icon = Icons.Outlined.Public,
                     onPreferenceClick = { showOpenUrlDialog = true },
+                )
+            }
+            item {
+                // Yakuyomi：擷取漫畫——內建 WebView 截頁 → 存成 LocalSource 漫畫（可加進書庫、可翻譯）。
+                TextPreferenceWidget(
+                    title = stringResource(MR.strings.capture_manga),
+                    icon = Icons.Outlined.PhotoCamera,
+                    onPreferenceClick = onOpenCapture,
                 )
             }
             item {
