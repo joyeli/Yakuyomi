@@ -249,6 +249,9 @@
     <string name="action_webview_forward">Forward</string>
     <string name="action_webview_refresh">Refresh</string>
     <string name="action_webview_close_tab">Close tab</string>
+    <string name="action_capture_page">Capture page</string>
+    <string name="webview_capture_dialog_title">Page capture</string>
+    <string name="webview_capture_failed">Capture failed</string>
     <string name="action_start_downloading_now">Start downloading now</string>
     <string name="action_not_now">Not now</string>
     <string name="action_add_anyway">Add anyway</string>
