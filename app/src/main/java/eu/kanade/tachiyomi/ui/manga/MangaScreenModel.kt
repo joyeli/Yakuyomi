@@ -34,6 +34,7 @@ import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.download.model.Download
 import eu.kanade.tachiyomi.data.track.EnhancedTracker
 import eu.kanade.tachiyomi.data.track.TrackerManager
+import eu.kanade.tachiyomi.data.translation.TranslationCache
 import eu.kanade.tachiyomi.data.translation.TranslationEngineConfig
 import eu.kanade.tachiyomi.data.translation.TranslationManager
 import eu.kanade.tachiyomi.data.translation.model.TranslationItem
@@ -83,9 +84,11 @@ import tachiyomi.domain.manga.model.MangaWithChapterCount
 import tachiyomi.domain.manga.model.applyFilter
 import tachiyomi.domain.manga.repository.MangaRepository
 import tachiyomi.domain.source.service.SourceManager
+import tachiyomi.domain.storage.service.StorageManager
 import tachiyomi.domain.track.interactor.GetTracks
 import tachiyomi.domain.translation.service.TranslationPreferences
 import tachiyomi.i18n.MR
+import tachiyomi.source.local.LocalSource
 import tachiyomi.source.local.isLocal
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -104,6 +107,8 @@ class MangaScreenModel(
     private val downloadManager: DownloadManager = Injekt.get(),
     private val downloadCache: DownloadCache = Injekt.get(),
     private val translationManager: TranslationManager = Injekt.get(),
+    private val translationCache: TranslationCache = Injekt.get(),
+    private val storageManager: StorageManager = Injekt.get(),
     private val translationPreferences: TranslationPreferences = Injekt.get(),
     private val getMangaAndChapters: GetMangaWithChapters = Injekt.get(),
     private val getDuplicateLibraryManga: GetDuplicateLibraryManga = Injekt.get(),
@@ -998,16 +1003,48 @@ class MangaScreenModel(
         screenModelScope.launchNonCancellable {
             try {
                 successState?.let { state ->
-                    downloadManager.deleteChapters(
-                        chapters,
-                        state.manga,
-                        state.source,
-                    )
+                    // Yakuyomi：本機來源的「已下載」章其實是硬設的（見 toChapterListItems），實體檔在
+                    // <local>/<manga.url>/ 而非 downloads 目錄 → downloadManager.deleteChapters 找不到會 no-op。
+                    // 改走本機刪檔分支（鏡射 LibraryScreenModel.removeMangas 的 local 寫法）。
+                    if (state.source is LocalSource) {
+                        deleteLocalChapters(state.manga, chapters)
+                    } else {
+                        downloadManager.deleteChapters(
+                            chapters,
+                            state.manga,
+                            state.source,
+                        )
+                    }
                 }
             } catch (e: Throwable) {
                 logcat(LogPriority.ERROR, e)
             }
         }
+    }
+
+    /**
+     * Yakuyomi：刪除本機（LocalSource）章節的實體檔案，並清掉隨之產生的孤兒章節 DB row。
+     *
+     * 本機章 chapter.url = "<mangaDir>/<chapterFileName>"（見 LocalSource.getChapterList），
+     * manga.url = 該漫畫資料夾名。先定位 manga 夾（takeIf isDirectory 防誤刪 local 根、全鏈 null-safe），
+     * 再逐章刪對應的章夾/檔（substringAfterLast('/') 取檔名）。
+     *
+     * 刪檔後 DB row 不會自動消失（local 章 downloaded 是硬設 true、不看檔）→ 重新掃描來源，讓
+     * SyncChaptersWithSource 依 LocalSource.getChapterList 的最新掃描結果移除已刪章的 DB row；
+     * getMangaAndChapters.subscribe 觀察 DB 變動 → 章節列表即時刷新。
+     */
+    private suspend fun deleteLocalChapters(manga: Manga, chapters: List<Chapter>) {
+        if (manga.url.isBlank()) return // 防空 url 讓 findFile 落到 local 根、誤刪整夾
+        val mangaDir = storageManager.getLocalSourceDirectory()
+            ?.findFile(manga.url)
+            ?.takeIf { it.isDirectory }
+            ?: return
+        chapters.forEach { chapter ->
+            mangaDir.findFile(chapter.url.substringAfterLast('/'))?.delete()
+        }
+        translationCache.invalidate(manga.id)
+        // 重新掃描來源 → 移除已刪章的孤兒 DB row + 即時刷新列表（不抓詳情、不自動下載新章）
+        fetchAllFromSource(manualFetch = false, fetchDetails = false, fetchChapters = true)
     }
 
     private fun downloadNewChapters(chapters: List<Chapter>) {

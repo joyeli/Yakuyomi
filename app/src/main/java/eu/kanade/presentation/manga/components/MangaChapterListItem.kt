@@ -59,6 +59,7 @@ fun MangaChapterListItem(
     bookmark: Boolean,
     selected: Boolean,
     downloadIndicatorEnabled: Boolean,
+    showDownloadIndicator: Boolean = true,
     downloadStateProvider: () -> Download.State,
     downloadProgressProvider: () -> Int,
     chapterSwipeStartAction: LibraryPreferences.ChapterSwipeAction,
@@ -186,13 +187,18 @@ fun MangaChapterListItem(
                     onClick = onTranslate,
                 )
             }
-            ChapterDownloadIndicator(
-                enabled = downloadIndicatorEnabled,
-                modifier = Modifier.padding(start = 4.dp),
-                downloadStateProvider = downloadStateProvider,
-                downloadProgressProvider = downloadProgressProvider,
-                onClick = { onDownloadClick?.invoke(it) },
-            )
+            // Yakuyomi：本機章不畫下載指示器——它對 local 是 disabled 的 CheckCircle，會吞掉點擊
+            // 卻無作用（downloaded=true 為硬設）。維持 downloaded=true 不動（翻譯指示器的 HIDDEN
+            // 邏輯依賴 isDownloaded），只在渲染層對 local 隱藏這顆。
+            if (showDownloadIndicator) {
+                ChapterDownloadIndicator(
+                    enabled = downloadIndicatorEnabled,
+                    modifier = Modifier.padding(start = 4.dp),
+                    downloadStateProvider = downloadStateProvider,
+                    downloadProgressProvider = downloadProgressProvider,
+                    onClick = { onDownloadClick?.invoke(it) },
+                )
+            }
         }
     }
 }
