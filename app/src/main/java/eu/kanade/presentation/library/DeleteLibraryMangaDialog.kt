@@ -60,17 +60,26 @@ fun DeleteLibraryMangaDialog(
         },
         text = {
             Column {
-                list.forEach { state ->
+                // 勾「連同本機檔案刪除」（local 時 index 1）→ 連動勾「書櫃上的作品」（index 0）並鎖住：
+                // 刪本機檔＝這本沒了、必然移出書櫃，故 deleteFromLibrary 恆真、removeMangas 不需後端補丁。
+                val localFilesChecked = containsLocalManga && list.getOrNull(1)?.isChecked == true
+                list.forEachIndexed { index, state ->
                     LabeledCheckbox(
                         label = stringResource(state.value),
                         checked = state.isChecked,
-                        onCheckedChange = {
-                            val index = list.indexOf(state)
-                            if (index != -1) {
-                                val mutableList = list.toMutableList()
-                                mutableList[index] = state.next() as CheckboxState.State<StringResource>
-                                list = mutableList.toList()
+                        enabled = !(index == 0 && localFilesChecked),
+                        onCheckedChange = { checked ->
+                            val mutableList = list.toMutableList()
+                            mutableList[index] = if (checked) {
+                                CheckboxState.State.Checked(state.value)
+                            } else {
+                                CheckboxState.State.None(state.value)
                             }
+                            // 勾「連同本機檔案刪除」→ 連動勾「書櫃上的作品」（讓那個勾也跳起來）。
+                            if (containsLocalManga && index == 1 && checked) {
+                                mutableList[0] = CheckboxState.State.Checked(mutableList[0].value)
+                            }
+                            list = mutableList.toList()
                         },
                     )
                 }
