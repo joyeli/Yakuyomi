@@ -14,15 +14,21 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.outlined.Autorenew
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,6 +40,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.kevinnzou.web.AccompanistWebViewClient
 import com.kevinnzou.web.WebContent
 import com.kevinnzou.web.WebView
@@ -43,6 +52,7 @@ import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.webview.captureWebView
 import eu.kanade.presentation.webview.findActivity
 import eu.kanade.tachiyomi.ui.capture.CaptureSaveResult
+import eu.kanade.tachiyomi.ui.capture.FrameGrabber
 import eu.kanade.tachiyomi.util.system.setDefaultSettings
 import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.coroutines.launch
@@ -66,6 +76,10 @@ fun CaptureScreenContent(
     chapterName: String,
     onChapterNameChange: (String) -> Unit,
     onCapture: suspend (android.graphics.Bitmap) -> CaptureSaveResult,
+    continuousRunning: Boolean,
+    capturedCount: Int,
+    onStartContinuous: (FrameGrabber) -> Unit,
+    onStopContinuous: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -125,6 +139,34 @@ fun CaptureScreenContent(
         }
     }
 
+    // 連續截圖 toggle：進行中→停止；否則檢查書名/章名後把「抓幀器」交給 ScreenModel 驅動迴圈。
+    fun toggleContinuous() {
+        if (continuousRunning) {
+            onStopContinuous()
+            return
+        }
+        if (bookName.isBlank() || chapterName.isBlank()) {
+            context.toast(context.contextStringResource(MR.strings.capture_missing_name))
+            return
+        }
+        val window = context.findActivity()?.window
+        val grabber: FrameGrabber = { onResult -> captureWebView(webView, window, onResult) }
+        onStartContinuous(grabber)
+    }
+
+    // 生命週期：畫面離開（onDispose）或 app 進背景（ON_STOP）都停止連續截圖，避免背景空轉抓幀。
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) onStopContinuous()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            onStopContinuous()
+        }
+    }
+
     // WebView 內還能上一頁時，系統返回＝WebView 上一頁（而非直接關畫面）。
     BackHandler(enabled = navigator.canGoBack) { navigator.navigateBack() }
 
@@ -161,18 +203,17 @@ fun CaptureScreenContent(
         },
         bottomBar = {
             Surface(tonalElevation = 3.dp) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .navigationBarsPadding()
                         .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     OutlinedTextField(
                         value = address,
                         onValueChange = { address = it },
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.fillMaxWidth(),
                         label = { Text(stringResource(MR.strings.open_url_in_webview_label)) },
                         placeholder = { Text(stringResource(MR.strings.open_url_in_webview_hint)) },
                         singleLine = true,
@@ -190,12 +231,47 @@ fun CaptureScreenContent(
                             }
                         },
                     )
-                    Button(onClick = { capture() }) {
-                        Icon(imageVector = Icons.Outlined.PhotoCamera, contentDescription = null)
-                        Text(
-                            text = stringResource(MR.strings.action_capture_page),
-                            modifier = Modifier.padding(start = 6.dp),
-                        )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        if (continuousRunning) {
+                            // 連續進行中：紅色「停止」+ 進度「已截 N 頁」。
+                            Button(
+                                onClick = { toggleContinuous() },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.error,
+                                    contentColor = MaterialTheme.colorScheme.onError,
+                                ),
+                            ) {
+                                Icon(imageVector = Icons.Filled.Stop, contentDescription = null)
+                                Text(
+                                    text = stringResource(MR.strings.capture_continuous_stop),
+                                    modifier = Modifier.padding(start = 6.dp),
+                                )
+                            }
+                            Text(
+                                text = stringResource(MR.strings.capture_continuous_count, capturedCount),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        } else {
+                            // 閒置：主要「截這頁」+ 次要「連續擷取」並列。
+                            Button(onClick = { capture() }) {
+                                Icon(imageVector = Icons.Outlined.PhotoCamera, contentDescription = null)
+                                Text(
+                                    text = stringResource(MR.strings.action_capture_page),
+                                    modifier = Modifier.padding(start = 6.dp),
+                                )
+                            }
+                            FilledTonalButton(onClick = { toggleContinuous() }) {
+                                Icon(imageVector = Icons.Outlined.Autorenew, contentDescription = null)
+                                Text(
+                                    text = stringResource(MR.strings.capture_continuous_start),
+                                    modifier = Modifier.padding(start = 6.dp),
+                                )
+                            }
+                        }
                     }
                 }
             }

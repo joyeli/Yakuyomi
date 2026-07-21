@@ -259,6 +259,9 @@
     <string name="capture_missing_name">Enter a manga title and chapter first</string>
     <string name="capture_go">Go</string>
     <string name="capture_saved">Saved page %1$d</string>
+    <string name="capture_continuous_start">Continuous</string>
+    <string name="capture_continuous_stop">Stop</string>
+    <string name="capture_continuous_count">Captured %1$d</string>
     <string name="action_start_downloading_now">Start downloading now</string>
     <string name="action_not_now">Not now</string>
     <string name="action_add_anyway">Add anyway</string>
