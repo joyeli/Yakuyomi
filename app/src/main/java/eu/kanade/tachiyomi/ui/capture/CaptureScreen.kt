@@ -54,6 +54,9 @@ private const val THUMB_SIZE = 32
 private const val STABLE_THRESHOLD = 2.0
 // 換頁門檻：當前幀 vs「上次已截那頁」> 此值 ⇒ 真的換頁了（去重：停在同頁不會重截）。
 private const val CHANGE_THRESHOLD = 10.0
+// 空白/黑頁門檻：縮圖亮度「值域(max-min)」< 此值 ⇒ 近乎純色（載入過場黑頁 / 純白頁）⇒ 跳過不截。
+// 漫畫頁通常黑白對比大、值域 >100；載入全黑或純白頁值域 ≈0。真機可調。
+private const val BLANK_RANGE_THRESHOLD = 36
 
 /** 連續截圖狀態：是否進行中 + 本 session 已截頁數（給 UI 顯示「已截 N 頁」）。 */
 data class ContinuousCaptureState(val running: Boolean = false, val count: Int = 0)
@@ -125,9 +128,12 @@ class CaptureScreenModel(
                     val frame = grabFrame(grabber)
                     if (frame != null) {
                         val thumb = withContext(Dispatchers.Default) { thumbLuma(frame) }
+                        // 載入過場的黑頁/純色幀跳過（不當有效頁），但仍更新 prev 維持穩定判斷連續：
+                        // 黑頁 → 真頁載入中（跟黑頁比不穩定）不截 → 載入完靜止才截。
+                        val blank = isBlank(thumb)
                         val stable = prev?.let { mad(thumb, it) < STABLE_THRESHOLD } ?: false
                         val changed = lastCaptured?.let { mad(thumb, it) > CHANGE_THRESHOLD } ?: true
-                        if (stable && changed) {
+                        if (!blank && stable && changed) {
                             if (saveCapture(frame) is CaptureSaveResult.Saved) {
                                 lastCaptured = thumb
                                 _continuous.update { it.copy(count = it.count + 1) }
@@ -189,6 +195,17 @@ class CaptureScreenModel(
         var sum = 0L
         for (i in a.indices) sum += abs(a[i] - b[i])
         return sum.toDouble() / a.size
+    }
+
+    /** 縮圖是否近乎純色（載入過場黑頁 / 純白 / 單色）：亮度值域(max-min) < [BLANK_RANGE_THRESHOLD]。 */
+    private fun isBlank(thumb: IntArray): Boolean {
+        var min = 255
+        var max = 0
+        for (v in thumb) {
+            if (v < min) min = v
+            if (v > max) max = v
+        }
+        return (max - min) < BLANK_RANGE_THRESHOLD
     }
 
     /**
