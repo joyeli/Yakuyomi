@@ -629,6 +629,11 @@ class LibraryScreenModel(
                         if (mangaDir != null) {
                             mangaDir.delete()
                             translationCache.invalidate(manga.id)
+                            // 本機檔都刪了 → 書庫留 row 指向已刪夾（壞封面）＝無意義；
+                            // 沒勾「從書庫移除」時一併移出，保證「刪本機檔」＝乾淨。
+                            if (!deleteFromLibrary) {
+                                updateManga.awaitAll(listOf(MangaUpdate(favorite = false, id = manga.id)))
+                            }
                         }
                     }
                 }
