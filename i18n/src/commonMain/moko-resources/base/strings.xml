@@ -187,6 +187,10 @@
     <!-- Do not translate "WebView" -->
     <string name="action_open_in_web_view">Open in WebView</string>
     <string name="action_web_view" translatable="false">WebView</string>
+    <!-- Do not translate "WebView" -->
+    <string name="action_open_url_in_webview">Open URL in WebView</string>
+    <string name="open_url_in_webview_label">Website URL</string>
+    <string name="open_url_in_webview_hint" translatable="false">https://example.com</string>
     <string name="action_migrate">Migrate</string>
     <string name="action_display_mode">Display mode</string>
     <string name="action_display">Display</string>

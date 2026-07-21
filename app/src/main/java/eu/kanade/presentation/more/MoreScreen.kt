@@ -1,6 +1,7 @@
 package eu.kanade.presentation.more
 
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.automirrored.outlined.Label
@@ -10,15 +11,25 @@ import androidx.compose.material.icons.outlined.Contrast
 import androidx.compose.material.icons.outlined.GetApp
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.NewReleases
+import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.QueryStats
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material.icons.outlined.Translate
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.vectorResource
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import eu.kanade.presentation.more.settings.widget.SwitchPreferenceWidget
 import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
@@ -50,8 +61,21 @@ fun MoreScreen(
     onClickSettings: () -> Unit,
     onClickSupport: () -> Unit,
     onClickAbout: () -> Unit,
+    onOpenUrlInWebView: (String) -> Unit,
 ) {
     val uriHandler = LocalUriHandler.current
+
+    // Yakuyomi：以 WebView 開啟任意網址的對話框開關（通用瀏覽入口）。
+    var showOpenUrlDialog by remember { mutableStateOf(false) }
+    if (showOpenUrlDialog) {
+        OpenUrlInWebViewDialog(
+            onDismissRequest = { showOpenUrlDialog = false },
+            onConfirm = { url ->
+                showOpenUrlDialog = false
+                onOpenUrlInWebView(url)
+            },
+        )
+    }
 
     Scaffold { contentPadding ->
         ScrollbarLazyColumn(contentPadding = contentPadding) {
@@ -163,6 +187,14 @@ fun MoreScreen(
             item { HorizontalDivider() }
 
             item {
+                // Yakuyomi：通用「以 WebView 開啟網址」入口——不綁 source，用內建 WebView 開任意網站。
+                TextPreferenceWidget(
+                    title = stringResource(MR.strings.action_open_url_in_webview),
+                    icon = Icons.Outlined.Public,
+                    onPreferenceClick = { showOpenUrlDialog = true },
+                )
+            }
+            item {
                 TextPreferenceWidget(
                     title = stringResource(MR.strings.label_settings),
                     icon = Icons.Outlined.Settings,
@@ -185,4 +217,47 @@ fun MoreScreen(
             }
         }
     }
+}
+
+// Yakuyomi：輸入任意網址 → 補 https:// 後交給呼叫端用 WebView 開啟。
+@Composable
+private fun OpenUrlInWebViewDialog(
+    onDismissRequest: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var input by remember { mutableStateOf("") }
+    val trimmed = input.trim()
+
+    AlertDialog(
+        onDismissRequest = onDismissRequest,
+        confirmButton = {
+            TextButton(
+                enabled = trimmed.isNotEmpty(),
+                onClick = {
+                    val normalized = if (trimmed.startsWith("http")) trimmed else "https://$trimmed"
+                    onConfirm(normalized)
+                },
+            ) {
+                Text(text = stringResource(MR.strings.action_ok))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismissRequest) {
+                Text(text = stringResource(MR.strings.action_cancel))
+            }
+        },
+        title = {
+            Text(text = stringResource(MR.strings.action_open_url_in_webview))
+        },
+        text = {
+            OutlinedTextField(
+                value = input,
+                onValueChange = { input = it },
+                label = { Text(text = stringResource(MR.strings.open_url_in_webview_label)) },
+                placeholder = { Text(text = stringResource(MR.strings.open_url_in_webview_hint)) },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                singleLine = true,
+            )
+        },
+    )
 }

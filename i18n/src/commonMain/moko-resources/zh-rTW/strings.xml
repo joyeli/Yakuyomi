@@ -50,6 +50,8 @@
     <string name="action_resume">繼續</string>
     <string name="action_open_in_browser">在瀏覽器中開啟</string>
     <string name="action_open_in_web_view">在 WebView 中開啟</string>
+    <string name="action_open_url_in_webview">以 WebView 開啟網址</string>
+    <string name="open_url_in_webview_label">網站網址</string>
     <string name="action_display_mode">檢視模式</string>
     <string name="action_display">檢視</string>
     <string name="action_display_grid">密集格狀</string>

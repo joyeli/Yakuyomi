@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.webkit.CookieManager
 import android.widget.Toast
 import androidx.core.net.toUri
 import eu.kanade.presentation.webview.WebViewScreenContent
@@ -79,6 +80,13 @@ class WebViewActivity : BaseActivity() {
                 onClearCookies = this::clearCookies,
             )
         }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // Yakuyomi：離開/背景化 reader 的 WebView 時把 session cookie 寫盤（行程被殺前未持久化
+        // 的登入 cookie 會遺失＝「每次都要重登入」根因）。只讓 cookie 更可靠保存、不改行為。
+        CookieManager.getInstance().flush()
     }
 
     override fun onProvideAssistContent(outContent: AssistContent) {

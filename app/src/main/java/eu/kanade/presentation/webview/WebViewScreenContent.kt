@@ -3,6 +3,7 @@ package eu.kanade.presentation.webview
 import android.content.pm.ApplicationInfo
 import android.graphics.Bitmap
 import android.os.Message
+import android.webkit.CookieManager
 import android.webkit.JsPromptResult
 import android.webkit.JsResult
 import android.webkit.WebResourceRequest
@@ -100,7 +101,12 @@ fun WebViewScreenContent(
     var isActive by remember { mutableStateOf(true) }
 
     DisposableEffect(Unit) {
-        onDispose { isActive = false }
+        onDispose {
+            isActive = false
+            // Yakuyomi：離開 WebView 時把 session cookie 寫盤（全 repo 唯一漏掉 flush → 行程被殺前
+            // 未持久化的登入 cookie 遺失＝「每次都要重登入」的根因）。只讓 cookie 更可靠保存、不改行為。
+            CookieManager.getInstance().flush()
+        }
     }
 
     val webClient = remember {
