@@ -276,6 +276,11 @@
     <string name="capture_insert_action">Insert as page %1$d</string>
     <string name="capture_insert_saved">Inserted page %1$d</string>
     <string name="capture_missing_pages">Possible missing pages</string>
+    <!-- Yakuyomi: capture floating toolbar + URL bar history -->
+    <string name="action_clear">Clear</string>
+    <string name="capture_toolbar_show">Show toolbar</string>
+    <string name="capture_toolbar_hide">Hide toolbar</string>
+    <string name="capture_url_history">URL history</string>
     <string name="action_start_downloading_now">Start downloading now</string>
     <string name="action_not_now">Not now</string>
     <string name="action_add_anyway">Add anyway</string>

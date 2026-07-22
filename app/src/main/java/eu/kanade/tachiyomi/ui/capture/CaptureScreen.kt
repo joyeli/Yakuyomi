@@ -13,6 +13,7 @@ import cafe.adriel.voyager.core.model.screenModelScope
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import com.hippo.unifile.UniFile
+import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.presentation.capture.CaptureScreenContent
 import eu.kanade.presentation.util.Screen
 import eu.kanade.tachiyomi.util.storage.DiskUtil
@@ -27,6 +28,9 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.lang.withUIContext
 import tachiyomi.domain.storage.service.StorageManager
@@ -57,6 +61,8 @@ private const val CHANGE_THRESHOLD = 10.0
 // 空白/黑頁門檻：縮圖亮度「值域(max-min)」< 此值 ⇒ 近乎純色（載入過場黑頁 / 純白頁）⇒ 跳過不截。
 // 漫畫頁通常黑白對比大、值域 >100；載入全黑或純白頁值域 ≈0。真機可調。
 private const val BLANK_RANGE_THRESHOLD = 36
+// 網址列輸入歷史保留上限（與 MoreScreenModel 一致）。
+private const val MAX_WEBVIEW_URL_HISTORY = 20
 
 /** 連續截圖狀態：是否進行中 + 本 session 已截頁數（給 UI 顯示「已截 N 頁」）。 */
 data class ContinuousCaptureState(val running: Boolean = false, val count: Int = 0)
@@ -119,6 +125,10 @@ class CaptureScreen(
             insertTargetPage = insert?.insertAtPage,
             // 重截 / 插入皆為單張、成功後退回確認頁（其 LaunchedEffect 重掃顯示更新後的序）。
             onReCaptureDone = navigator::pop,
+            // 網址列輸入歷史（帶出歷史清單 + 逐筆刪除 + 造訪時記錄）。
+            urlHistoryProvider = { screenModel.webViewUrlHistory() },
+            onAddUrl = { screenModel.addWebViewUrl(it) },
+            onRemoveUrl = { screenModel.removeWebViewUrl(it) },
         )
     }
 }
@@ -153,11 +163,34 @@ data class InsertTarget(
 class CaptureScreenModel(
     private val context: Application = Injekt.get(),
     private val storageManager: StorageManager = Injekt.get(),
+    private val uiPreferences: UiPreferences = Injekt.get(),
 ) : ScreenModel {
 
     // 書名 / 章名手動輸入（此步先不做選書流程）。
     var bookName by mutableStateOf("")
     var chapterName by mutableStateOf("")
+
+    // Yakuyomi：擷取畫面網址列的輸入歷史——與 More 瀏覽入口共用同一份 pref（UiPreferences.lastWebViewUrls，
+    // JSON 字串陣列、最近的在最前）。仿 MoreScreenModel 的 add/remove（去重 → 放最前 → 截斷上限）。
+    private val webViewUrlJson = Json { ignoreUnknownKeys = true }
+
+    /** 讀出歷史清單（最近的在最前）；解析失敗回空清單。 */
+    fun webViewUrlHistory(): List<String> = uiPreferences.lastWebViewUrls.get()
+        .let { raw -> runCatching { webViewUrlJson.decodeFromString<List<String>>(raw) }.getOrElse { emptyList() } }
+
+    /** 記錄一筆網址（造訪／輸入送出時）：忽略空白 / about:blank；移除既有同值 → 加到最前 → 截斷上限。 */
+    fun addWebViewUrl(url: String) {
+        val trimmed = url.trim()
+        if (trimmed.isEmpty() || trimmed == "about:blank") return
+        val updated = (listOf(trimmed) + webViewUrlHistory().filterNot { it == trimmed }).take(MAX_WEBVIEW_URL_HISTORY)
+        uiPreferences.lastWebViewUrls.set(webViewUrlJson.encodeToString(updated))
+    }
+
+    /** 逐筆刪除歷史中的某筆網址。 */
+    fun removeWebViewUrl(url: String) {
+        val updated = webViewUrlHistory().filterNot { it == url }
+        uiPreferences.lastWebViewUrls.set(webViewUrlJson.encodeToString(updated))
+    }
 
     // 本次連續截圖存下的頁碼（每次 startContinuous 重置）；供確認頁「放棄這次截圖」只刪這批、
     // 不誤刪接續截圖前該章夾既有的頁。快照回傳（toList）避免與迴圈的 add 撞併發修改。
