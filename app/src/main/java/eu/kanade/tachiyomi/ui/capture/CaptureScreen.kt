@@ -70,28 +70,54 @@ data class ContinuousCaptureState(val running: Boolean = false, val count: Int =
  *
  * B1b 半自動連續截圖：使用者手動翻頁，app 用 frame-diff 雙門檻（穩定 + 換頁）自動偵測、自動截存。
  */
-class CaptureScreen(private val initialUrl: String = "") : Screen() {
+class CaptureScreen(
+    private val initialUrl: String = "",
+    private val reCaptureTarget: ReCaptureTarget? = null,
+) : Screen() {
 
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.currentOrThrow
         val screenModel = rememberScreenModel { CaptureScreenModel() }
         val continuous by screenModel.continuous.collectAsState()
+        val target = reCaptureTarget
 
         CaptureScreenContent(
             onNavigateUp = navigator::pop,
-            initialUrl = initialUrl,
+            initialUrl = target?.url ?: initialUrl,
             bookName = screenModel.bookName,
             onBookNameChange = { screenModel.bookName = it },
             chapterName = screenModel.chapterName,
             onChapterNameChange = { screenModel.chapterName = it },
-            onCapture = screenModel::saveCapture,
+            onCapture = if (target != null) {
+                { bitmap, url ->
+                    screenModel.saveReCapture(bitmap, url, target.safeBook, target.safeChapter, target.pageName)
+                }
+            } else {
+                screenModel::saveCapture
+            },
             continuousRunning = continuous.running,
             capturedCount = continuous.count,
             onStartContinuous = screenModel::startContinuous,
             onStopContinuous = screenModel::stopContinuous,
+            reCaptureTargetPage = target?.pageNumber,
+            onReCaptureDone = navigator::pop,
         )
     }
+}
+
+/**
+ * 重截目標：確認頁點某頁重截時帶進 [CaptureScreen] 的參數。null＝正常擷取模式（完全不變）。
+ * [url]＝該頁存檔當下記錄的網址（可能為 null＝當初取不到），[pageName]＝要覆蓋的檔名（如 `003.png`）。
+ * 章夾用已 sanitise 的 [safeBook] / [safeChapter] 定位（與存檔時同一套安全檔名）。
+ */
+data class ReCaptureTarget(
+    val url: String?,
+    val safeBook: String,
+    val safeChapter: String,
+    val pageName: String,
+) {
+    val pageNumber: Int get() = pageName.substringBeforeLast('.').toIntOrNull() ?: 0
 }
 
 class CaptureScreenModel(
@@ -115,8 +141,9 @@ class CaptureScreenModel(
      * 需先填書名 / 章名（呼叫端已擋一次，這裡再守一次）；重複呼叫不會疊開。
      *
      * 抓幀在主執行緒（PixelCopy 需 window）、比對在 [Dispatchers.Default]、存檔在 IO（[saveCapture] 內建）。
+     * [urlProvider] 在主執行緒讀當前 WebView 網址（供每張截圖寫 sidecar `.url`）；取不到＝null（不寫）。
      */
-    fun startContinuous(grabber: FrameGrabber) {
+    fun startContinuous(grabber: FrameGrabber, urlProvider: () -> String?) {
         if (bookName.isBlank() || chapterName.isBlank()) return
         if (continuousJob?.isActive == true) return
         continuousJob = screenModelScope.launch {
@@ -134,7 +161,9 @@ class CaptureScreenModel(
                         val stable = prev?.let { mad(thumb, it) < STABLE_THRESHOLD } ?: false
                         val changed = lastCaptured?.let { mad(thumb, it) > CHANGE_THRESHOLD } ?: true
                         if (!blank && stable && changed) {
-                            if (saveCapture(frame) is CaptureSaveResult.Saved) {
+                            // WebView 網址須在主執行緒讀（PixelCopy 抓幀已在主執行緒，這裡另起一次快讀）。
+                            val url = withUIContext { urlProvider() }
+                            if (saveCapture(frame, url) is CaptureSaveResult.Saved) {
                                 lastCaptured = thumb
                                 _continuous.update { it.copy(count = it.count + 1) }
                             }
@@ -211,9 +240,11 @@ class CaptureScreenModel(
     /**
      * 把 [bitmap] 存成 LocalSource 的 `<local>/<書名>/<章名>/NNN.png`（零填充、頁碼在該章內遞增）。
      * 頁碼＝掃該章夾既有 `NNN.*` 取最大值 +1（換章名自然接續該章、重進畫面也不覆蓋）。
+     * 存完在同章夾寫 sidecar `NNN.url`（純文字＝該頁截圖當下的網址），供確認頁重截時開回同一頁；
+     * [url] 為 null/空＝取不到網址（不寫 sidecar，不影響閱讀——`.url` 非圖副檔名、LocalSource 掃描會略過）。
      * I/O 全在 IO thread；SAF 走 ContentResolver "wt" 截斷寫（file:// 用一般串流）。
      */
-    suspend fun saveCapture(bitmap: Bitmap): CaptureSaveResult = withIOContext {
+    suspend fun saveCapture(bitmap: Bitmap, url: String?): CaptureSaveResult = withIOContext {
         val book = bookName.trim()
         val chapter = chapterName.trim()
         if (book.isEmpty() || chapter.isEmpty()) {
@@ -235,9 +266,52 @@ class CaptureScreenModel(
             val name = "%03d.png".format(page)
             val file = chapterDir.createFile(name) ?: error("Cannot create page file")
             openTruncating(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            writeSidecar(chapterDir, "%03d.url".format(page), url)
 
             CaptureSaveResult.Saved(page, file.uri.toString())
         }.getOrElse { CaptureSaveResult.Failed(it.message) }
+    }
+
+    /**
+     * 重截：覆蓋既有頁 [pageName]（如 `003.png`）並更新其 sidecar `NNN.url`。不新增頁碼、不掃 next。
+     * 章夾用已 sanitise 的 [safeBook] / [safeChapter] 定位（與存檔時同一套安全檔名）；找不到章夾＝失敗。
+     */
+    suspend fun saveReCapture(
+        bitmap: Bitmap,
+        url: String?,
+        safeBook: String,
+        safeChapter: String,
+        pageName: String,
+    ): CaptureSaveResult = withIOContext {
+        runCatching {
+            val base = storageManager.getLocalSourceDirectory()
+                ?: error("Local source directory unavailable")
+            val chapterDir = base.findFile(safeBook)?.takeIf { it.isDirectory }
+                ?.findFile(safeChapter)?.takeIf { it.isDirectory }
+                ?: error("Chapter directory not found")
+
+            val file = chapterDir.findFile(pageName)
+                ?: chapterDir.createFile(pageName)
+                ?: error("Cannot create page file")
+            openTruncating(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            writeSidecar(chapterDir, pageName.substringBeforeLast('.') + ".url", url)
+
+            val page = pageName.substringBeforeLast('.').toIntOrNull() ?: 0
+            CaptureSaveResult.Saved(page, file.uri.toString())
+        }.getOrElse { CaptureSaveResult.Failed(it.message) }
+    }
+
+    /**
+     * 寫 URL sidecar（純文字 UTF-8）。[url] 為 null/空白＝不寫（取不到網址時 sidecar 就缺席、讀時視為 null）。
+     * 同名已存在＝截斷覆蓋（[openTruncating]），供重截更新網址。
+     */
+    private fun writeSidecar(chapterDir: UniFile, name: String, url: String?) {
+        val trimmed = url?.trim().orEmpty()
+        if (trimmed.isEmpty()) return
+        runCatching {
+            val file = chapterDir.findFile(name) ?: chapterDir.createFile(name) ?: return
+            openTruncating(file).use { it.write(trimmed.toByteArray(Charsets.UTF_8)) }
+        }
     }
 
     private fun nextPageNumber(chapterDir: UniFile): Int =

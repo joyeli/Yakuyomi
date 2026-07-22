@@ -78,12 +78,16 @@ fun CaptureScreenContent(
     onBookNameChange: (String) -> Unit,
     chapterName: String,
     onChapterNameChange: (String) -> Unit,
-    onCapture: suspend (android.graphics.Bitmap) -> CaptureSaveResult,
+    onCapture: suspend (android.graphics.Bitmap, String?) -> CaptureSaveResult,
     continuousRunning: Boolean,
     capturedCount: Int,
-    onStartContinuous: (FrameGrabber) -> Unit,
+    onStartContinuous: (FrameGrabber, () -> String?) -> Unit,
     onStopContinuous: () -> Unit,
+    // 非 null＝重截模式：隱藏書名/章名輸入與連續擷取，「截這頁」改成覆蓋第 N 頁、成功後 [onReCaptureDone]。
+    reCaptureTargetPage: Int? = null,
+    onReCaptureDone: () -> Unit = {},
 ) {
+    val reCaptureMode = reCaptureTargetPage != null
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val screenNavigator = LocalNavigator.currentOrThrow
@@ -124,15 +128,25 @@ fun CaptureScreenContent(
 
     fun capture() {
         val window = context.findActivity()?.window
+        // WebView 網址須在主執行緒讀；captureWebView 回呼在主執行緒，這裡先取好再帶進存檔。
+        val url = webView?.url
         captureWebView(webView, window) { bitmap ->
             if (bitmap == null) {
                 context.toast(context.contextStringResource(MR.strings.webview_capture_failed))
                 return@captureWebView
             }
             scope.launch {
-                when (val result = onCapture(bitmap)) {
-                    is CaptureSaveResult.Saved ->
-                        context.toast(context.contextStringResource(MR.strings.capture_saved, result.page))
+                when (val result = onCapture(bitmap, url)) {
+                    is CaptureSaveResult.Saved -> {
+                        if (reCaptureMode) {
+                            context.toast(
+                                context.contextStringResource(MR.strings.capture_recapture_saved, result.page),
+                            )
+                            onReCaptureDone()
+                        } else {
+                            context.toast(context.contextStringResource(MR.strings.capture_saved, result.page))
+                        }
+                    }
                     CaptureSaveResult.MissingName ->
                         context.toast(context.contextStringResource(MR.strings.capture_missing_name))
                     is CaptureSaveResult.Failed ->
@@ -158,7 +172,7 @@ fun CaptureScreenContent(
         }
         val window = context.findActivity()?.window
         val grabber: FrameGrabber = { onResult -> captureWebView(webView, window, onResult) }
-        onStartContinuous(grabber)
+        onStartContinuous(grabber) { webView?.url }
     }
 
     // 生命週期：畫面離開（onDispose）或 app 進背景（ON_STOP）都停止連續截圖，避免背景空轉抓幀。
@@ -181,30 +195,35 @@ fun CaptureScreenContent(
         topBar = {
             Column {
                 AppBar(
-                    title = stringResource(MR.strings.capture_manga),
+                    title = stringResource(
+                        if (reCaptureMode) MR.strings.capture_recapture_title else MR.strings.capture_manga,
+                    ),
                     navigateUp = onNavigateUp,
                     navigationIcon = Icons.Outlined.Close,
                 )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    OutlinedTextField(
-                        value = bookName,
-                        onValueChange = onBookNameChange,
-                        modifier = Modifier.weight(1f),
-                        label = { Text(stringResource(MR.strings.capture_book_name)) },
-                        singleLine = true,
-                    )
-                    OutlinedTextField(
-                        value = chapterName,
-                        onValueChange = onChapterNameChange,
-                        modifier = Modifier.weight(1f),
-                        label = { Text(stringResource(MR.strings.capture_chapter_name)) },
-                        singleLine = true,
-                    )
+                // 重截模式不需要書名/章名輸入（目標頁已鎖定），隱藏之。
+                if (!reCaptureMode) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        OutlinedTextField(
+                            value = bookName,
+                            onValueChange = onBookNameChange,
+                            modifier = Modifier.weight(1f),
+                            label = { Text(stringResource(MR.strings.capture_book_name)) },
+                            singleLine = true,
+                        )
+                        OutlinedTextField(
+                            value = chapterName,
+                            onValueChange = onChapterNameChange,
+                            modifier = Modifier.weight(1f),
+                            label = { Text(stringResource(MR.strings.capture_chapter_name)) },
+                            singleLine = true,
+                        )
+                    }
                 }
             }
         },
@@ -243,7 +262,19 @@ fun CaptureScreenContent(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        if (continuousRunning) {
+                        if (reCaptureMode) {
+                            // 重截模式：只有「截這頁（取代第 N 頁）」，捲到對的地方按 → 覆蓋該頁 + 回確認頁。
+                            Button(onClick = { capture() }) {
+                                Icon(imageVector = Icons.Outlined.PhotoCamera, contentDescription = null)
+                                Text(
+                                    text = stringResource(
+                                        MR.strings.capture_recapture_action,
+                                        reCaptureTargetPage ?: 0,
+                                    ),
+                                    modifier = Modifier.padding(start = 6.dp),
+                                )
+                            }
+                        } else if (continuousRunning) {
                             // 連續進行中：紅色「停止」+ 進度「已截 N 頁」。
                             Button(
                                 onClick = { toggleContinuous() },

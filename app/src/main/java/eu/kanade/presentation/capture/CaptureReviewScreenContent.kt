@@ -17,11 +17,13 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -32,9 +34,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.tachiyomi.ui.capture.CapturePage
 import eu.kanade.tachiyomi.ui.capture.CaptureReviewState
@@ -52,6 +56,7 @@ fun CaptureReviewScreenContent(
     state: CaptureReviewState,
     onNavigateUp: () -> Unit,
     onToggleSelect: (String) -> Unit,
+    onReCapture: (CapturePage) -> Unit,
     onDeleteSelected: () -> Unit,
     onSave: () -> Unit,
 ) {
@@ -135,7 +140,9 @@ fun CaptureReviewScreenContent(
                         page = page,
                         number = index + 1,
                         selected = page.uri in state.selected,
+                        reloadKey = state.reloadKey,
                         onToggle = { onToggleSelect(page.uri) },
+                        onReCapture = { onReCapture(page) },
                     )
                 }
             }
@@ -148,7 +155,9 @@ private fun ReviewGridItem(
     page: CapturePage,
     number: Int,
     selected: Boolean,
+    reloadKey: Int,
     onToggle: () -> Unit,
+    onReCapture: () -> Unit,
 ) {
     Box(
         modifier = Modifier
@@ -157,8 +166,13 @@ private fun ReviewGridItem(
             .clip(MaterialTheme.shapes.small)
             .clickable(onClick = onToggle),
     ) {
+        // 重截同檔名覆蓋 → coil 預設用 uri 當快取鍵會顯示舊圖；把 reloadKey 併進快取鍵每次重掃即失效。
         AsyncImage(
-            model = page.file.uri,
+            model = ImageRequest.Builder(LocalContext.current)
+                .data(page.file.uri)
+                .memoryCacheKey("${page.uri}#$reloadKey")
+                .diskCacheKey("${page.uri}#$reloadKey")
+                .build(),
             contentDescription = page.name,
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize(),
@@ -186,12 +200,30 @@ private fun ReviewGridItem(
                 .padding(horizontal = 6.dp, vertical = 2.dp),
         )
 
-        // 右上角勾選框。
+        // 右上角勾選框（管批次刪除）。
         Checkbox(
             checked = selected,
             onCheckedChange = { onToggle() },
             modifier = Modifier.align(Alignment.TopEnd),
         )
+
+        // 右下角單頁重截鈕（獨立於刪除 Checkbox）：開該頁記錄的網址重截、覆蓋這一頁。
+        IconButton(
+            onClick = onReCapture,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(2.dp)
+                .clip(MaterialTheme.shapes.small)
+                .background(Color.Black.copy(alpha = 0.55f))
+                .size(28.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.Refresh,
+                contentDescription = stringResource(MR.strings.capture_recapture_action, number),
+                tint = Color.White,
+                modifier = Modifier.size(18.dp),
+            )
+        }
     }
 }
 

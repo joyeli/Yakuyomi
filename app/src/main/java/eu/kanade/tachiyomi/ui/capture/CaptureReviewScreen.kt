@@ -48,11 +48,16 @@ class CaptureReviewScreen(
         val screenModel = rememberScreenModel { CaptureReviewScreenModel(bookName, chapterName) }
         val state by screenModel.state.collectAsState()
 
+        // 每次進入（含從重截 pop 回來）重掃該章夾——Voyager 隱藏頁會 dispose composition，返回時
+        // 此 LaunchedEffect(Unit) 重跑 → 重截覆蓋的新圖被重新載入顯示。
+        LaunchedEffect(Unit) { screenModel.loadPages() }
+
         LaunchedEffect(Unit) {
             screenModel.events.collectLatest { event ->
                 when (event) {
                     is CaptureReviewEvent.OpenManga -> navigator.replace(MangaScreen(event.mangaId))
                     CaptureReviewEvent.Back -> navigator.pop()
+                    is CaptureReviewEvent.ReCapture -> navigator.push(CaptureScreen(reCaptureTarget = event.target))
                 }
             }
         }
@@ -61,29 +66,38 @@ class CaptureReviewScreen(
             state = state,
             onNavigateUp = navigator::pop,
             onToggleSelect = screenModel::toggleSelection,
+            onReCapture = screenModel::reCapture,
             onDeleteSelected = screenModel::deleteSelected,
             onSave = screenModel::save,
         )
     }
 }
 
-/** 確認頁一張截圖：底層 [UniFile] + 顯示名；[uri] 字串當網格 key / 選取集合的元素。 */
-data class CapturePage(val file: UniFile, val name: String) {
+/**
+ * 確認頁一張截圖：底層 [UniFile] + 顯示名 + 該頁記錄的網址 [url]（讀同名 `.url` sidecar，沒有＝null）。
+ * [uri] 字串當網格 key / 選取集合的元素。
+ */
+data class CapturePage(val file: UniFile, val name: String, val url: String? = null) {
     val uri: String = file.uri.toString()
 }
 
-/** 確認頁狀態：載入中 / 目前頁清單 / 已勾選（uri 字串集合）/ 儲存中。 */
+/**
+ * 確認頁狀態：載入中 / 目前頁清單 / 已勾選（uri 字串集合）/ 儲存中。
+ * [reloadKey] 每次重掃遞增，供縮圖破 coil 快取（重截同檔名覆蓋後顯示新圖，不留舊快取殘影）。
+ */
 data class CaptureReviewState(
     val loading: Boolean = true,
     val pages: List<CapturePage> = emptyList(),
     val selected: Set<String> = emptySet(),
     val saving: Boolean = false,
+    val reloadKey: Int = 0,
 )
 
-/** 一次性導覽事件：儲存後開漫畫詳情頁，或（找不到漫畫時）退回上一頁。 */
+/** 一次性導覽事件：儲存後開漫畫詳情頁、（找不到漫畫時）退回上一頁、或開重截畫面。 */
 sealed interface CaptureReviewEvent {
     data class OpenManga(val mangaId: Long) : CaptureReviewEvent
     data object Back : CaptureReviewEvent
+    data class ReCapture(val target: ReCaptureTarget) : CaptureReviewEvent
 }
 
 class CaptureReviewScreenModel(
@@ -104,9 +118,7 @@ class CaptureReviewScreenModel(
     private val _events = Channel<CaptureReviewEvent>()
     val events = _events.receiveAsFlow()
 
-    init {
-        loadPages()
-    }
+    // 首次載入與返回重載都由畫面的 LaunchedEffect(Unit) 呼叫 loadPages()（見 CaptureReviewScreen.Content）。
 
     /** 定位 `<local>/<safeBook>/<safeChapter>/`（任一層缺 → null）。 */
     private fun chapterDir(): UniFile? =
@@ -114,20 +126,48 @@ class CaptureReviewScreenModel(
             ?.findFile(safeBook)?.takeIf { it.isDirectory }
             ?.findFile(safeChapter)?.takeIf { it.isDirectory }
 
-    /** 掃該章夾內的圖檔（png/jpg/webp）、依名稱排序（截圖零填充 3 位 → 字串排序＝頁序）。 */
-    private fun scanPages(dir: UniFile): List<CapturePage> =
-        dir.listFiles().orEmpty()
+    /**
+     * 掃該章夾內的圖檔（png/jpg/webp）、依名稱排序（截圖零填充 3 位 → 字串排序＝頁序）。
+     * 每頁順帶讀同名 `.url` sidecar（`003.png` → `003.url`）成 [CapturePage.url]；無 sidecar＝null。
+     */
+    private fun scanPages(dir: UniFile): List<CapturePage> {
+        val files = dir.listFiles().orEmpty()
+        return files
             .filter { !it.isDirectory && isImageName(it.name) }
             .sortedBy { it.name.orEmpty().lowercase() }
-            .map { CapturePage(it, it.name.orEmpty()) }
+            .map { file ->
+                val base = file.name.orEmpty().substringBeforeLast('.')
+                val url = files.firstOrNull { it.name == "$base.url" }
+                    ?.let { sidecar -> runCatching { readSidecar(sidecar) }.getOrNull() }
+                CapturePage(file, file.name.orEmpty(), url)
+            }
+    }
+
+    private fun readSidecar(file: UniFile): String? =
+        file.openInputStream().use { it.readBytes().toString(Charsets.UTF_8).trim() }
+            .takeIf { it.isNotEmpty() }
 
     fun loadPages() {
         screenModelScope.launch {
             val pages = withIOContext { chapterDir()?.let(::scanPages).orEmpty() }
             _state.update { s ->
                 val uris = pages.map { it.uri }.toSet()
-                s.copy(loading = false, pages = pages, selected = s.selected.intersect(uris))
+                s.copy(
+                    loading = false,
+                    pages = pages,
+                    selected = s.selected.intersect(uris),
+                    reloadKey = s.reloadKey + 1,
+                )
             }
+        }
+    }
+
+    /** 對某頁發起重截：帶該頁記錄的網址 [CapturePage.url] + 章夾定位 + 檔名，push 到重截畫面。 */
+    fun reCapture(page: CapturePage) {
+        screenModelScope.launch {
+            _events.send(
+                CaptureReviewEvent.ReCapture(ReCaptureTarget(page.url, safeBook, safeChapter, page.name)),
+            )
         }
     }
 
@@ -140,15 +180,20 @@ class CaptureReviewScreenModel(
         }
     }
 
-    /** 刪除已勾選的圖檔 → 重新掃、更新網格。 */
+    /** 刪除已勾選的圖檔（連同其 `.url` sidecar，免留孤兒 sidecar 在 renumber 撞名/錯貼）→ 重新掃、更新網格。 */
     fun deleteSelected() {
         val selected = _state.value.selected
         if (selected.isEmpty()) return
         screenModelScope.launch {
             withIOContext {
+                val dir = chapterDir()
                 _state.value.pages
                     .filter { it.uri in selected }
-                    .forEach { runCatching { it.file.delete() } }
+                    .forEach { page ->
+                        runCatching { page.file.delete() }
+                        val sidecar = page.name.substringBeforeLast('.') + ".url"
+                        runCatching { dir?.findFile(sidecar)?.delete() }
+                    }
             }
             _state.update { it.copy(selected = emptySet()) }
             loadPages()
@@ -175,13 +220,18 @@ class CaptureReviewScreenModel(
     /**
      * 依目前順序把整章重新編號成連續 001/002…。兩階段避免 001→002 覆蓋衝突：
      * 先全部改成暫名 `__tmp_NNN`，再由暫名（保留順序）改成最終 `NNN`。副檔名逐檔保留。
+     * 每頁的 `.url` sidecar 跟著圖一起連帶改名（同一暫名索引），重排後網址仍對得上頁。
      */
     private fun renumber(dir: UniFile) {
-        // 階段一：目前順序 → 暫名（零填充保順序）。
+        // 階段一：目前順序 → 暫名（零填充保順序）；圖 + 其 .url sidecar 用同一索引一起改。
         scanPages(dir).forEachIndexed { i, page ->
             renameOrCopy(dir, page.file, "%s%03d.%s".format(TMP_PREFIX, i + 1, extOf(page.name)))
+            val base = page.name.substringBeforeLast('.')
+            dir.listFiles().orEmpty().firstOrNull { it.name == "$base.url" }?.let { sidecar ->
+                renameOrCopy(dir, sidecar, "%s%03d.url".format(TMP_PREFIX, i + 1))
+            }
         }
-        // 階段二：暫名（依名稱＝順序）→ 最終 NNN。
+        // 階段二：暫名（依名稱＝順序）→ 最終 NNN；.url 亦在其列（extOf 保留副檔名 url）。
         dir.listFiles().orEmpty()
             .filter { !it.isDirectory && it.name.orEmpty().startsWith(TMP_PREFIX) }
             .sortedBy { it.name.orEmpty() }
