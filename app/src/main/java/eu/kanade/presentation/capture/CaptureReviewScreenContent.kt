@@ -17,8 +17,10 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Save
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
@@ -28,7 +30,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import eu.kanade.presentation.components.AppBar
+import eu.kanade.presentation.components.AppBarActions
 import eu.kanade.tachiyomi.ui.capture.CapturePage
 import eu.kanade.tachiyomi.ui.capture.CaptureReviewState
 import tachiyomi.i18n.MR
@@ -59,12 +67,56 @@ fun CaptureReviewScreenContent(
     onReCapture: (CapturePage) -> Unit,
     onDeleteSelected: () -> Unit,
     onSave: () -> Unit,
+    // 本次連續截圖存下的頁數（0＝非連續 session 進入或無新頁）；>0 才顯示「放棄這次截圖」。
+    sessionPageCount: Int = 0,
+    onDiscardSession: () -> Unit = {},
 ) {
+    // 「放棄這次截圖」確認對話框（防誤觸，此動作刪頁不可復原）。
+    var showDiscardDialog by remember { mutableStateOf(false) }
+
+    if (showDiscardDialog) {
+        AlertDialog(
+            onDismissRequest = { showDiscardDialog = false },
+            title = { Text(stringResource(MR.strings.capture_review_discard)) },
+            text = { Text(stringResource(MR.strings.capture_review_discard_confirm, sessionPageCount)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDiscardDialog = false
+                        onDiscardSession()
+                    },
+                ) {
+                    Text(stringResource(MR.strings.action_ok))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDiscardDialog = false }) {
+                    Text(stringResource(MR.strings.action_cancel))
+                }
+            },
+        )
+    }
+
     Scaffold(
         topBar = {
             AppBar(
                 title = stringResource(MR.strings.capture_review_title),
                 navigateUp = onNavigateUp,
+                // 放棄整批入口放 TopAppBar action（不擠底部「刪除選取／儲存」）；只在有本次 session 新頁時出現。
+                actions = {
+                    if (sessionPageCount > 0) {
+                        AppBarActions(
+                            listOf(
+                                AppBar.Action(
+                                    title = stringResource(MR.strings.capture_review_discard),
+                                    icon = Icons.Outlined.DeleteSweep,
+                                    onClick = { showDiscardDialog = true },
+                                    enabled = !state.saving,
+                                ),
+                            ),
+                        )
+                    }
+                },
             )
         },
         bottomBar = {
@@ -200,12 +252,19 @@ private fun ReviewGridItem(
                 .padding(horizontal = 6.dp, vertical = 2.dp),
         )
 
-        // 右上角勾選框（管批次刪除）。
-        Checkbox(
-            checked = selected,
-            onCheckedChange = { onToggle() },
-            modifier = Modifier.align(Alignment.TopEnd),
-        )
+        // 右上角勾選框（管批次刪除）：包半透明黑底、與左上標號/右下重截 icon 同款，讓勾選框明顯。
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(4.dp)
+                .clip(MaterialTheme.shapes.small)
+                .background(Color.Black.copy(alpha = 0.55f)),
+        ) {
+            Checkbox(
+                checked = selected,
+                onCheckedChange = { onToggle() },
+            )
+        }
 
         // 右下角單頁重截鈕（獨立於刪除 Checkbox）：開該頁記錄的網址重截、覆蓋這一頁。
         IconButton(

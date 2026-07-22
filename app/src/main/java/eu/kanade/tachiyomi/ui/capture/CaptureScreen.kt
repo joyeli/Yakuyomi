@@ -100,6 +100,8 @@ class CaptureScreen(
             capturedCount = continuous.count,
             onStartContinuous = screenModel::startContinuous,
             onStopContinuous = screenModel::stopContinuous,
+            // 停止後 push 確認頁時帶本次 session 截的頁碼（供「放棄這次截圖」只刪這批）。
+            sessionPages = { screenModel.sessionPages },
             reCaptureTargetPage = target?.pageNumber,
             onReCaptureDone = navigator::pop,
         )
@@ -129,6 +131,11 @@ class CaptureScreenModel(
     var bookName by mutableStateOf("")
     var chapterName by mutableStateOf("")
 
+    // 本次連續截圖存下的頁碼（每次 startContinuous 重置）；供確認頁「放棄這次截圖」只刪這批、
+    // 不誤刪接續截圖前該章夾既有的頁。快照回傳（toList）避免與迴圈的 add 撞併發修改。
+    private val _sessionPages = mutableListOf<Int>()
+    val sessionPages: List<Int> get() = _sessionPages.toList()
+
     // 連續截圖：狀態 + 驅動迴圈的 job。
     private val _continuous = MutableStateFlow(ContinuousCaptureState())
     val continuous: StateFlow<ContinuousCaptureState> = _continuous.asStateFlow()
@@ -149,6 +156,7 @@ class CaptureScreenModel(
         continuousJob = screenModelScope.launch {
             var prev: IntArray? = null // 前一幀縮圖（判穩定）
             var lastCaptured: IntArray? = null // 上次已截那頁的縮圖（判換頁 + 去重）
+            _sessionPages.clear()
             _continuous.update { it.copy(running = true, count = 0) }
             try {
                 while (isActive) {
@@ -163,7 +171,9 @@ class CaptureScreenModel(
                         if (!blank && stable && changed) {
                             // WebView 網址須在主執行緒讀（PixelCopy 抓幀已在主執行緒，這裡另起一次快讀）。
                             val url = withUIContext { urlProvider() }
-                            if (saveCapture(frame, url) is CaptureSaveResult.Saved) {
+                            val result = saveCapture(frame, url)
+                            if (result is CaptureSaveResult.Saved) {
+                                _sessionPages.add(result.page)
                                 lastCaptured = thumb
                                 _continuous.update { it.copy(count = it.count + 1) }
                             }

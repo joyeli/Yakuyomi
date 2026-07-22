@@ -268,6 +268,8 @@
     <string name="capture_recapture_title">Re-capture page</string>
     <string name="capture_recapture_action">Replace page %1$d</string>
     <string name="capture_recapture_saved">Replaced page %1$d</string>
+    <string name="capture_review_discard">Discard this capture</string>
+    <string name="capture_review_discard_confirm">Discard the %1$d pages from this capture? This cannot be undone.</string>
     <string name="action_start_downloading_now">Start downloading now</string>
     <string name="action_not_now">Not now</string>
     <string name="action_add_anyway">Add anyway</string>

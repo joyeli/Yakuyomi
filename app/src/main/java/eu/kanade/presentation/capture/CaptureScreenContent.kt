@@ -83,6 +83,8 @@ fun CaptureScreenContent(
     capturedCount: Int,
     onStartContinuous: (FrameGrabber, () -> String?) -> Unit,
     onStopContinuous: () -> Unit,
+    // 停止時讀本次 session 截下的頁碼，帶進確認頁供「放棄這次截圖」只刪這批。
+    sessionPages: () -> List<Int> = { emptyList() },
     // 非 null＝重截模式：隱藏書名/章名輸入與連續擷取，「截這頁」改成覆蓋第 N 頁、成功後 [onReCaptureDone]。
     reCaptureTargetPage: Int? = null,
     onReCaptureDone: () -> Unit = {},
@@ -163,7 +165,9 @@ fun CaptureScreenContent(
     fun toggleContinuous() {
         if (continuousRunning) {
             onStopContinuous()
-            screenNavigator.push(CaptureReviewScreen(bookName.trim(), chapterName.trim()))
+            screenNavigator.push(
+                CaptureReviewScreen(bookName.trim(), chapterName.trim(), sessionPages = sessionPages()),
+            )
             return
         }
         if (bookName.isBlank() || chapterName.isBlank()) {

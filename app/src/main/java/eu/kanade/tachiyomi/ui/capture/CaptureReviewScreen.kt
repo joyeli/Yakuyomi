@@ -40,12 +40,14 @@ import uy.kohesive.injekt.api.get
 class CaptureReviewScreen(
     private val bookName: String,
     private val chapterName: String,
+    // 本次連續截圖存下的頁碼（自 CaptureScreen 帶入）；供「放棄這次截圖」只刪這批、不誤刪既有頁。空＝不顯示放棄入口。
+    private val sessionPages: List<Int> = emptyList(),
 ) : Screen() {
 
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.currentOrThrow
-        val screenModel = rememberScreenModel { CaptureReviewScreenModel(bookName, chapterName) }
+        val screenModel = rememberScreenModel { CaptureReviewScreenModel(bookName, chapterName, sessionPages) }
         val state by screenModel.state.collectAsState()
 
         // 每次進入（含從重截 pop 回來）重掃該章夾——Voyager 隱藏頁會 dispose composition，返回時
@@ -69,6 +71,8 @@ class CaptureReviewScreen(
             onReCapture = screenModel::reCapture,
             onDeleteSelected = screenModel::deleteSelected,
             onSave = screenModel::save,
+            sessionPageCount = sessionPages.size,
+            onDiscardSession = screenModel::discardSession,
         )
     }
 }
@@ -103,6 +107,8 @@ sealed interface CaptureReviewEvent {
 class CaptureReviewScreenModel(
     bookName: String,
     chapterName: String,
+    // 本次連續截圖存下的頁碼（供 [discardSession] 只刪這批）。
+    private val sessionPages: List<Int> = emptyList(),
     private val storageManager: StorageManager = Injekt.get(),
     private val networkToLocalManga: NetworkToLocalManga = Injekt.get(),
 ) : ScreenModel {
@@ -197,6 +203,28 @@ class CaptureReviewScreenModel(
             }
             _state.update { it.copy(selected = emptySet()) }
             loadPages()
+        }
+    }
+
+    /**
+     * 放棄這次連續截圖：刪掉本 session 截的頁（[sessionPages] 對應的 `%03d.png`／其他副檔名同 basename 圖 + `%03d.url`），
+     * 只在該章夾內、存在才刪、找不到＝no-op；**不動接續截圖前既有的其他頁** → 發 Back 事件退回上一頁。
+     */
+    fun discardSession() {
+        screenModelScope.launch {
+            withIOContext {
+                val dir = chapterDir() ?: return@withIOContext
+                val targets = sessionPages.map { "%03d".format(it) }.toSet()
+                dir.listFiles().orEmpty()
+                    .filter { !it.isDirectory }
+                    .filter {
+                        val name = it.name.orEmpty()
+                        val base = name.substringBeforeLast('.')
+                        base in targets && (isImageName(name) || name.endsWith(".url"))
+                    }
+                    .forEach { file -> runCatching { file.delete() } }
+            }
+            _events.send(CaptureReviewEvent.Back)
         }
     }
 
