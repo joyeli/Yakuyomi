@@ -1,7 +1,9 @@
 package eu.kanade.presentation.capture
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -16,14 +18,18 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckBox
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -65,6 +71,7 @@ fun CaptureReviewScreenContent(
     onNavigateUp: () -> Unit,
     onToggleSelect: (String) -> Unit,
     onReCapture: (CapturePage) -> Unit,
+    onInsert: (CapturePage, Boolean) -> Unit,
     onDeleteSelected: () -> Unit,
     onSave: () -> Unit,
     // 本次連續截圖存下的頁數（0＝非連續 session 進入或無新頁）；>0 才顯示「放棄這次截圖」。
@@ -192,9 +199,11 @@ fun CaptureReviewScreenContent(
                         page = page,
                         number = index + 1,
                         selected = page.uri in state.selected,
+                        missing = page.uri in state.missingBefore,
                         reloadKey = state.reloadKey,
                         onToggle = { onToggleSelect(page.uri) },
                         onReCapture = { onReCapture(page) },
+                        onInsert = { before -> onInsert(page, before) },
                     )
                 }
             }
@@ -202,21 +211,37 @@ fun CaptureReviewScreenContent(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ReviewGridItem(
     page: CapturePage,
     number: Int,
     selected: Boolean,
+    missing: Boolean,
     reloadKey: Int,
     onToggle: () -> Unit,
     onReCapture: () -> Unit,
+    onInsert: (before: Boolean) -> Unit,
 ) {
+    // 長按縮圖開「在此頁前/後插入」選單（角落已有 3 個 icon，插入走長按不再加角落 icon）。
+    var menuExpanded by remember { mutableStateOf(false) }
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .aspectRatio(MangaPageRatio)
             .clip(MaterialTheme.shapes.small)
-            .clickable(onClick = onToggle),
+            // 缺頁（相鄰頁 URL 頁碼跳號）→ error 色外框醒目提示；只提示、不擋操作。
+            .then(
+                if (missing) {
+                    Modifier.border(2.dp, MaterialTheme.colorScheme.error, MaterialTheme.shapes.small)
+                } else {
+                    Modifier
+                },
+            )
+            .combinedClickable(
+                onClick = onToggle,
+                onLongClick = { menuExpanded = true },
+            ),
     ) {
         // 重截同檔名覆蓋 → coil 預設用 uri 當快取鍵會顯示舊圖；把 reloadKey 併進快取鍵每次重掃即失效。
         AsyncImage(
@@ -252,21 +277,25 @@ private fun ReviewGridItem(
                 .padding(horizontal = 6.dp, vertical = 2.dp),
         )
 
-        // 右上角勾選框（管批次刪除）：包半透明黑底、與左上標號/右下重截 icon 同款，讓勾選框明顯。
-        Box(
+        // 右上角勾選框（管批次刪除）：與右下重截 icon 完全對稱（同款黑底方塊 + 28dp），三角落大小一致。
+        IconButton(
+            onClick = onToggle,
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(4.dp)
+                .padding(2.dp)
                 .clip(MaterialTheme.shapes.small)
-                .background(Color.Black.copy(alpha = 0.55f)),
+                .background(Color.Black.copy(alpha = 0.55f))
+                .size(28.dp),
         ) {
-            Checkbox(
-                checked = selected,
-                onCheckedChange = { onToggle() },
+            Icon(
+                imageVector = if (selected) Icons.Filled.CheckBox else Icons.Outlined.CheckBoxOutlineBlank,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(18.dp),
             )
         }
 
-        // 右下角單頁重截鈕（獨立於刪除 Checkbox）：開該頁記錄的網址重截、覆蓋這一頁。
+        // 右下角單頁重截鈕（獨立於刪除勾選）：開該頁記錄的網址重截、覆蓋這一頁。
         IconButton(
             onClick = onReCapture,
             modifier = Modifier
@@ -281,6 +310,47 @@ private fun ReviewGridItem(
                 contentDescription = stringResource(MR.strings.capture_recapture_action, number),
                 tint = Color.White,
                 modifier = Modifier.size(18.dp),
+            )
+        }
+
+        // 缺頁警告（左下角，避開已占用的三角）：error 色三角驚嘆號、與外框同義。
+        if (missing) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(2.dp)
+                    .clip(MaterialTheme.shapes.small)
+                    .background(Color.Black.copy(alpha = 0.55f))
+                    .size(28.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Warning,
+                    contentDescription = stringResource(MR.strings.capture_missing_pages),
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+
+        // 插入選單（長按縮圖開）：在此頁前 / 在此頁後插入一張新截圖。
+        DropdownMenu(
+            expanded = menuExpanded,
+            onDismissRequest = { menuExpanded = false },
+        ) {
+            DropdownMenuItem(
+                text = { Text(stringResource(MR.strings.capture_insert_before)) },
+                onClick = {
+                    menuExpanded = false
+                    onInsert(true)
+                },
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(MR.strings.capture_insert_after)) },
+                onClick = {
+                    menuExpanded = false
+                    onInsert(false)
+                },
             )
         }
     }

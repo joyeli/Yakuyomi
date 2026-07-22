@@ -87,9 +87,14 @@ fun CaptureScreenContent(
     sessionPages: () -> List<Int> = { emptyList() },
     // 非 null＝重截模式：隱藏書名/章名輸入與連續擷取，「截這頁」改成覆蓋第 N 頁、成功後 [onReCaptureDone]。
     reCaptureTargetPage: Int? = null,
+    // 非 null＝插入模式：同樣隱藏書名/章名與連續，「截這頁」改成「插入為第 X 頁」、成功後 [onReCaptureDone]。
+    insertTargetPage: Int? = null,
     onReCaptureDone: () -> Unit = {},
 ) {
     val reCaptureMode = reCaptureTargetPage != null
+    val insertMode = insertTargetPage != null
+    // 單張目標模式（重截 / 插入）：隱藏書名/章名輸入與連續擷取，只留單一擷取鈕、成功後退回。
+    val singleShotMode = reCaptureMode || insertMode
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val screenNavigator = LocalNavigator.currentOrThrow
@@ -140,13 +145,21 @@ fun CaptureScreenContent(
             scope.launch {
                 when (val result = onCapture(bitmap, url)) {
                     is CaptureSaveResult.Saved -> {
-                        if (reCaptureMode) {
-                            context.toast(
-                                context.contextStringResource(MR.strings.capture_recapture_saved, result.page),
-                            )
-                            onReCaptureDone()
-                        } else {
-                            context.toast(context.contextStringResource(MR.strings.capture_saved, result.page))
+                        when {
+                            reCaptureMode -> {
+                                context.toast(
+                                    context.contextStringResource(MR.strings.capture_recapture_saved, result.page),
+                                )
+                                onReCaptureDone()
+                            }
+                            insertMode -> {
+                                context.toast(
+                                    context.contextStringResource(MR.strings.capture_insert_saved, result.page),
+                                )
+                                onReCaptureDone()
+                            }
+                            else ->
+                                context.toast(context.contextStringResource(MR.strings.capture_saved, result.page))
                         }
                     }
                     CaptureSaveResult.MissingName ->
@@ -200,13 +213,17 @@ fun CaptureScreenContent(
             Column {
                 AppBar(
                     title = stringResource(
-                        if (reCaptureMode) MR.strings.capture_recapture_title else MR.strings.capture_manga,
+                        when {
+                            reCaptureMode -> MR.strings.capture_recapture_title
+                            insertMode -> MR.strings.capture_insert_title
+                            else -> MR.strings.capture_manga
+                        },
                     ),
                     navigateUp = onNavigateUp,
                     navigationIcon = Icons.Outlined.Close,
                 )
-                // 重截模式不需要書名/章名輸入（目標頁已鎖定），隱藏之。
-                if (!reCaptureMode) {
+                // 重截 / 插入模式不需要書名/章名輸入（目標頁已鎖定），隱藏之。
+                if (!singleShotMode) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -274,6 +291,18 @@ fun CaptureScreenContent(
                                     text = stringResource(
                                         MR.strings.capture_recapture_action,
                                         reCaptureTargetPage ?: 0,
+                                    ),
+                                    modifier = Modifier.padding(start = 6.dp),
+                                )
+                            }
+                        } else if (insertMode) {
+                            // 插入模式：只有「截這頁（插入為第 X 頁）」，捲到要補的頁按 → 騰位插入 + 回確認頁。
+                            Button(onClick = { capture() }) {
+                                Icon(imageVector = Icons.Outlined.PhotoCamera, contentDescription = null)
+                                Text(
+                                    text = stringResource(
+                                        MR.strings.capture_insert_action,
+                                        insertTargetPage ?: 0,
                                     ),
                                     modifier = Modifier.padding(start = 6.dp),
                                 )

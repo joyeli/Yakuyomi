@@ -60,6 +60,7 @@ class CaptureReviewScreen(
                     is CaptureReviewEvent.OpenManga -> navigator.replace(MangaScreen(event.mangaId))
                     CaptureReviewEvent.Back -> navigator.pop()
                     is CaptureReviewEvent.ReCapture -> navigator.push(CaptureScreen(reCaptureTarget = event.target))
+                    is CaptureReviewEvent.Insert -> navigator.push(CaptureScreen(insertTarget = event.target))
                 }
             }
         }
@@ -69,6 +70,7 @@ class CaptureReviewScreen(
             onNavigateUp = navigator::pop,
             onToggleSelect = screenModel::toggleSelection,
             onReCapture = screenModel::reCapture,
+            onInsert = screenModel::insert,
             onDeleteSelected = screenModel::deleteSelected,
             onSave = screenModel::save,
             sessionPageCount = sessionPages.size,
@@ -93,15 +95,18 @@ data class CaptureReviewState(
     val loading: Boolean = true,
     val pages: List<CapturePage> = emptyList(),
     val selected: Set<String> = emptySet(),
+    // 缺頁提示：這些頁（uri）的「前面」相鄰頁 URL 頁碼跳號（>1）→ 該格標紅提示可能缺頁。
+    val missingBefore: Set<String> = emptySet(),
     val saving: Boolean = false,
     val reloadKey: Int = 0,
 )
 
-/** 一次性導覽事件：儲存後開漫畫詳情頁、（找不到漫畫時）退回上一頁、或開重截畫面。 */
+/** 一次性導覽事件：儲存後開漫畫詳情頁、（找不到漫畫時）退回上一頁、開重截或插入畫面。 */
 sealed interface CaptureReviewEvent {
     data class OpenManga(val mangaId: Long) : CaptureReviewEvent
     data object Back : CaptureReviewEvent
     data class ReCapture(val target: ReCaptureTarget) : CaptureReviewEvent
+    data class Insert(val target: InsertTarget) : CaptureReviewEvent
 }
 
 class CaptureReviewScreenModel(
@@ -162,6 +167,7 @@ class CaptureReviewScreenModel(
                     loading = false,
                     pages = pages,
                     selected = s.selected.intersect(uris),
+                    missingBefore = computeMissing(pages),
                     reloadKey = s.reloadKey + 1,
                 )
             }
@@ -175,6 +181,45 @@ class CaptureReviewScreenModel(
                 CaptureReviewEvent.ReCapture(ReCaptureTarget(page.url, safeBook, safeChapter, page.name)),
             )
         }
+    }
+
+    /**
+     * 在某頁前/後插入一張新截圖：算出插入位置頁碼（before＝該頁頁碼 N、after＝N+1）→ push 插入模式的擷取畫面。
+     * 頁碼取自檔名（`003.png` → 3；解析不到＝忽略）。實際騰位與存檔在 [CaptureScreenModel.saveInsert]。
+     */
+    fun insert(page: CapturePage, before: Boolean) {
+        val pageNo = page.name.substringBeforeLast('.').toIntOrNull() ?: return
+        val insertAt = if (before) pageNo else pageNo + 1
+        screenModelScope.launch {
+            _events.send(CaptureReviewEvent.Insert(InsertTarget(safeBook, safeChapter, insertAt)))
+        }
+    }
+
+    /**
+     * 依相鄰兩頁的 URL 頁碼算「缺頁」：兩頁 URL 皆能解析出頁碼、且後頁頁碼 - 前頁頁碼 > 1 → 標記後頁（其前面缺頁）。
+     * URL 解析不到頁碼（該站無頁碼/固定網址）＝不標，屬正常。
+     */
+    private fun computeMissing(pages: List<CapturePage>): Set<String> {
+        val result = mutableSetOf<String>()
+        for (i in 1 until pages.size) {
+            val prev = parsePageNumber(pages[i - 1].url)
+            val cur = parsePageNumber(pages[i].url)
+            if (prev != null && cur != null && cur - prev > 1) {
+                result.add(pages[i].uri)
+            }
+        }
+        return result
+    }
+
+    /**
+     * 從 URL 啟發式解析頁碼：先試 query 頁碼（`?page=`/`?p=`/`?pg=`），再試路徑末段數字（`/12` 或 `/12.jpg`）。
+     * 第一個命中回其 Int，都不中回 null。
+     */
+    private fun parsePageNumber(url: String?): Int? {
+        if (url.isNullOrBlank()) return null
+        Regex("[?&](?:page|p|pg)=(\\d+)").find(url)?.let { return it.groupValues[1].toIntOrNull() }
+        Regex("/(\\d+)(?:\\.[a-zA-Z0-9]+)?(?:[?#].*)?$").find(url)?.let { return it.groupValues[1].toIntOrNull() }
+        return null
     }
 
     /** 切換某頁的勾選（要刪的）。 */

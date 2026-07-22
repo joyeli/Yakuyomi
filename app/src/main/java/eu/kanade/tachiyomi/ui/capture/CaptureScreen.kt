@@ -73,6 +73,7 @@ data class ContinuousCaptureState(val running: Boolean = false, val count: Int =
 class CaptureScreen(
     private val initialUrl: String = "",
     private val reCaptureTarget: ReCaptureTarget? = null,
+    private val insertTarget: InsertTarget? = null,
 ) : Screen() {
 
     @Composable
@@ -81,6 +82,7 @@ class CaptureScreen(
         val screenModel = rememberScreenModel { CaptureScreenModel() }
         val continuous by screenModel.continuous.collectAsState()
         val target = reCaptureTarget
+        val insert = insertTarget
 
         CaptureScreenContent(
             onNavigateUp = navigator::pop,
@@ -89,12 +91,18 @@ class CaptureScreen(
             onBookNameChange = { screenModel.bookName = it },
             chapterName = screenModel.chapterName,
             onChapterNameChange = { screenModel.chapterName = it },
-            onCapture = if (target != null) {
-                { bitmap, url ->
-                    screenModel.saveReCapture(bitmap, url, target.safeBook, target.safeChapter, target.pageName)
+            onCapture = when {
+                target != null -> {
+                    { bitmap, url ->
+                        screenModel.saveReCapture(bitmap, url, target.safeBook, target.safeChapter, target.pageName)
+                    }
                 }
-            } else {
-                screenModel::saveCapture
+                insert != null -> {
+                    { bitmap, url ->
+                        screenModel.saveInsert(bitmap, url, insert.safeBook, insert.safeChapter, insert.insertAtPage)
+                    }
+                }
+                else -> screenModel::saveCapture
             },
             continuousRunning = continuous.running,
             capturedCount = continuous.count,
@@ -103,6 +111,8 @@ class CaptureScreen(
             // 停止後 push 確認頁時帶本次 session 截的頁碼（供「放棄這次截圖」只刪這批）。
             sessionPages = { screenModel.sessionPages },
             reCaptureTargetPage = target?.pageNumber,
+            insertTargetPage = insert?.insertAtPage,
+            // 重截 / 插入皆為單張、成功後退回確認頁（其 LaunchedEffect 重掃顯示更新後的序）。
             onReCaptureDone = navigator::pop,
         )
     }
@@ -121,6 +131,17 @@ data class ReCaptureTarget(
 ) {
     val pageNumber: Int get() = pageName.substringBeforeLast('.').toIntOrNull() ?: 0
 }
+
+/**
+ * 插入目標：確認頁長按某頁選「在此頁前/後插入」時帶進 [CaptureScreen] 的參數。null＝非插入模式。
+ * [insertAtPage]＝新頁要落的頁碼；存檔時把該頁碼（含）以上的既有頁 +1 騰位（見 [CaptureScreenModel.saveInsert]）。
+ * 章夾用已 sanitise 的 [safeBook] / [safeChapter] 定位（與存檔時同一套安全檔名）。
+ */
+data class InsertTarget(
+    val safeBook: String,
+    val safeChapter: String,
+    val insertAtPage: Int,
+)
 
 class CaptureScreenModel(
     private val context: Application = Injekt.get(),
@@ -309,6 +330,60 @@ class CaptureScreenModel(
             val page = pageName.substringBeforeLast('.').toIntOrNull() ?: 0
             CaptureSaveResult.Saved(page, file.uri.toString())
         }.getOrElse { CaptureSaveResult.Failed(it.message) }
+    }
+
+    /**
+     * 插入：在 [insertAtPage] 位置插一張新截圖。先把該章夾內頁碼 >= [insertAtPage] 的既有頁（圖 + `.url` sidecar）
+     * 由**尾端往前逐一 +1** 改名騰位（降序處理 → 目標名恆空、不覆蓋），再把新截頁存成 `%03d.png`.format(insertAtPage)
+     * + 同 basename `.url` sidecar。null-safe、只碰該章夾；找不到章夾＝失敗。頁碼可能留下與插入前一致的間隙，
+     * 交由確認頁儲存時的 renumber 收斂成連續。
+     */
+    suspend fun saveInsert(
+        bitmap: Bitmap,
+        url: String?,
+        safeBook: String,
+        safeChapter: String,
+        insertAtPage: Int,
+    ): CaptureSaveResult = withIOContext {
+        runCatching {
+            val base = storageManager.getLocalSourceDirectory()
+                ?: error("Local source directory unavailable")
+            val chapterDir = base.findFile(safeBook)?.takeIf { it.isDirectory }
+                ?.findFile(safeChapter)?.takeIf { it.isDirectory }
+                ?: error("Chapter directory not found")
+
+            // 騰位：頁碼 >= insertAtPage 的圖 + .url 皆 +1，降序（尾端先）避免改名撞到既有目標名。
+            chapterDir.listFiles().orEmpty()
+                .filter { !it.isDirectory }
+                .mapNotNull { f ->
+                    val name = f.name.orEmpty()
+                    val n = name.substringBeforeLast('.').toIntOrNull()
+                    if (n != null && n >= insertAtPage) Triple(n, f, name) else null
+                }
+                .sortedByDescending { it.first }
+                .forEach { (n, f, name) ->
+                    renameOrCopyFile(chapterDir, f, "%03d.%s".format(n + 1, name.substringAfterLast('.', "png")))
+                }
+
+            val name = "%03d.png".format(insertAtPage)
+            val file = chapterDir.findFile(name) ?: chapterDir.createFile(name) ?: error("Cannot create page file")
+            openTruncating(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            writeSidecar(chapterDir, "%03d.url".format(insertAtPage), url)
+
+            CaptureSaveResult.Saved(insertAtPage, file.uri.toString())
+        }.getOrElse { CaptureSaveResult.Failed(it.message) }
+    }
+
+    /** 改名；[UniFile.renameTo] 失敗（回 false / 丟例外）→ 退回 copy 到新名 + 刪舊檔。 */
+    private fun renameOrCopyFile(dir: UniFile, file: UniFile, newName: String) {
+        if (runCatching { file.renameTo(newName) }.getOrDefault(false)) return
+        val dest = dir.createFile(newName) ?: return
+        runCatching {
+            file.openInputStream().use { input ->
+                dest.openOutputStream().use { output -> input.copyTo(output) }
+            }
+            file.delete()
+        }
     }
 
     /**

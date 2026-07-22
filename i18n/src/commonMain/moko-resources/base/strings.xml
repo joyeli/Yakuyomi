@@ -270,6 +270,12 @@
     <string name="capture_recapture_saved">Replaced page %1$d</string>
     <string name="capture_review_discard">Discard this capture</string>
     <string name="capture_review_discard_confirm">Discard the %1$d pages from this capture? This cannot be undone.</string>
+    <string name="capture_insert_before">Insert before this page</string>
+    <string name="capture_insert_after">Insert after this page</string>
+    <string name="capture_insert_title">Insert page</string>
+    <string name="capture_insert_action">Insert as page %1$d</string>
+    <string name="capture_insert_saved">Inserted page %1$d</string>
+    <string name="capture_missing_pages">Possible missing pages</string>
     <string name="action_start_downloading_now">Start downloading now</string>
     <string name="action_not_now">Not now</string>
     <string name="action_add_anyway">Add anyway</string>
