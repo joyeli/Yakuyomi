@@ -2,7 +2,6 @@ package eu.kanade.presentation.capture
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,7 +18,6 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckBox
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DeleteSweep
@@ -199,7 +197,6 @@ fun CaptureReviewScreenContent(
                         page = page,
                         number = index + 1,
                         selected = page.uri in state.selected,
-                        missing = page.uri in state.missingBefore,
                         reloadKey = state.reloadKey,
                         onToggle = { onToggleSelect(page.uri) },
                         onReCapture = { onReCapture(page) },
@@ -217,7 +214,6 @@ private fun ReviewGridItem(
     page: CapturePage,
     number: Int,
     selected: Boolean,
-    missing: Boolean,
     reloadKey: Int,
     onToggle: () -> Unit,
     onReCapture: () -> Unit,
@@ -230,14 +226,6 @@ private fun ReviewGridItem(
             .fillMaxWidth()
             .aspectRatio(MangaPageRatio)
             .clip(MaterialTheme.shapes.small)
-            // 缺頁（相鄰頁 URL 頁碼跳號）→ error 色外框醒目提示；只提示、不擋操作。
-            .then(
-                if (missing) {
-                    Modifier.border(2.dp, MaterialTheme.colorScheme.error, MaterialTheme.shapes.small)
-                } else {
-                    Modifier
-                },
-            )
             .combinedClickable(
                 onClick = onToggle,
                 onLongClick = { menuExpanded = true },
@@ -311,26 +299,6 @@ private fun ReviewGridItem(
                 tint = Color.White,
                 modifier = Modifier.size(18.dp),
             )
-        }
-
-        // 缺頁警告（左下角，避開已占用的三角）：error 色三角驚嘆號、與外框同義。
-        if (missing) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(2.dp)
-                    .clip(MaterialTheme.shapes.small)
-                    .background(Color.Black.copy(alpha = 0.55f))
-                    .size(28.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Warning,
-                    contentDescription = stringResource(MR.strings.capture_missing_pages),
-                    tint = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.size(18.dp),
-                )
-            }
         }
 
         // 插入選單（長按縮圖開）：在此頁前 / 在此頁後插入一張新截圖。

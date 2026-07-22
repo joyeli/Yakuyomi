@@ -86,7 +86,12 @@ class CaptureScreen(
 
         CaptureScreenContent(
             onNavigateUp = navigator::pop,
-            initialUrl = target?.url ?: initialUrl,
+            initialUrl = when {
+                target != null -> target.url ?: initialUrl
+                // 插入模式：從被長按那頁的網址開起（使用者由該頁捲到要插入的頁再截）；取不到＝about:blank。
+                insert != null -> insert.url ?: "about:blank"
+                else -> initialUrl
+            },
             bookName = screenModel.bookName,
             onBookNameChange = { screenModel.bookName = it },
             chapterName = screenModel.chapterName,
@@ -135,12 +140,14 @@ data class ReCaptureTarget(
 /**
  * 插入目標：確認頁長按某頁選「在此頁前/後插入」時帶進 [CaptureScreen] 的參數。null＝非插入模式。
  * [insertAtPage]＝新頁要落的頁碼；存檔時把該頁碼（含）以上的既有頁 +1 騰位（見 [CaptureScreenModel.saveInsert]）。
+ * [url]＝被長按那頁記錄的網址（相鄰頁 URL，供插入時開回附近；可能為 null＝該頁當初取不到網址）。
  * 章夾用已 sanitise 的 [safeBook] / [safeChapter] 定位（與存檔時同一套安全檔名）。
  */
 data class InsertTarget(
     val safeBook: String,
     val safeChapter: String,
     val insertAtPage: Int,
+    val url: String? = null,
 )
 
 class CaptureScreenModel(
@@ -169,7 +176,7 @@ class CaptureScreenModel(
      * 需先填書名 / 章名（呼叫端已擋一次，這裡再守一次）；重複呼叫不會疊開。
      *
      * 抓幀在主執行緒（PixelCopy 需 window）、比對在 [Dispatchers.Default]、存檔在 IO（[saveCapture] 內建）。
-     * [urlProvider] 在主執行緒讀當前 WebView 網址（供每張截圖寫 sidecar `.url`）；取不到＝null（不寫）。
+     * [urlProvider] 在主執行緒讀當前 WebView 網址（供每張截圖記進整章 meta）；取不到＝null（不記）。
      */
     fun startContinuous(grabber: FrameGrabber, urlProvider: () -> String?) {
         if (bookName.isBlank() || chapterName.isBlank()) return
@@ -271,8 +278,8 @@ class CaptureScreenModel(
     /**
      * 把 [bitmap] 存成 LocalSource 的 `<local>/<書名>/<章名>/NNN.png`（零填充、頁碼在該章內遞增）。
      * 頁碼＝掃該章夾既有 `NNN.*` 取最大值 +1（換章名自然接續該章、重進畫面也不覆蓋）。
-     * 存完在同章夾寫 sidecar `NNN.url`（純文字＝該頁截圖當下的網址），供確認頁重截時開回同一頁；
-     * [url] 為 null/空＝取不到網址（不寫 sidecar，不影響閱讀——`.url` 非圖副檔名、LocalSource 掃描會略過）。
+     * 存完把該頁網址記進**整章一個** meta 檔 `.yakuyomi_meta.json`（[updateMetaUrl]，取代舊 `NNN.url` sidecar）；
+     * [url] 為 null/空＝取不到網址（該頁不記，不影響閱讀）。
      * I/O 全在 IO thread；SAF 走 ContentResolver "wt" 截斷寫（file:// 用一般串流）。
      */
     suspend fun saveCapture(bitmap: Bitmap, url: String?): CaptureSaveResult = withIOContext {
@@ -297,15 +304,15 @@ class CaptureScreenModel(
             val name = "%03d.png".format(page)
             val file = chapterDir.createFile(name) ?: error("Cannot create page file")
             openTruncating(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-            writeSidecar(chapterDir, "%03d.url".format(page), url)
+            updateMetaUrl(chapterDir, page, url)
 
             CaptureSaveResult.Saved(page, file.uri.toString())
         }.getOrElse { CaptureSaveResult.Failed(it.message) }
     }
 
     /**
-     * 重截：覆蓋既有頁 [pageName]（如 `003.png`）並更新其 sidecar `NNN.url`。不新增頁碼、不掃 next。
-     * 章夾用已 sanitise 的 [safeBook] / [safeChapter] 定位（與存檔時同一套安全檔名）；找不到章夾＝失敗。
+     * 重截：覆蓋既有頁 [pageName]（如 `003.png`）並更新其在整章 meta（`.yakuyomi_meta.json`）記的網址。
+     * 不新增頁碼、不掃 next。章夾用已 sanitise 的 [safeBook] / [safeChapter] 定位；找不到章夾＝失敗。
      */
     suspend fun saveReCapture(
         bitmap: Bitmap,
@@ -325,18 +332,18 @@ class CaptureScreenModel(
                 ?: chapterDir.createFile(pageName)
                 ?: error("Cannot create page file")
             openTruncating(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-            writeSidecar(chapterDir, pageName.substringBeforeLast('.') + ".url", url)
 
             val page = pageName.substringBeforeLast('.').toIntOrNull() ?: 0
+            updateMetaUrl(chapterDir, page, url)
             CaptureSaveResult.Saved(page, file.uri.toString())
         }.getOrElse { CaptureSaveResult.Failed(it.message) }
     }
 
     /**
-     * 插入：在 [insertAtPage] 位置插一張新截圖。先把該章夾內頁碼 >= [insertAtPage] 的既有頁（圖 + `.url` sidecar）
-     * 由**尾端往前逐一 +1** 改名騰位（降序處理 → 目標名恆空、不覆蓋），再把新截頁存成 `%03d.png`.format(insertAtPage)
-     * + 同 basename `.url` sidecar。null-safe、只碰該章夾；找不到章夾＝失敗。頁碼可能留下與插入前一致的間隙，
-     * 交由確認頁儲存時的 renumber 收斂成連續。
+     * 插入：在 [insertAtPage] 位置插一張新截圖。先把該章夾內頁碼 >= [insertAtPage] 的既有頁圖（含 legacy `.url`）
+     * 由**尾端往前逐一 +1** 改名騰位（降序處理 → 目標名恆空、不覆蓋），並把整章 meta 內 key >= [insertAtPage]
+     * 的網址同步 +1 搬位、放入新頁 [url]，最後存新截頁 `%03d.png`.format(insertAtPage)。
+     * null-safe、只碰該章夾；找不到章夾＝失敗。頁碼可能留下與插入前一致的間隙，交由確認頁儲存時的 renumber 收斂成連續。
      */
     suspend fun saveInsert(
         bitmap: Bitmap,
@@ -352,7 +359,8 @@ class CaptureScreenModel(
                 ?.findFile(safeChapter)?.takeIf { it.isDirectory }
                 ?: error("Chapter directory not found")
 
-            // 騰位：頁碼 >= insertAtPage 的圖 + .url 皆 +1，降序（尾端先）避免改名撞到既有目標名。
+            // 騰位：頁碼 >= insertAtPage 的圖（含 legacy .url sidecar）皆 +1，降序（尾端先）避免改名撞到既有目標名。
+            // meta 檔（.yakuyomi_meta.json）basename 非數字 → 不被此迴圈掃到、不會被誤改名。
             chapterDir.listFiles().orEmpty()
                 .filter { !it.isDirectory }
                 .mapNotNull { f ->
@@ -365,10 +373,21 @@ class CaptureScreenModel(
                     renameOrCopyFile(chapterDir, f, "%03d.%s".format(n + 1, name.substringAfterLast('.', "png")))
                 }
 
+            // meta 同步騰位：key >= insertAtPage 的網址 +1 搬位，再放入新頁 url。
+            val meta = readMeta(chapterDir)
+            val shifted = mutableMapOf<String, String>()
+            for ((key, u) in meta) {
+                val n = key.toIntOrNull()
+                if (n != null && n >= insertAtPage) shifted["%03d".format(n + 1)] = u else shifted[key] = u
+            }
+            val trimmedUrl = url?.trim().orEmpty()
+            val insertKey = "%03d".format(insertAtPage)
+            if (trimmedUrl.isNotEmpty()) shifted[insertKey] = trimmedUrl else shifted.remove(insertKey)
+            writeMeta(context, chapterDir, shifted)
+
             val name = "%03d.png".format(insertAtPage)
             val file = chapterDir.findFile(name) ?: chapterDir.createFile(name) ?: error("Cannot create page file")
             openTruncating(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-            writeSidecar(chapterDir, "%03d.url".format(insertAtPage), url)
 
             CaptureSaveResult.Saved(insertAtPage, file.uri.toString())
         }.getOrElse { CaptureSaveResult.Failed(it.message) }
@@ -387,16 +406,16 @@ class CaptureScreenModel(
     }
 
     /**
-     * 寫 URL sidecar（純文字 UTF-8）。[url] 為 null/空白＝不寫（取不到網址時 sidecar 就缺席、讀時視為 null）。
-     * 同名已存在＝截斷覆蓋（[openTruncating]），供重截更新網址。
+     * 把單頁的網址寫進整章 meta（`.yakuyomi_meta.json`，見 [CaptureMeta]）：讀現有 map → 設/移除該頁 key
+     * （`%03d`.format(page)）→ 整檔截斷回寫。[url] 為 null/空白＝該頁不記（既有記錄一併移除）。
+     * best-effort（[writeMeta] 內建吞例外），取不到網址不影響存圖。
      */
-    private fun writeSidecar(chapterDir: UniFile, name: String, url: String?) {
+    private fun updateMetaUrl(chapterDir: UniFile, page: Int, url: String?) {
+        val map = readMeta(chapterDir)
+        val key = "%03d".format(page)
         val trimmed = url?.trim().orEmpty()
-        if (trimmed.isEmpty()) return
-        runCatching {
-            val file = chapterDir.findFile(name) ?: chapterDir.createFile(name) ?: return
-            openTruncating(file).use { it.write(trimmed.toByteArray(Charsets.UTF_8)) }
-        }
+        if (trimmed.isEmpty()) map.remove(key) else map[key] = trimmed
+        writeMeta(context, chapterDir, map)
     }
 
     private fun nextPageNumber(chapterDir: UniFile): Int =

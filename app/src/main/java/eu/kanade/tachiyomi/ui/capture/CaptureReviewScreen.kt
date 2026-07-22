@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.ui.capture
 
+import android.app.Application
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -95,8 +96,6 @@ data class CaptureReviewState(
     val loading: Boolean = true,
     val pages: List<CapturePage> = emptyList(),
     val selected: Set<String> = emptySet(),
-    // 缺頁提示：這些頁（uri）的「前面」相鄰頁 URL 頁碼跳號（>1）→ 該格標紅提示可能缺頁。
-    val missingBefore: Set<String> = emptySet(),
     val saving: Boolean = false,
     val reloadKey: Int = 0,
 )
@@ -116,6 +115,8 @@ class CaptureReviewScreenModel(
     private val sessionPages: List<Int> = emptyList(),
     private val storageManager: StorageManager = Injekt.get(),
     private val networkToLocalManga: NetworkToLocalManga = Injekt.get(),
+    // 寫整章 meta（.yakuyomi_meta.json）需 context 開截斷串流（見 [writeMeta]）。
+    private val context: Application = Injekt.get(),
 ) : ScreenModel {
 
     // 章夾定位用「安全檔名」（與 CaptureScreenModel.saveCapture 落地時同一套 sanitise）。
@@ -139,17 +140,20 @@ class CaptureReviewScreenModel(
 
     /**
      * 掃該章夾內的圖檔（png/jpg/webp）、依名稱排序（截圖零填充 3 位 → 字串排序＝頁序）。
-     * 每頁順帶讀同名 `.url` sidecar（`003.png` → `003.url`）成 [CapturePage.url]；無 sidecar＝null。
+     * 網址先讀整章 meta（`.yakuyomi_meta.json`，[readMeta] 一次）→ 每頁 `map[basename]`；
+     * meta 沒有該頁 → **fallback** 讀舊 `NNN.url` sidecar（相容既有那批、不用重截）；都無＝null。
      */
     private fun scanPages(dir: UniFile): List<CapturePage> {
         val files = dir.listFiles().orEmpty()
+        val meta = readMeta(dir)
         return files
             .filter { !it.isDirectory && isImageName(it.name) }
             .sortedBy { it.name.orEmpty().lowercase() }
             .map { file ->
                 val base = file.name.orEmpty().substringBeforeLast('.')
-                val url = files.firstOrNull { it.name == "$base.url" }
-                    ?.let { sidecar -> runCatching { readSidecar(sidecar) }.getOrNull() }
+                val url = meta[base]
+                    ?: files.firstOrNull { it.name == "$base.url" }
+                        ?.let { sidecar -> runCatching { readSidecar(sidecar) }.getOrNull() }
                 CapturePage(file, file.name.orEmpty(), url)
             }
     }
@@ -167,7 +171,6 @@ class CaptureReviewScreenModel(
                     loading = false,
                     pages = pages,
                     selected = s.selected.intersect(uris),
-                    missingBefore = computeMissing(pages),
                     reloadKey = s.reloadKey + 1,
                 )
             }
@@ -184,42 +187,16 @@ class CaptureReviewScreenModel(
     }
 
     /**
-     * 在某頁前/後插入一張新截圖：算出插入位置頁碼（before＝該頁頁碼 N、after＝N+1）→ push 插入模式的擷取畫面。
+     * 在某頁前/後插入一張新截圖：算出插入位置頁碼（before＝該頁頁碼 N、after＝N+1）→ push 插入模式的擷取畫面，
+     * 並帶被長按那頁的網址 [CapturePage.url]（讓擷取畫面從相鄰頁開起、使用者捲到要插入的頁再截）。
      * 頁碼取自檔名（`003.png` → 3；解析不到＝忽略）。實際騰位與存檔在 [CaptureScreenModel.saveInsert]。
      */
     fun insert(page: CapturePage, before: Boolean) {
         val pageNo = page.name.substringBeforeLast('.').toIntOrNull() ?: return
         val insertAt = if (before) pageNo else pageNo + 1
         screenModelScope.launch {
-            _events.send(CaptureReviewEvent.Insert(InsertTarget(safeBook, safeChapter, insertAt)))
+            _events.send(CaptureReviewEvent.Insert(InsertTarget(safeBook, safeChapter, insertAt, page.url)))
         }
-    }
-
-    /**
-     * 依相鄰兩頁的 URL 頁碼算「缺頁」：兩頁 URL 皆能解析出頁碼、且後頁頁碼 - 前頁頁碼 > 1 → 標記後頁（其前面缺頁）。
-     * URL 解析不到頁碼（該站無頁碼/固定網址）＝不標，屬正常。
-     */
-    private fun computeMissing(pages: List<CapturePage>): Set<String> {
-        val result = mutableSetOf<String>()
-        for (i in 1 until pages.size) {
-            val prev = parsePageNumber(pages[i - 1].url)
-            val cur = parsePageNumber(pages[i].url)
-            if (prev != null && cur != null && cur - prev > 1) {
-                result.add(pages[i].uri)
-            }
-        }
-        return result
-    }
-
-    /**
-     * 從 URL 啟發式解析頁碼：先試 query 頁碼（`?page=`/`?p=`/`?pg=`），再試路徑末段數字（`/12` 或 `/12.jpg`）。
-     * 第一個命中回其 Int，都不中回 null。
-     */
-    private fun parsePageNumber(url: String?): Int? {
-        if (url.isNullOrBlank()) return null
-        Regex("[?&](?:page|p|pg)=(\\d+)").find(url)?.let { return it.groupValues[1].toIntOrNull() }
-        Regex("/(\\d+)(?:\\.[a-zA-Z0-9]+)?(?:[?#].*)?$").find(url)?.let { return it.groupValues[1].toIntOrNull() }
-        return null
     }
 
     /** 切換某頁的勾選（要刪的）。 */
@@ -231,20 +208,23 @@ class CaptureReviewScreenModel(
         }
     }
 
-    /** 刪除已勾選的圖檔（連同其 `.url` sidecar，免留孤兒 sidecar 在 renumber 撞名/錯貼）→ 重新掃、更新網格。 */
+    /** 刪除已勾選的圖檔（連同 legacy `.url` sidecar + 整章 meta 內該頁 entry，免留孤兒）→ 重新掃、更新網格。 */
     fun deleteSelected() {
         val selected = _state.value.selected
         if (selected.isEmpty()) return
         screenModelScope.launch {
             withIOContext {
-                val dir = chapterDir()
+                val dir = chapterDir() ?: return@withIOContext
+                val meta = readMeta(dir)
                 _state.value.pages
                     .filter { it.uri in selected }
                     .forEach { page ->
                         runCatching { page.file.delete() }
-                        val sidecar = page.name.substringBeforeLast('.') + ".url"
-                        runCatching { dir?.findFile(sidecar)?.delete() }
+                        val base = page.name.substringBeforeLast('.')
+                        runCatching { dir.findFile("$base.url")?.delete() }
+                        meta.remove(base)
                     }
+                writeMeta(context, dir, meta)
             }
             _state.update { it.copy(selected = emptySet()) }
             loadPages()
@@ -268,6 +248,10 @@ class CaptureReviewScreenModel(
                         base in targets && (isImageName(name) || name.endsWith(".url"))
                     }
                     .forEach { file -> runCatching { file.delete() } }
+                // 整章 meta 同步移除本 session 頁的網址 entry（免留孤兒）。
+                val meta = readMeta(dir)
+                targets.forEach { meta.remove(it) }
+                writeMeta(context, dir, meta)
             }
             _events.send(CaptureReviewEvent.Back)
         }
@@ -293,11 +277,14 @@ class CaptureReviewScreenModel(
     /**
      * 依目前順序把整章重新編號成連續 001/002…。兩階段避免 001→002 覆蓋衝突：
      * 先全部改成暫名 `__tmp_NNN`，再由暫名（保留順序）改成最終 `NNN`。副檔名逐檔保留。
-     * 每頁的 `.url` sidecar 跟著圖一起連帶改名（同一暫名索引），重排後網址仍對得上頁。
+     * legacy `.url` sidecar 跟著圖一起連帶改名（同一暫名索引，不留孤兒）；整章 meta 則於重排後**整批重建**：
+     * 新頁碼 001,002… 對應 [scanPages] 當前順序第 1,2… 頁的網址（scanPages 已把 meta/legacy 網址填進 [CapturePage.url]）。
      */
     private fun renumber(dir: UniFile) {
-        // 階段一：目前順序 → 暫名（零填充保順序）；圖 + 其 .url sidecar 用同一索引一起改。
-        scanPages(dir).forEachIndexed { i, page ->
+        // 重排前先抓當前順序（含每頁網址）——後面拿來重建 meta。
+        val ordered = scanPages(dir)
+        // 階段一：目前順序 → 暫名（零填充保順序）；圖 + 其 legacy .url sidecar 用同一索引一起改。
+        ordered.forEachIndexed { i, page ->
             renameOrCopy(dir, page.file, "%s%03d.%s".format(TMP_PREFIX, i + 1, extOf(page.name)))
             val base = page.name.substringBeforeLast('.')
             dir.listFiles().orEmpty().firstOrNull { it.name == "$base.url" }?.let { sidecar ->
@@ -313,6 +300,13 @@ class CaptureReviewScreenModel(
                 val idx = name.removePrefix(TMP_PREFIX).substringBefore('.').toIntOrNull() ?: return@forEach
                 renameOrCopy(dir, file, "%03d.%s".format(idx, extOf(name)))
             }
+        // 重建整章 meta：新頁碼 i+1 ← 原順序第 i 頁的網址（空網址略過）。整批截斷回寫 → 與新編號一致、無孤兒。
+        val rebuilt = mutableMapOf<String, String>()
+        ordered.forEachIndexed { i, page ->
+            val u = page.url?.trim().orEmpty()
+            if (u.isNotEmpty()) rebuilt["%03d".format(i + 1)] = u
+        }
+        writeMeta(context, dir, rebuilt)
     }
 
     /** 改名；[UniFile.renameTo] 失敗（回 false / 丟例外）→ 退回 copy 到新名 + 刪舊檔。 */
