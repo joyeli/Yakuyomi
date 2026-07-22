@@ -1,9 +1,11 @@
 package eu.kanade.presentation.capture
 
 import android.graphics.Bitmap
+import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,19 +25,25 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.outlined.Autorenew
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.CollectionsBookmark
+import androidx.compose.material.icons.outlined.DeleteSweep
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.PhotoCamera
+import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.UnfoldLess
 import androidx.compose.material.icons.outlined.UnfoldMore
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -48,6 +56,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -78,15 +87,22 @@ import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
 
 /**
- * Yakuyomi 擷取漫畫畫面內容（批 B：截圖界面重構）。
+ * Yakuyomi 擷取漫畫畫面內容（階段 1：介面骨架重構）。
  *
- * 版面：WebView **鋪滿全螢幕**（底層），工具列改成**浮動 overlay**（半透明底、疊在 WebView 上、不擠壓）。
- * 因截圖走 [captureWebView] 的 PixelCopy（只抓 WebView 的渲染 surface），浮動的 Compose 工具列**不會進截圖**
- * → 截得到完整一頁（不再被 topBar/bottomBar 切掉視野）。
+ * 版面：WebView **鋪滿全螢幕**（底層），但 status bar / navigation bar 讓出（[statusBarsPadding] /
+ * [navigationBarsPadding]），系統列不與畫面重疊；WebView 未載真網址時背景透出底層系統色（不露全白 html 畫布）。
+ * 工具列改成**浮動 overlay**（半透明底、疊在 WebView 上、不擠壓）。
  *
- * 頂部浮動 bar：返回 + 網址列（X 清除 + 可展開歷史）+ 書名/章名（正常模式；[singleShotMode] 隱藏）。
- * 底部浮動 bar：正常模式「截這頁 / 連續截圖 / 停止」；重截/插入模式「取代/插入第 N 頁」+ 取消。
- * 「收起工具列」小鈕：收起後只剩 WebView + 該鈕（看漫畫/翻頁乾淨；截圖本就不含 overlay，收起純為視覺清爽）。
+ * 主工具列（頂部一條浮動 bar）＝**5 鍵**：返回 / 瀏覽 / 新漫畫 / 新話數 / 開始‧停止。
+ * - **瀏覽**：toggle「瀏覽 panel」（網址列＋清除＋前往＋歷史＋上一頁/下一頁＋清除 Cookie）。
+ * - **新漫畫**：階段 3 才做，此處 placeholder（toast 提示）。
+ * - **新話數**：階段 1 先 toggle「書名＋章名」兩輸入框的簡易 panel（完整內容留階段 2）。
+ * - **開始‧停止**：接現有連續截圖 [toggleContinuous]；書名/章名皆非空才可開始，連續中顯示紅色停止。
+ * 重截 / 插入（[singleShotMode]）只留單張截圖鍵（底部浮動 bar），隱藏連續/新漫畫/新話數。
+ *
+ * ★ 截圖零 overlay：截圖前把 [hideOverlayForCapture] 設 true → 等兩個 frame（隱藏工具列那次重繪畫上螢幕）
+ * 才 [captureWebView]（PixelCopy 抓 WebView 區域的合成像素 → 此時區域內只剩 WebView、無任何浮動工具列）。
+ * 存完再設回 false。連續截圖的抓幀器（grabber）也走此隱藏流程。
  */
 @Composable
 fun CaptureScreenContent(
@@ -127,11 +143,20 @@ fun CaptureScreenContent(
     var webView by remember { mutableStateOf<WebView?>(null) }
     var address by remember { mutableStateOf(initialUrl) }
 
-    // 工具列收起/展開（收起＝只剩 WebView + 展開小鈕）；歷史清單展開與否。
+    // 工具列收起/展開（收起＝只剩 WebView + 展開小鈕）。
     var toolbarExpanded by remember { mutableStateOf(true) }
+    // 全新入口（initialUrl 空、非重截/插入）＝自動展開「瀏覽」panel 引導輸入網址；否則預設收合。
+    var browseExpanded by remember { mutableStateOf(initialUrl.isBlank() && !singleShotMode) }
+    // 「新話數」簡易 panel（書名/章名輸入）展開與否。
+    var chapterPanelExpanded by remember { mutableStateOf(false) }
+    // 歷史清單展開與否。
     var historyExpanded by remember { mutableStateOf(false) }
     // 歷史清單在畫面內管理：初值來自 pref，刪除即時反映 UI 並同步寫回 pref；展開時再重讀（納入剛造訪的網址）。
     var history by remember { mutableStateOf(urlHistoryProvider()) }
+    // ★ 截圖當下把所有浮動 overlay 隱藏，避免進到 PixelCopy 的截圖裡。
+    var hideOverlayForCapture by remember { mutableStateOf(false) }
+    // 清除 Cookie 確認對話框（防誤觸）。
+    var showClearCookiesDialog by remember { mutableStateOf(false) }
 
     // 網址列上的當前網址（隨 WebView 導覽同步）；造訪時記錄進歷史 pref。
     val webClient = remember {
@@ -167,45 +192,57 @@ fun CaptureScreenContent(
         val normalized = if (trimmed.startsWith("http")) trimmed else "https://$trimmed"
         address = normalized
         historyExpanded = false
+        // 載入後收起瀏覽 panel（回到乾淨看漫畫視野）。
+        browseExpanded = false
         onAddUrl(normalized)
         webView?.loadUrl(normalized)
     }
 
     fun capture() {
-        val window = context.findActivity()?.window
-        // WebView 網址須在主執行緒讀；captureWebView 回呼在主執行緒，這裡先取好再帶進存檔。
-        val url = webView?.url
-        captureWebView(webView, window) { bitmap ->
-            if (bitmap == null) {
-                context.toast(context.contextStringResource(MR.strings.webview_capture_failed))
-                return@captureWebView
-            }
-            scope.launch {
-                when (val result = onCapture(bitmap, url)) {
-                    is CaptureSaveResult.Saved -> {
-                        when {
-                            reCaptureMode -> {
-                                context.toast(
-                                    context.contextStringResource(MR.strings.capture_recapture_saved, result.page),
-                                )
-                                onReCaptureDone()
-                            }
-                            insertMode -> {
-                                context.toast(
-                                    context.contextStringResource(MR.strings.capture_insert_saved, result.page),
-                                )
-                                onReCaptureDone()
-                            }
-                            else ->
-                                context.toast(context.contextStringResource(MR.strings.capture_saved, result.page))
-                        }
-                    }
-                    CaptureSaveResult.MissingName ->
-                        context.toast(context.contextStringResource(MR.strings.capture_missing_name))
-                    is CaptureSaveResult.Failed ->
-                        context.toast(result.message ?: context.contextStringResource(MR.strings.webview_capture_failed))
+        scope.launch {
+            // ★ 先隱藏所有浮動 overlay，等兩個 frame 讓「隱藏」那次重繪畫上螢幕，PixelCopy 才不會抓到工具列。
+            hideOverlayForCapture = true
+            withFrameNanos {}
+            withFrameNanos {}
+            val window = context.findActivity()?.window
+            // WebView 網址須在主執行緒讀；captureWebView 回呼在主執行緒，這裡先取好再帶進存檔。
+            val url = webView?.url
+            captureWebView(webView, window) { bitmap ->
+                // 拿到（含失敗的 null）像素後即可還原 overlay，存檔在背景進行。
+                hideOverlayForCapture = false
+                if (bitmap == null) {
+                    context.toast(context.contextStringResource(MR.strings.webview_capture_failed))
+                    return@captureWebView
                 }
-                if (!bitmap.isRecycled) bitmap.recycle()
+                scope.launch {
+                    when (val result = onCapture(bitmap, url)) {
+                        is CaptureSaveResult.Saved -> {
+                            when {
+                                reCaptureMode -> {
+                                    context.toast(
+                                        context.contextStringResource(MR.strings.capture_recapture_saved, result.page),
+                                    )
+                                    onReCaptureDone()
+                                }
+                                insertMode -> {
+                                    context.toast(
+                                        context.contextStringResource(MR.strings.capture_insert_saved, result.page),
+                                    )
+                                    onReCaptureDone()
+                                }
+                                else ->
+                                    context.toast(context.contextStringResource(MR.strings.capture_saved, result.page))
+                            }
+                        }
+                        CaptureSaveResult.MissingName ->
+                            context.toast(context.contextStringResource(MR.strings.capture_missing_name))
+                        is CaptureSaveResult.Failed ->
+                            context.toast(
+                                result.message ?: context.contextStringResource(MR.strings.webview_capture_failed),
+                            )
+                    }
+                    if (!bitmap.isRecycled) bitmap.recycle()
+                }
             }
         }
     }
@@ -226,7 +263,18 @@ fun CaptureScreenContent(
             return
         }
         val window = context.findActivity()?.window
-        val grabber: FrameGrabber = { onResult -> captureWebView(webView, window, onResult) }
+        // ★ 抓幀器也走隱藏流程：每次抓幀前隱藏 overlay、等兩 frame、截圖、還原 → 截到的每幀皆零工具列。
+        val grabber: FrameGrabber = { onResult ->
+            scope.launch {
+                hideOverlayForCapture = true
+                withFrameNanos {}
+                withFrameNanos {}
+                captureWebView(webView, window) { bmp ->
+                    hideOverlayForCapture = false
+                    onResult(bmp)
+                }
+            }
+        }
         onStartContinuous(grabber) { webView?.url }
     }
 
@@ -249,84 +297,136 @@ fun CaptureScreenContent(
     // 浮動 bar 半透明底：讓文字可讀又不完全擋住 WebView。
     val barColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        // 底層：WebView 鋪滿全螢幕（不被工具列擠壓 → 截到完整一頁）。
-        WebView(
-            state = state,
-            modifier = Modifier.fillMaxSize(),
-            navigator = navigator,
-            onCreated = { wv ->
-                wv.setDefaultSettings()
-                webView = wv
-            },
-            client = webClient,
-        )
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            // 底層系統色：WebView 未載真網址（about:blank 全白）時不露白，風格與 app 一致。
+            .background(MaterialTheme.colorScheme.background),
+    ) {
+        // 底層：WebView 佔滿 status/navigation bar 之間（不涵蓋系統列 → 系統文字不與畫面重疊、截圖也不含系統列）。
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding(),
+        ) {
+            WebView(
+                state = state,
+                modifier = Modifier.fillMaxSize(),
+                navigator = navigator,
+                onCreated = { wv ->
+                    wv.setDefaultSettings()
+                    // 透明背景：未載入頁面時讓底層系統色透出（不是全白 html 畫布）。
+                    wv.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                    webView = wv
+                },
+                client = webClient,
+            )
+        }
 
-        if (toolbarExpanded) {
-            // 頂部浮動 bar：返回 + 網址列（X 清除 + 歷史）+ 書名/章名（正常模式）+ 收起鈕。
-            Column(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(8.dp),
-            ) {
-                Surface(
-                    color = barColor,
-                    shape = MaterialTheme.shapes.large,
-                    shadowElevation = 3.dp,
+        // ★ 截圖進行中：不 render 任何浮動 overlay（頂部 bar / 底部 bar / 收起小鈕 / panel / 對話框）。
+        if (!hideOverlayForCapture) {
+            if (toolbarExpanded) {
+                // 頂部浮動工具列（5 鍵）+ 可展開的瀏覽 / 新話數 panel。
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(8.dp),
                 ) {
-                    Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
+                    Surface(
+                        color = barColor,
+                        shape = MaterialTheme.shapes.large,
+                        shadowElevation = 3.dp,
+                    ) {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 4.dp, vertical = 2.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
+                            // 1) 返回
                             IconButton(onClick = onNavigateUp) {
                                 Icon(
                                     imageVector = Icons.Outlined.Close,
                                     contentDescription = stringResource(MR.strings.action_close),
                                 )
                             }
-                            OutlinedTextField(
-                                value = address,
-                                onValueChange = { address = it },
-                                modifier = Modifier.weight(1f),
-                                placeholder = { Text(stringResource(MR.strings.open_url_in_webview_hint)) },
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(
-                                    keyboardType = KeyboardType.Uri,
-                                    imeAction = ImeAction.Go,
-                                ),
-                                keyboardActions = KeyboardActions(onGo = { go() }),
-                                trailingIcon = {
-                                    if (address.isNotEmpty()) {
-                                        IconButton(onClick = { address = "" }) {
-                                            Icon(
-                                                imageVector = Icons.Outlined.Close,
-                                                contentDescription = stringResource(MR.strings.action_clear),
-                                            )
-                                        }
-                                    }
+                            // 2) 瀏覽（toggle 瀏覽 panel；開時關掉新話數 panel 免過高）
+                            IconButton(
+                                onClick = {
+                                    browseExpanded = !browseExpanded
+                                    if (browseExpanded) chapterPanelExpanded = false
                                 },
-                            )
-                            // 歷史下拉 toggle（有歷史才顯示）；展開時重讀 pref 納入剛造訪的網址。
-                            if (history.isNotEmpty() || historyExpanded) {
-                                IconButton(
-                                    onClick = {
-                                        if (!historyExpanded) history = urlHistoryProvider()
-                                        historyExpanded = !historyExpanded
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Public,
+                                    contentDescription = stringResource(MR.strings.capture_browse),
+                                    tint = if (browseExpanded) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        LocalContentColor.current
                                     },
-                                ) {
-                                    Icon(
-                                        imageVector = if (historyExpanded) {
-                                            Icons.Outlined.ExpandLess
-                                        } else {
-                                            Icons.Outlined.History
-                                        },
-                                        contentDescription = stringResource(MR.strings.capture_url_history),
+                                )
+                            }
+                            if (!singleShotMode) {
+                                if (continuousRunning) {
+                                    // 連續中：紅色停止 + 進度「已截 N 頁」（隱藏新漫畫/新話數，翻頁自動截）。
+                                    IconButton(onClick = { toggleContinuous() }) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Stop,
+                                            contentDescription = stringResource(MR.strings.capture_continuous_stop),
+                                            tint = MaterialTheme.colorScheme.error,
+                                        )
+                                    }
+                                    Text(
+                                        text = stringResource(MR.strings.capture_continuous_count, capturedCount),
+                                        style = MaterialTheme.typography.bodyMedium,
                                     )
+                                } else {
+                                    // 3) 新漫畫（階段 3 才做，先 placeholder）
+                                    IconButton(
+                                        onClick = {
+                                            context.toast(
+                                                context.contextStringResource(MR.strings.capture_new_manga_todo),
+                                            )
+                                        },
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.CollectionsBookmark,
+                                            contentDescription = stringResource(MR.strings.capture_new_manga),
+                                        )
+                                    }
+                                    // 4) 新話數（toggle 書名/章名 panel；開時關掉瀏覽 panel）
+                                    IconButton(
+                                        onClick = {
+                                            chapterPanelExpanded = !chapterPanelExpanded
+                                            if (chapterPanelExpanded) browseExpanded = false
+                                        },
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Edit,
+                                            contentDescription = stringResource(MR.strings.capture_new_chapter),
+                                            tint = if (chapterPanelExpanded) {
+                                                MaterialTheme.colorScheme.primary
+                                            } else {
+                                                LocalContentColor.current
+                                            },
+                                        )
+                                    }
+                                    // 5) 開始（書名/章名皆非空才可開始，否則灰）
+                                    val canStart = bookName.isNotBlank() && chapterName.isNotBlank()
+                                    IconButton(onClick = { toggleContinuous() }, enabled = canStart) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.PlayArrow,
+                                            contentDescription = stringResource(MR.strings.capture_continuous_start),
+                                        )
+                                    }
                                 }
                             }
+                            Spacer(modifier = Modifier.weight(1f))
+                            // 收起工具列（清爽看漫畫；截圖本就不含 overlay，收起純為視覺）。
                             IconButton(onClick = { toolbarExpanded = false }) {
                                 Icon(
                                     imageVector = Icons.Outlined.UnfoldLess,
@@ -334,62 +434,161 @@ fun CaptureScreenContent(
                                 )
                             }
                         }
+                    }
 
-                        // 網址輸入歷史清單：點列＝填入並載入、每筆叉叉＝刪除。
-                        if (historyExpanded && history.isNotEmpty()) {
-                            LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
-                                items(items = history, key = { it }) { url ->
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable { go(urlOverride = url) },
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Text(
-                                            text = url,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .padding(start = 12.dp, top = 8.dp, bottom = 8.dp),
+                    // 瀏覽 panel：網址列（X 清除 + 前往）+ 上一頁/下一頁 + 歷史 + 清除 Cookie。
+                    if (browseExpanded) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Surface(
+                            color = barColor,
+                            shape = MaterialTheme.shapes.large,
+                            shadowElevation = 3.dp,
+                        ) {
+                            Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    OutlinedTextField(
+                                        value = address,
+                                        onValueChange = { address = it },
+                                        modifier = Modifier.weight(1f),
+                                        placeholder = { Text(stringResource(MR.strings.open_url_in_webview_hint)) },
+                                        singleLine = true,
+                                        keyboardOptions = KeyboardOptions(
+                                            keyboardType = KeyboardType.Uri,
+                                            imeAction = ImeAction.Go,
+                                        ),
+                                        keyboardActions = KeyboardActions(onGo = { go() }),
+                                        trailingIcon = {
+                                            if (address.isNotEmpty()) {
+                                                IconButton(onClick = { address = "" }) {
+                                                    Icon(
+                                                        imageVector = Icons.Outlined.Close,
+                                                        contentDescription = stringResource(MR.strings.action_clear),
+                                                    )
+                                                }
+                                            }
+                                        },
+                                    )
+                                    // 前往（載入 go() + 收起 panel）
+                                    IconButton(onClick = { go() }) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Outlined.ArrowForward,
+                                            contentDescription = stringResource(MR.strings.capture_go),
                                         )
+                                    }
+                                }
+
+                                // 導覽列：上一頁 / 下一頁 / 歷史 toggle / 清除 Cookie。
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    IconButton(
+                                        onClick = { if (navigator.canGoBack) navigator.navigateBack() },
+                                        enabled = navigator.canGoBack,
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
+                                            contentDescription = stringResource(MR.strings.action_webview_back),
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = { if (navigator.canGoForward) navigator.navigateForward() },
+                                        enabled = navigator.canGoForward,
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Outlined.ArrowForward,
+                                            contentDescription = stringResource(MR.strings.action_webview_forward),
+                                        )
+                                    }
+                                    // 歷史下拉 toggle（有歷史才顯示）；展開時重讀 pref 納入剛造訪的網址。
+                                    if (history.isNotEmpty() || historyExpanded) {
                                         IconButton(
                                             onClick = {
-                                                history = history.filterNot { it == url }
-                                                onRemoveUrl(url)
+                                                if (!historyExpanded) history = urlHistoryProvider()
+                                                historyExpanded = !historyExpanded
                                             },
                                         ) {
                                             Icon(
-                                                imageVector = Icons.Outlined.Close,
-                                                contentDescription = stringResource(MR.strings.action_delete),
+                                                imageVector = if (historyExpanded) {
+                                                    Icons.Outlined.ExpandLess
+                                                } else {
+                                                    Icons.Outlined.History
+                                                },
+                                                contentDescription = stringResource(MR.strings.capture_url_history),
                                             )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.weight(1f))
+                                    IconButton(onClick = { showClearCookiesDialog = true }) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.DeleteSweep,
+                                            contentDescription = stringResource(MR.strings.pref_clear_cookies),
+                                        )
+                                    }
+                                }
+
+                                // 網址輸入歷史清單：點列＝填入並載入、每筆叉叉＝刪除。
+                                if (historyExpanded && history.isNotEmpty()) {
+                                    LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
+                                        items(items = history, key = { it }) { url ->
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable { go(urlOverride = url) },
+                                                verticalAlignment = Alignment.CenterVertically,
+                                            ) {
+                                                Text(
+                                                    text = url,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .padding(start = 12.dp, top = 8.dp, bottom = 8.dp),
+                                                )
+                                                IconButton(
+                                                    onClick = {
+                                                        history = history.filterNot { it == url }
+                                                        onRemoveUrl(url)
+                                                    },
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Outlined.Close,
+                                                        contentDescription = stringResource(MR.strings.action_delete),
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
+                    }
 
-                        // 重截 / 插入模式不需要書名/章名輸入（目標頁已鎖定），隱藏之。
-                        if (!singleShotMode) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 4.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
+                    // 新話數 panel（階段 1 簡易＝書名 + 章名）；重截/插入與連續進行中不顯示。
+                    if (chapterPanelExpanded && !singleShotMode && !continuousRunning) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Surface(
+                            color = barColor,
+                            shape = MaterialTheme.shapes.large,
+                            shadowElevation = 3.dp,
+                        ) {
+                            Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
                                 OutlinedTextField(
                                     value = bookName,
                                     onValueChange = onBookNameChange,
-                                    modifier = Modifier.weight(1f),
+                                    modifier = Modifier.fillMaxWidth(),
                                     label = { Text(stringResource(MR.strings.capture_book_name)) },
                                     singleLine = true,
                                 )
+                                Spacer(modifier = Modifier.height(8.dp))
                                 OutlinedTextField(
                                     value = chapterName,
                                     onValueChange = onChapterNameChange,
-                                    modifier = Modifier.weight(1f),
+                                    modifier = Modifier.fillMaxWidth(),
                                     label = { Text(stringResource(MR.strings.capture_chapter_name)) },
                                     singleLine = true,
                                 )
@@ -397,114 +596,90 @@ fun CaptureScreenContent(
                         }
                     }
                 }
-            }
 
-            // 底部浮動 bar：擷取動作。
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .padding(8.dp),
-            ) {
-                Surface(
-                    color = barColor,
-                    shape = MaterialTheme.shapes.large,
-                    shadowElevation = 3.dp,
-                ) {
-                    Row(
+                // 底部浮動 bar：僅重截 / 插入（singleShot）用的單張截圖鍵（保留現有行為）。
+                if (singleShotMode) {
+                    Box(
                         modifier = Modifier
+                            .align(Alignment.BottomCenter)
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            .navigationBarsPadding()
+                            .padding(8.dp),
                     ) {
-                        if (reCaptureMode) {
-                            // 重截模式：只有「截這頁（取代第 N 頁）」，捲到對的地方按 → 覆蓋該頁 + 回確認頁。
-                            Button(onClick = { capture() }) {
-                                Icon(imageVector = Icons.Outlined.PhotoCamera, contentDescription = null)
-                                Text(
-                                    text = stringResource(
-                                        MR.strings.capture_recapture_action,
-                                        reCaptureTargetPage ?: 0,
-                                    ),
-                                    modifier = Modifier.padding(start = 6.dp),
-                                )
-                            }
-                            TextButton(onClick = onNavigateUp) {
-                                Text(text = stringResource(MR.strings.action_cancel))
-                            }
-                        } else if (insertMode) {
-                            // 插入模式：只有「截這頁（插入為第 X 頁）」，捲到要補的頁按 → 騰位插入 + 回確認頁。
-                            Button(onClick = { capture() }) {
-                                Icon(imageVector = Icons.Outlined.PhotoCamera, contentDescription = null)
-                                Text(
-                                    text = stringResource(
-                                        MR.strings.capture_insert_action,
-                                        insertTargetPage ?: 0,
-                                    ),
-                                    modifier = Modifier.padding(start = 6.dp),
-                                )
-                            }
-                            TextButton(onClick = onNavigateUp) {
-                                Text(text = stringResource(MR.strings.action_cancel))
-                            }
-                        } else if (continuousRunning) {
-                            // 連續進行中：紅色「停止」+ 進度「已截 N 頁」。
-                            Button(
-                                onClick = { toggleContinuous() },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.error,
-                                    contentColor = MaterialTheme.colorScheme.onError,
-                                ),
+                        Surface(
+                            color = barColor,
+                            shape = MaterialTheme.shapes.large,
+                            shadowElevation = 3.dp,
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
-                                Icon(imageVector = Icons.Filled.Stop, contentDescription = null)
-                                Text(
-                                    text = stringResource(MR.strings.capture_continuous_stop),
-                                    modifier = Modifier.padding(start = 6.dp),
-                                )
-                            }
-                            Text(
-                                text = stringResource(MR.strings.capture_continuous_count, capturedCount),
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                        } else {
-                            // 閒置：主要「截這頁」+ 次要「連續擷取」並列。
-                            Button(onClick = { capture() }) {
-                                Icon(imageVector = Icons.Outlined.PhotoCamera, contentDescription = null)
-                                Text(
-                                    text = stringResource(MR.strings.action_capture_page),
-                                    modifier = Modifier.padding(start = 6.dp),
-                                )
-                            }
-                            FilledTonalButton(onClick = { toggleContinuous() }) {
-                                Icon(imageVector = Icons.Outlined.Autorenew, contentDescription = null)
-                                Text(
-                                    text = stringResource(MR.strings.capture_continuous_start),
-                                    modifier = Modifier.padding(start = 6.dp),
-                                )
+                                Button(onClick = { capture() }) {
+                                    Icon(imageVector = Icons.Outlined.PhotoCamera, contentDescription = null)
+                                    Text(
+                                        text = if (reCaptureMode) {
+                                            stringResource(MR.strings.capture_recapture_action, reCaptureTargetPage ?: 0)
+                                        } else {
+                                            stringResource(MR.strings.capture_insert_action, insertTargetPage ?: 0)
+                                        },
+                                        modifier = Modifier.padding(start = 6.dp),
+                                    )
+                                }
+                                TextButton(onClick = onNavigateUp) {
+                                    Text(text = stringResource(MR.strings.action_cancel))
+                                }
                             }
                         }
                     }
                 }
-            }
-        } else {
-            // 收起：只剩 WebView + 一顆「展開工具列」浮動小鈕。
-            Surface(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .statusBarsPadding()
-                    .padding(8.dp),
-                color = barColor,
-                shape = CircleShape,
-                shadowElevation = 3.dp,
-            ) {
-                IconButton(onClick = { toolbarExpanded = true }) {
-                    Icon(
-                        imageVector = Icons.Outlined.UnfoldMore,
-                        contentDescription = stringResource(MR.strings.capture_toolbar_show),
-                    )
+            } else {
+                // 收起：只剩 WebView + 一顆「展開工具列」浮動小鈕。
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .statusBarsPadding()
+                        .padding(8.dp),
+                    color = barColor,
+                    shape = CircleShape,
+                    shadowElevation = 3.dp,
+                ) {
+                    IconButton(onClick = { toolbarExpanded = true }) {
+                        Icon(
+                            imageVector = Icons.Outlined.UnfoldMore,
+                            contentDescription = stringResource(MR.strings.capture_toolbar_show),
+                        )
+                    }
                 }
+            }
+
+            // 清除 Cookie 確認對話框（清整個內建瀏覽器的 Cookie，防誤觸）。
+            if (showClearCookiesDialog) {
+                AlertDialog(
+                    onDismissRequest = { showClearCookiesDialog = false },
+                    title = { Text(stringResource(MR.strings.pref_clear_cookies)) },
+                    text = { Text(stringResource(MR.strings.capture_clear_cookies_confirm)) },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                CookieManager.getInstance().removeAllCookies(null)
+                                CookieManager.getInstance().flush()
+                                showClearCookiesDialog = false
+                                context.toast(context.contextStringResource(MR.strings.cookies_cleared))
+                            },
+                        ) {
+                            Text(text = stringResource(MR.strings.action_ok))
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showClearCookiesDialog = false }) {
+                            Text(text = stringResource(MR.strings.action_cancel))
+                        }
+                    },
+                )
             }
         }
     }
