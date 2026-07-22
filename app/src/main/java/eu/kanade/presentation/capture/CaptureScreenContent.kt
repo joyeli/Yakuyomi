@@ -18,10 +18,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -99,6 +100,9 @@ import tachiyomi.presentation.core.i18n.stringResource
  * - **新話數**：階段 1 先 toggle「書名＋章名」兩輸入框的簡易 panel（完整內容留階段 2）。
  * - **開始‧停止**：接現有連續截圖 [toggleContinuous]；書名/章名皆非空才可開始，連續中顯示紅色停止。
  * 重截 / 插入（[singleShotMode]）只留單張截圖鍵（底部浮動 bar），隱藏連續/新漫畫/新話數。
+ *
+ * 浮動元件配色一律走 `surfaceContainerHigh`＋`onSurface`（與 app 其他 bar 同色階，非純黑膠帶）；工具列收起後
+ * 只留一個貼右緣的 32×40dp 小把手。連續擷取進行中，底部置中顯示「已截 N 頁 · 翻到下一頁繼續」引導。
  *
  * ★ 截圖零 overlay：截圖前把 [hideOverlayForCapture] 設 true → 等兩個 frame（隱藏工具列那次重繪畫上螢幕）
  * 才 [captureWebView]（PixelCopy 抓 WebView 區域的合成像素 → 此時區域內只剩 WebView、無任何浮動工具列）。
@@ -295,7 +299,12 @@ fun CaptureScreenContent(
     BackHandler(enabled = navigator.canGoBack) { navigator.navigateBack() }
 
     // 浮動 bar 半透明底：讓文字可讀又不完全擋住 WebView。
-    val barColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
+    // 用 surfaceContainerHigh（＝app 內其他 bar／對話框的抬升面色）而非 surface——深色主題下 surface 幾乎純黑、
+    // 浮在 WebView 上像一塊黑膠帶；surfaceContainerHigh 與全域介面同一套色階，風格一致又看得出是工具列。
+    val barColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f)
+    // 明確指定內容色：Surface 的預設 contentColor 走 contentColorFor(color)，帶 alpha 的顏色比對不到色票
+    // → 退回 LocalContentColor（可能是純黑），icon/文字會失色；直接給 onSurface 最穩。
+    val barContentColor = MaterialTheme.colorScheme.onSurface
 
     Box(
         modifier = Modifier
@@ -337,6 +346,7 @@ fun CaptureScreenContent(
                 ) {
                     Surface(
                         color = barColor,
+                        contentColor = barContentColor,
                         shape = MaterialTheme.shapes.large,
                         shadowElevation = 3.dp,
                     ) {
@@ -441,6 +451,7 @@ fun CaptureScreenContent(
                         Spacer(modifier = Modifier.height(6.dp))
                         Surface(
                             color = barColor,
+                            contentColor = barContentColor,
                             shape = MaterialTheme.shapes.large,
                             shadowElevation = 3.dp,
                         ) {
@@ -573,6 +584,7 @@ fun CaptureScreenContent(
                         Spacer(modifier = Modifier.height(6.dp))
                         Surface(
                             color = barColor,
+                            contentColor = barContentColor,
                             shape = MaterialTheme.shapes.large,
                             shadowElevation = 3.dp,
                         ) {
@@ -608,6 +620,7 @@ fun CaptureScreenContent(
                     ) {
                         Surface(
                             color = barColor,
+                            contentColor = barContentColor,
                             shape = MaterialTheme.shapes.large,
                             shadowElevation = 3.dp,
                         ) {
@@ -637,22 +650,55 @@ fun CaptureScreenContent(
                     }
                 }
             } else {
-                // 收起：只剩 WebView + 一顆「展開工具列」浮動小鈕。
+                // 收起：只剩 WebView + 一個「展開工具列」小把手。
+                // 取「貼右緣的小把手」而非圓鈕：48dp 圓鈕壓在漫畫右上角很搶眼，把手只有 32dp 寬、右側切齊螢幕邊
+                // （右側直角、左側圓角），視覺上像從邊緣拉出來的抽屜提把，不像可誤觸的主要動作；高度仍留 40dp
+                // 讓拇指好按。收起的目的就是「乾淨看漫畫」，這是最低調又找得到的作法。
                 Surface(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .statusBarsPadding()
-                        .padding(8.dp),
+                        .padding(top = 8.dp)
+                        .size(width = 32.dp, height = 40.dp),
                     color = barColor,
-                    shape = CircleShape,
+                    contentColor = barContentColor,
+                    shape = RoundedCornerShape(topStart = 12.dp, bottomStart = 12.dp),
                     shadowElevation = 3.dp,
                 ) {
-                    IconButton(onClick = { toolbarExpanded = true }) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clickable { toolbarExpanded = true },
+                        contentAlignment = Alignment.Center,
+                    ) {
                         Icon(
                             imageVector = Icons.Outlined.UnfoldMore,
                             contentDescription = stringResource(MR.strings.capture_toolbar_show),
+                            modifier = Modifier.size(18.dp),
                         )
                     }
+                }
+            }
+
+            // 連續擷取進行中的引導提示（底部置中小條）：光看「已截 N 頁」不知道還要不要動作，
+            // 這條明講「翻到下一頁繼續」——工具列收起時也看得到（放在 toolbarExpanded 之外），
+            // 且同樣在 hideOverlayForCapture 內 → 截圖時不會入鏡。
+            if (continuousRunning && !singleShotMode) {
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .navigationBarsPadding()
+                        .padding(bottom = 16.dp),
+                    color = barColor,
+                    contentColor = barContentColor,
+                    shape = MaterialTheme.shapes.large,
+                    shadowElevation = 3.dp,
+                ) {
+                    Text(
+                        text = stringResource(MR.strings.capture_continuous_hint, capturedCount),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
                 }
             }
 

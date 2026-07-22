@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
@@ -21,10 +22,12 @@ import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DeleteSweep
+import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -61,7 +64,16 @@ import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.screens.LoadingScreen
 
 /**
- * Yakuyomi 擷取漫畫確認頁內容：3 欄縮圖網格、角落順序標號 + 勾選、底部「刪除選取 / 儲存」。
+ * Yakuyomi 擷取漫畫確認頁內容：3 欄縮圖網格、角落順序標號 + 勾選、底部動作列。
+ *
+ * 三個動作的語意分明：
+ * - **繼續擷取**（[onContinueCapture]）＝這話還沒截完 → 不儲存、不重編號、不跳詳情，只退回擷取工具續截
+ *   （頁碼由存檔時掃章夾 max+1 天然接續；回去後仍要自己按「開始」才續截）。
+ * - **儲存**（[onSave]）＝這話完成 → 重新編號成連續頁碼 + 跳漫畫詳情。
+ * - **放棄**（[onDiscardSession]，TopAppBar）＝丟掉這次 session 截的頁。
+ *
+ * 底部排版：平時只有「繼續擷取 / 儲存」兩顆主要動作；**有勾選時才多出一列「刪除選取 (N)」**（error 色），
+ * 免得三顆鈕擠一排、也讓破壞性動作與主要動作分開。
  */
 @Composable
 fun CaptureReviewScreenContent(
@@ -72,6 +84,8 @@ fun CaptureReviewScreenContent(
     onInsert: (CapturePage, Boolean) -> Unit,
     onDeleteSelected: () -> Unit,
     onSave: () -> Unit,
+    // 回擷取工具續截這話（不儲存 / 不重編號 / 不跳詳情）。
+    onContinueCapture: () -> Unit = {},
     // 本次連續截圖存下的頁數（0＝非連續 session 進入或無新頁）；>0 才顯示「放棄這次截圖」。
     sessionPageCount: Int = 0,
     onDiscardSession: () -> Unit = {},
@@ -126,41 +140,64 @@ fun CaptureReviewScreenContent(
         },
         bottomBar = {
             Surface(tonalElevation = 3.dp) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .navigationBarsPadding()
                         .padding(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    OutlinedButton(
-                        onClick = onDeleteSelected,
-                        enabled = state.selected.isNotEmpty() && !state.saving,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Icon(imageVector = Icons.Outlined.Delete, contentDescription = null)
-                        Text(
-                            text = stringResource(MR.strings.capture_review_delete_selected, state.selected.size),
-                            modifier = Modifier.padding(start = 6.dp),
-                        )
-                    }
-                    Button(
-                        onClick = onSave,
-                        enabled = !state.saving && state.pages.isNotEmpty(),
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        if (state.saving) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.onPrimary,
-                            )
-                        } else {
-                            Icon(imageVector = Icons.Outlined.Save, contentDescription = null)
+                    // 刪除列：只在有勾選時出現（平時底部只剩「繼續擷取 / 儲存」兩顆主要動作）。
+                    if (state.selected.isNotEmpty()) {
+                        OutlinedButton(
+                            onClick = onDeleteSelected,
+                            enabled = !state.saving,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = MaterialTheme.colorScheme.error,
+                            ),
+                        ) {
+                            Icon(imageVector = Icons.Outlined.Delete, contentDescription = null)
                             Text(
-                                text = stringResource(MR.strings.action_save),
+                                text = stringResource(MR.strings.capture_review_delete_selected, state.selected.size),
                                 modifier = Modifier.padding(start = 6.dp),
                             )
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        // 繼續擷取：不儲存、不重編號、不跳詳情，單純退回擷取工具接著截這話。
+                        OutlinedButton(
+                            onClick = onContinueCapture,
+                            enabled = !state.saving,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Icon(imageVector = Icons.Outlined.PhotoCamera, contentDescription = null)
+                            Text(
+                                text = stringResource(MR.strings.capture_review_continue),
+                                modifier = Modifier.padding(start = 6.dp),
+                            )
+                        }
+                        Button(
+                            onClick = onSave,
+                            enabled = !state.saving && state.pages.isNotEmpty(),
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            if (state.saving) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                )
+                            } else {
+                                Icon(imageVector = Icons.Outlined.Save, contentDescription = null)
+                                Text(
+                                    text = stringResource(MR.strings.action_save),
+                                    modifier = Modifier.padding(start = 6.dp),
+                                )
+                            }
                         }
                     }
                 }

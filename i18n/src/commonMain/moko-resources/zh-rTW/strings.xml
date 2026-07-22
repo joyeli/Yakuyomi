@@ -307,8 +307,10 @@
     <string name="capture_continuous_start">連續擷取</string>
     <string name="capture_continuous_stop">停止</string>
     <string name="capture_continuous_count">已截 %1$d 頁</string>
+    <string name="capture_continuous_hint">已截 %1$d 頁 · 翻到下一頁繼續</string>
     <string name="capture_review_title">確認截圖</string>
     <string name="capture_review_delete_selected">刪除 (%1$d)</string>
+    <string name="capture_review_continue">繼續擷取</string>
     <string name="capture_review_empty">這一章沒有截圖</string>
     <string name="capture_recapture_title">重截這頁</string>
     <string name="capture_recapture_action">取代第 %1$d 頁</string>

@@ -74,6 +74,9 @@ class CaptureReviewScreen(
             onInsert = screenModel::insert,
             onDeleteSelected = screenModel::deleteSelected,
             onSave = screenModel::save,
+            // 繼續擷取＝單純退回擷取畫面（它還在 back stack、書名/章名等 model 狀態原封不動），
+            // 不儲存、不重編號、不跳詳情；回去後由使用者自己按「開始」續截，新頁碼由存檔時掃章夾 max+1 接續。
+            onContinueCapture = navigator::pop,
             sessionPageCount = sessionPages.size,
             onDiscardSession = screenModel::discardSession,
         )
