@@ -263,6 +263,7 @@
     <string name="capture_continuous_stop">Stop</string>
     <string name="capture_continuous_count">Captured %1$d</string>
     <string name="capture_continuous_hint">Captured %1$d · turn to the next page to continue</string>
+    <string name="capture_continuous_saved_hint">Captured page %1$d · turn to the next page</string>
     <string name="capture_review_title">Review capture</string>
     <string name="capture_review_delete_selected">Delete (%1$d)</string>
     <string name="capture_review_continue">Keep capturing</string>

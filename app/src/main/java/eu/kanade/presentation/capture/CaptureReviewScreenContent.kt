@@ -54,7 +54,6 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import eu.kanade.presentation.components.AppBar
-import eu.kanade.presentation.components.AppBarActions
 import eu.kanade.tachiyomi.ui.capture.CapturePage
 import eu.kanade.tachiyomi.ui.capture.CaptureReviewState
 import tachiyomi.i18n.MR
@@ -66,30 +65,32 @@ import tachiyomi.presentation.core.screens.LoadingScreen
 /**
  * Yakuyomi 擷取漫畫確認頁內容：3 欄縮圖網格、角落順序標號 + 勾選、底部動作列。
  *
- * 三個動作的語意分明：
- * - **繼續擷取**（[onContinueCapture]）＝這話還沒截完 → 不儲存、不重編號、不跳詳情，只退回擷取工具續截
- *   （頁碼由存檔時掃章夾 max+1 天然接續；回去後仍要自己按「開始」才續截）。
- * - **儲存**（[onSave]）＝這話完成 → 重新編號成連續頁碼 + 跳漫畫詳情。
- * - **放棄**（[onDiscardSession]，TopAppBar）＝丟掉這次 session 截的頁。
+ * ★ 這是**面板**不是 Screen——由 [eu.kanade.tachiyomi.ui.capture.CaptureScreen] 在
+ * [eu.kanade.tachiyomi.ui.capture.CaptureMode.REVIEW] 時疊在常駐 WebView 上（見該檔說明）。
  *
- * 底部排版：平時只有「繼續擷取 / 儲存」兩顆主要動作；**有勾選時才多出一列「刪除選取 (N)」**（error 色），
- * 免得三顆鈕擠一排、也讓破壞性動作與主要動作分開。
+ * 三個動作**一律排在底部、一眼看得到**（2026-07 改：放棄原本藏在 TopAppBar 的掃把 icon，使用者找不到）：
+ * - **繼續擷取**（[onContinueCapture]）＝這話還沒截完 → 不儲存、不重編號、不跳詳情，只回擷取模式續截
+ *   （網頁還停在按停止時那一頁；頁碼由存檔時掃章夾 max+1 天然接續；回去後仍要自己按「開始」才續截）。
+ * - **儲存**（[onSave]）＝這話完成 → 重新編號成連續頁碼 + 跳漫畫詳情（此時才離開擷取畫面）。
+ * - **放棄**（[onDiscardSession]）＝丟掉這次 session 截的頁（error 色 + 確認對話框，與上面兩顆分列一行）。
+ *
+ * 底部排版：第一列「繼續擷取 / 儲存」兩顆主要動作，第二列「放棄這次截圖」（只在本次 session 有新頁時出現）；
+ * **有勾選時才在最上面多一列「刪除選取 (N)」**，讓兩種破壞性動作與主要動作分得開。
  */
 @Composable
 fun CaptureReviewScreenContent(
     state: CaptureReviewState,
-    onNavigateUp: () -> Unit,
     onToggleSelect: (String) -> Unit,
     onReCapture: (CapturePage) -> Unit,
     onInsert: (CapturePage, Boolean) -> Unit,
     onDeleteSelected: () -> Unit,
     onSave: () -> Unit,
-    // 回擷取工具續截這話（不儲存 / 不重編號 / 不跳詳情）。
+    // 回擷取模式續截這話（不儲存 / 不重編號 / 不跳詳情）；也是 TopAppBar 返回鍵與系統返回鍵的行為。
     onContinueCapture: () -> Unit = {},
-    // 本次連續截圖存下的頁數（0＝非連續 session 進入或無新頁）；>0 才顯示「放棄這次截圖」。
-    sessionPageCount: Int = 0,
     onDiscardSession: () -> Unit = {},
 ) {
+    // 本次連續截圖存下的頁數（0＝非連續 session 進入或無新頁）；>0 才顯示「放棄這次截圖」。
+    val sessionPageCount = state.sessionPageCount
     // 「放棄這次截圖」確認對話框（防誤觸，此動作刪頁不可復原）。
     var showDiscardDialog by remember { mutableStateOf(false) }
 
@@ -118,24 +119,10 @@ fun CaptureReviewScreenContent(
 
     Scaffold(
         topBar = {
+            // 返回＝「繼續擷取」（不刪任何頁、回擷取模式）；三個動作全在底部，這裡不再放掃把 icon。
             AppBar(
                 title = stringResource(MR.strings.capture_review_title),
-                navigateUp = onNavigateUp,
-                // 放棄整批入口放 TopAppBar action（不擠底部「刪除選取／儲存」）；只在有本次 session 新頁時出現。
-                actions = {
-                    if (sessionPageCount > 0) {
-                        AppBarActions(
-                            listOf(
-                                AppBar.Action(
-                                    title = stringResource(MR.strings.capture_review_discard),
-                                    icon = Icons.Outlined.DeleteSweep,
-                                    onClick = { showDiscardDialog = true },
-                                    enabled = !state.saving,
-                                ),
-                            ),
-                        )
-                    }
-                },
+                navigateUp = onContinueCapture,
             )
         },
         bottomBar = {
@@ -198,6 +185,24 @@ fun CaptureReviewScreenContent(
                                     modifier = Modifier.padding(start = 6.dp),
                                 )
                             }
+                        }
+                    }
+                    // 放棄這次截圖：排在底部第三個動作（原本藏在 TopAppBar 掃把 icon、使用者找不到）。
+                    // 用 error 色的 TextButton 與上面兩顆主要動作區隔，按下仍走確認對話框。
+                    if (sessionPageCount > 0) {
+                        TextButton(
+                            onClick = { showDiscardDialog = true },
+                            enabled = !state.saving,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.textButtonColors(
+                                contentColor = MaterialTheme.colorScheme.error,
+                            ),
+                        ) {
+                            Icon(imageVector = Icons.Outlined.DeleteSweep, contentDescription = null)
+                            Text(
+                                text = stringResource(MR.strings.capture_review_discard),
+                                modifier = Modifier.padding(start = 6.dp),
+                            )
                         }
                     }
                 }

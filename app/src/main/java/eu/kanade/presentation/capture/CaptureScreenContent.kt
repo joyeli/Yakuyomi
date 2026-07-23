@@ -52,6 +52,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,6 +61,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -68,8 +71,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import cafe.adriel.voyager.navigator.LocalNavigator
-import cafe.adriel.voyager.navigator.currentOrThrow
 import com.kevinnzou.web.AccompanistWebViewClient
 import com.kevinnzou.web.WebContent
 import com.kevinnzou.web.WebView
@@ -77,15 +78,15 @@ import com.kevinnzou.web.WebViewNavigator
 import com.kevinnzou.web.WebViewState
 import eu.kanade.presentation.webview.captureWebView
 import eu.kanade.presentation.webview.findActivity
-import eu.kanade.tachiyomi.ui.capture.CaptureReviewScreen
+import eu.kanade.tachiyomi.ui.capture.CaptureMode
 import eu.kanade.tachiyomi.ui.capture.CaptureSaveResult
 import eu.kanade.tachiyomi.ui.capture.FrameGrabber
 import eu.kanade.tachiyomi.util.system.setDefaultSettings
 import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.coroutines.launch
-import tachiyomi.core.common.i18n.stringResource as contextStringResource
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
+import tachiyomi.core.common.i18n.stringResource as contextStringResource
 
 /**
  * Yakuyomi 擷取漫畫畫面內容（階段 1：介面骨架重構）。
@@ -106,7 +107,15 @@ import tachiyomi.presentation.core.i18n.stringResource
  *
  * ★ 截圖零 overlay：截圖前把 [hideOverlayForCapture] 設 true → 等兩個 frame（隱藏工具列那次重繪畫上螢幕）
  * 才 [captureWebView]（PixelCopy 抓 WebView 區域的合成像素 → 此時區域內只剩 WebView、無任何浮動工具列）。
- * 存完再設回 false。連續截圖的抓幀器（grabber）也走此隱藏流程。
+ * 存完再設回 false。
+ *
+ * ★ WebView 常駐（2026-07 重構）：確認 / 重截 / 插入不再是別的 Screen，而是本 composable 的 [mode]
+ * （[CaptureMode]）。**WebView 永遠 render**（不被任何 if 分支丟掉），[CaptureMode.REVIEW] 時由
+ * [reviewContent] 全屏蓋在它上面（同時把 WebView 那層的觸控在 Initial pass 吃掉，避免蓋著還能捲）。
+ *
+ * ★ 連續擷取零閃爍：偵測用的「比較幀」不隱藏工具列（靜態工具列前後幀都在、不影響 frame-diff），
+ * 只有真的要存那一刻才用 cleanGrabber 隱藏 overlay 抓乾淨幀（見
+ * [eu.kanade.tachiyomi.ui.capture.CaptureScreenModel.startContinuous]）。
  */
 @Composable
 fun CaptureScreenContent(
@@ -119,15 +128,30 @@ fun CaptureScreenContent(
     onCapture: suspend (android.graphics.Bitmap, String?) -> CaptureSaveResult,
     continuousRunning: Boolean,
     capturedCount: Int,
-    onStartContinuous: (FrameGrabber, () -> String?) -> Unit,
+    // 目前模式：擷取 / 確認（面板蓋在 WebView 上）/ 單張重截或插入。
+    mode: CaptureMode = CaptureMode.CAPTURING,
+    // 剛存下的頁碼（非 null＝顯示「已擷取第 N 頁 · 請翻下一頁」提示，期間 model 暫停偵測）。
+    justCapturedPage: Int? = null,
+    // (比較幀抓取器, 乾淨幀抓取器, 網址讀取器)。
+    onStartContinuous: (FrameGrabber, FrameGrabber, () -> String?) -> Unit,
     onStopContinuous: () -> Unit,
-    // 停止時讀本次 session 截下的頁碼，帶進確認頁供「放棄這次截圖」只刪這批。
-    sessionPages: () -> List<Int> = { emptyList() },
+    // 按停止後進確認模式（不 push Screen）。
+    onEnterReview: () -> Unit = {},
     // 非 null＝重截模式：隱藏書名/章名輸入與連續擷取，「截這頁」改成覆蓋第 N 頁、成功後 [onReCaptureDone]。
     reCaptureTargetPage: Int? = null,
     // 非 null＝插入模式：同樣隱藏書名/章名與連續，「截這頁」改成「插入為第 X 頁」、成功後 [onReCaptureDone]。
     insertTargetPage: Int? = null,
+    // 單張模式要開回的網址；null/空＝該頁沒記網址 → **WebView 保持現狀不動**（不是每個站的網址都帶頁資訊）。
+    singleShotUrl: String? = null,
+    // 每次進單張模式遞增，讓上面的 loadUrl 重新觸發（同一頁重截兩次也算）。
+    singleShotToken: Int = 0,
     onReCaptureDone: () -> Unit = {},
+    // 單張模式取消（返回鍵 / 取消鈕）→ 回確認模式。
+    onSingleShotCancel: () -> Unit = {},
+    // 確認模式按系統返回＝「繼續擷取」（回擷取模式、不刪頁）。
+    onReviewContinue: () -> Unit = {},
+    // 確認模式的面板內容（疊在常駐 WebView 上）。
+    reviewContent: @Composable () -> Unit = {},
     // 網址列輸入歷史（帶出歷史清單 + 逐筆刪除 + 造訪時記錄）。
     urlHistoryProvider: () -> List<String> = { emptyList() },
     onAddUrl: (String) -> Unit = {},
@@ -136,10 +160,10 @@ fun CaptureScreenContent(
     val reCaptureMode = reCaptureTargetPage != null
     val insertMode = insertTargetPage != null
     // 單張目標模式（重截 / 插入）：隱藏書名/章名輸入與連續擷取，只留單一擷取鈕、成功後退回。
-    val singleShotMode = reCaptureMode || insertMode
+    val singleShotMode = mode == CaptureMode.SINGLE_SHOT && (reCaptureMode || insertMode)
+    val reviewMode = mode == CaptureMode.REVIEW
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val screenNavigator = LocalNavigator.currentOrThrow
 
     val navigator = remember { WebViewNavigator(scope) }
     val state = remember { WebViewState(WebContent.Url(initialUrl.ifBlank { "about:blank" })) }
@@ -149,8 +173,8 @@ fun CaptureScreenContent(
 
     // 工具列收起/展開（收起＝只剩 WebView + 展開小鈕）。
     var toolbarExpanded by remember { mutableStateOf(true) }
-    // 全新入口（initialUrl 空、非重截/插入）＝自動展開「瀏覽」panel 引導輸入網址；否則預設收合。
-    var browseExpanded by remember { mutableStateOf(initialUrl.isBlank() && !singleShotMode) }
+    // 全新入口（initialUrl 空）＝自動展開「瀏覽」panel 引導輸入網址；否則預設收合。
+    var browseExpanded by remember { mutableStateOf(initialUrl.isBlank()) }
     // 「新話數」簡易 panel（書名/章名輸入）展開與否。
     var chapterPanelExpanded by remember { mutableStateOf(false) }
     // 歷史清單展開與否。
@@ -251,15 +275,13 @@ fun CaptureScreenContent(
         }
     }
 
-    // 連續截圖 toggle：進行中→停止（停止後跳確認頁檢視/剔除/儲存這次的截圖）；
-    // 否則檢查書名/章名後把「抓幀器」交給 ScreenModel 驅動迴圈。
-    // 只有使用者「按停止」才跳確認頁；生命週期 ON_STOP / onDispose 直接呼叫 onStopContinuous、不跳。
+    // 連續截圖 toggle：進行中→停止（停止後切確認模式檢視/剔除/儲存這次的截圖，WebView 原地留著）；
+    // 否則檢查書名/章名後把兩個「抓幀器」交給 ScreenModel 驅動迴圈。
+    // 只有使用者「按停止」才進確認模式；生命週期 ON_STOP / onDispose 直接呼叫 onStopContinuous、不切模式。
     fun toggleContinuous() {
         if (continuousRunning) {
             onStopContinuous()
-            screenNavigator.push(
-                CaptureReviewScreen(bookName.trim(), chapterName.trim(), sessionPages = sessionPages()),
-            )
+            onEnterReview()
             return
         }
         if (bookName.isBlank() || chapterName.isBlank()) {
@@ -267,8 +289,14 @@ fun CaptureScreenContent(
             return
         }
         val window = context.findActivity()?.window
-        // ★ 抓幀器也走隱藏流程：每次抓幀前隱藏 overlay、等兩 frame、截圖、還原 → 截到的每幀皆零工具列。
-        val grabber: FrameGrabber = { onResult ->
+        // ① 比較幀抓取器：**不隱藏 overlay**。工具列是靜態的、前後幀都有它 → 不影響 frame-diff，
+        // 也就不必每 500ms 閃一次工具列（舊做法的閃爍來源）。
+        val compareGrabber: FrameGrabber = { onResult ->
+            captureWebView(webView, window) { bmp -> onResult(bmp) }
+        }
+        // ② 乾淨幀抓取器：只有真的要存那一刻才用——隱藏 overlay、等兩 frame（讓隱藏那次重繪上螢幕）、
+        // 截圖、還原 → 落地的截圖零工具列（護欄不破）。
+        val cleanGrabber: FrameGrabber = { onResult ->
             scope.launch {
                 hideOverlayForCapture = true
                 withFrameNanos {}
@@ -279,7 +307,15 @@ fun CaptureScreenContent(
                 }
             }
         }
-        onStartContinuous(grabber) { webView?.url }
+        onStartContinuous(compareGrabber, cleanGrabber) { webView?.url }
+    }
+
+    // 進單張模式（重截 / 插入）：該頁有記網址才開回去；沒有就**保持 WebView 現狀**（讓使用者自己捲到位）。
+    LaunchedEffect(singleShotToken) {
+        if (mode == CaptureMode.SINGLE_SHOT && !singleShotUrl.isNullOrBlank()) {
+            address = singleShotUrl
+            webView?.loadUrl(singleShotUrl)
+        }
     }
 
     // 生命週期：畫面離開（onDispose）或 app 進背景（ON_STOP）都停止連續截圖，避免背景空轉抓幀。
@@ -295,8 +331,15 @@ fun CaptureScreenContent(
         }
     }
 
-    // WebView 內還能上一頁時，系統返回＝WebView 上一頁（而非直接關畫面）。
-    BackHandler(enabled = navigator.canGoBack) { navigator.navigateBack() }
+    // 系統返回：確認模式＝回擷取模式（等同「繼續擷取」，不刪任何頁）；單張模式＝取消回確認模式；
+    // 擷取模式下 WebView 還能上一頁＝WebView 上一頁（而非直接關畫面）。
+    BackHandler(enabled = reviewMode || singleShotMode || navigator.canGoBack) {
+        when {
+            reviewMode -> onReviewContinue()
+            singleShotMode -> onSingleShotCancel()
+            else -> navigator.navigateBack()
+        }
+    }
 
     // 浮動 bar 半透明底：讓文字可讀又不完全擋住 WebView。
     // 用 surfaceContainerHigh（＝app 內其他 bar／對話框的抬升面色）而非 surface——深色主題下 surface 幾乎純黑、
@@ -313,11 +356,22 @@ fun CaptureScreenContent(
             .background(MaterialTheme.colorScheme.background),
     ) {
         // 底層：WebView 佔滿 status/navigation bar 之間（不涵蓋系統列 → 系統文字不與畫面重疊、截圖也不含系統列）。
+        // ★ 這個 Box 及其中的 WebView **永遠 render**（不進任何 if 分支）——確認 / 重截 / 插入只是疊模式，
+        // WebView 不重建 ⇒ 捲動位置 / 登入 / JS 狀態全保留。確認模式時在 Initial pass 吃掉觸控，
+        // 免得被面板蓋住還能捲動底下的網頁。
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
-                .navigationBarsPadding(),
+                .navigationBarsPadding()
+                .pointerInput(reviewMode) {
+                    if (!reviewMode) return@pointerInput
+                    awaitPointerEventScope {
+                        while (true) {
+                            awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
+                        }
+                    }
+                },
         ) {
             WebView(
                 state = state,
@@ -334,7 +388,8 @@ fun CaptureScreenContent(
         }
 
         // ★ 截圖進行中：不 render 任何浮動 overlay（頂部 bar / 底部 bar / 收起小鈕 / panel / 對話框）。
-        if (!hideOverlayForCapture) {
+        // 確認模式時整片被面板蓋住，浮動工具列一併不畫（免壓在面板下方漏出來）。
+        if (!hideOverlayForCapture && !reviewMode) {
             if (toolbarExpanded) {
                 // 頂部浮動工具列（5 鍵）+ 可展開的瀏覽 / 新話數 panel。
                 Column(
@@ -356,8 +411,8 @@ fun CaptureScreenContent(
                                 .padding(horizontal = 4.dp, vertical = 2.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            // 1) 返回
-                            IconButton(onClick = onNavigateUp) {
+                            // 1) 返回（單張模式＝取消回確認面板，其餘＝關掉整個擷取畫面）
+                            IconButton(onClick = { if (singleShotMode) onSingleShotCancel() else onNavigateUp() }) {
                                 Icon(
                                     imageVector = Icons.Outlined.Close,
                                     contentDescription = stringResource(MR.strings.action_close),
@@ -635,14 +690,17 @@ fun CaptureScreenContent(
                                     Icon(imageVector = Icons.Outlined.PhotoCamera, contentDescription = null)
                                     Text(
                                         text = if (reCaptureMode) {
-                                            stringResource(MR.strings.capture_recapture_action, reCaptureTargetPage ?: 0)
+                                            stringResource(
+                                                MR.strings.capture_recapture_action,
+                                                reCaptureTargetPage ?: 0,
+                                            )
                                         } else {
                                             stringResource(MR.strings.capture_insert_action, insertTargetPage ?: 0)
                                         },
                                         modifier = Modifier.padding(start = 6.dp),
                                     )
                                 }
-                                TextButton(onClick = onNavigateUp) {
+                                TextButton(onClick = onSingleShotCancel) {
                                     Text(text = stringResource(MR.strings.action_cancel))
                                 }
                             }
@@ -683,21 +741,40 @@ fun CaptureScreenContent(
             // 連續擷取進行中的引導提示（底部置中小條）：光看「已截 N 頁」不知道還要不要動作，
             // 這條明講「翻到下一頁繼續」——工具列收起時也看得到（放在 toolbarExpanded 之外），
             // 且同樣在 hideOverlayForCapture 內 → 截圖時不會入鏡。
+            // 剛存完一頁（justCapturedPage != null）時改成醒目的主色提示「已擷取第 N 頁 · 請翻下一頁」，
+            // 此期間 model 暫停偵測（見 startContinuous 的 CAPTURE_PAUSE_MS）——閃爍剛好發生在使用者看提示時。
             if (continuousRunning && !singleShotMode) {
+                val justCaptured = justCapturedPage
                 Surface(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .navigationBarsPadding()
                         .padding(bottom = 16.dp),
-                    color = barColor,
-                    contentColor = barContentColor,
+                    color = if (justCaptured != null) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        barColor
+                    },
+                    contentColor = if (justCaptured != null) {
+                        MaterialTheme.colorScheme.onPrimary
+                    } else {
+                        barContentColor
+                    },
                     shape = MaterialTheme.shapes.large,
                     shadowElevation = 3.dp,
                 ) {
                     Text(
-                        text = stringResource(MR.strings.capture_continuous_hint, capturedCount),
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        text = if (justCaptured != null) {
+                            stringResource(MR.strings.capture_continuous_saved_hint, justCaptured)
+                        } else {
+                            stringResource(MR.strings.capture_continuous_hint, capturedCount)
+                        },
+                        style = if (justCaptured != null) {
+                            MaterialTheme.typography.titleMedium
+                        } else {
+                            MaterialTheme.typography.bodyMedium
+                        },
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
                     )
                 }
             }
@@ -726,6 +803,17 @@ fun CaptureScreenContent(
                         }
                     },
                 )
+            }
+        }
+
+        // 確認模式：不透明面板全屏蓋在**仍然活著**的 WebView 上（不是 push 新 Screen）。
+        // 「繼續擷取」只是把 mode 切回 CAPTURING，網頁還停在按停止時那一頁。
+        if (reviewMode) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = MaterialTheme.colorScheme.background,
+            ) {
+                reviewContent()
             }
         }
     }

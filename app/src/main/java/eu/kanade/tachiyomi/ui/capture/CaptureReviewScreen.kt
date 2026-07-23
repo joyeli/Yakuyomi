@@ -1,25 +1,14 @@
 package eu.kanade.tachiyomi.ui.capture
 
 import android.app.Application
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import cafe.adriel.voyager.core.model.ScreenModel
-import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
-import cafe.adriel.voyager.navigator.LocalNavigator
-import cafe.adriel.voyager.navigator.currentOrThrow
 import com.hippo.unifile.UniFile
-import eu.kanade.presentation.capture.CaptureReviewScreenContent
-import eu.kanade.presentation.util.Screen
-import eu.kanade.tachiyomi.ui.manga.MangaScreen
 import eu.kanade.tachiyomi.util.storage.DiskUtil
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -31,57 +20,19 @@ import tachiyomi.source.local.LocalSource
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
-/**
- * Yakuyomi 擷取漫畫（B1c 第一步）：連續截圖「停止」後的確認頁。
+/*
+ * Yakuyomi 擷取漫畫：連續截圖「停止」後的**確認模式**。
+ *
+ * ★ 2026-07 重構：這裡**不再是獨立 Screen**。確認頁被拆成「model（本檔）＋ 一個 composable 面板
+ * （[eu.kanade.presentation.capture.CaptureReviewScreenContent]）」，由 [CaptureScreen] 以 [CaptureMode]
+ * 模式切換的方式疊在**常駐的 WebView 之上**——推獨立 Screen 會讓 CaptureScreen 的 composition 被 dispose、
+ * WebView 連同捲動/登入/JS 狀態一併重建（「繼續擷取」回去變 about:blank）。model 的邏輯（掃圖/重編號/
+ * 刪選取/放棄 session/插入/重截/儲存）原封不動沿用，只是改成可 [configure] 重設書名/章名/session 頁碼。
  *
  * 純檢視 + 剔除壞頁 + 儲存：掃 `<local>/<書名>/<章名>/` 下的截圖，3 欄網格 + 順序標號 + 勾選刪除，
  * 儲存時把剩餘頁重新編號成連續 001/002…（無缺號）→ 跳到該 local 漫畫詳情頁。
- * 先不做重截 / 插入 / 缺頁提示（後續步驟）。只操作該書/章夾內的圖檔，不碰別處。
+ * 只操作該書/章夾內的圖檔，不碰別處。
  */
-class CaptureReviewScreen(
-    private val bookName: String,
-    private val chapterName: String,
-    // 本次連續截圖存下的頁碼（自 CaptureScreen 帶入）；供「放棄這次截圖」只刪這批、不誤刪既有頁。空＝不顯示放棄入口。
-    private val sessionPages: List<Int> = emptyList(),
-) : Screen() {
-
-    @Composable
-    override fun Content() {
-        val navigator = LocalNavigator.currentOrThrow
-        val screenModel = rememberScreenModel { CaptureReviewScreenModel(bookName, chapterName, sessionPages) }
-        val state by screenModel.state.collectAsState()
-
-        // 每次進入（含從重截 pop 回來）重掃該章夾——Voyager 隱藏頁會 dispose composition，返回時
-        // 此 LaunchedEffect(Unit) 重跑 → 重截覆蓋的新圖被重新載入顯示。
-        LaunchedEffect(Unit) { screenModel.loadPages() }
-
-        LaunchedEffect(Unit) {
-            screenModel.events.collectLatest { event ->
-                when (event) {
-                    is CaptureReviewEvent.OpenManga -> navigator.replace(MangaScreen(event.mangaId))
-                    CaptureReviewEvent.Back -> navigator.pop()
-                    is CaptureReviewEvent.ReCapture -> navigator.push(CaptureScreen(reCaptureTarget = event.target))
-                    is CaptureReviewEvent.Insert -> navigator.push(CaptureScreen(insertTarget = event.target))
-                }
-            }
-        }
-
-        CaptureReviewScreenContent(
-            state = state,
-            onNavigateUp = navigator::pop,
-            onToggleSelect = screenModel::toggleSelection,
-            onReCapture = screenModel::reCapture,
-            onInsert = screenModel::insert,
-            onDeleteSelected = screenModel::deleteSelected,
-            onSave = screenModel::save,
-            // 繼續擷取＝單純退回擷取畫面（它還在 back stack、書名/章名等 model 狀態原封不動），
-            // 不儲存、不重編號、不跳詳情；回去後由使用者自己按「開始」續截，新頁碼由存檔時掃章夾 max+1 接續。
-            onContinueCapture = navigator::pop,
-            sessionPageCount = sessionPages.size,
-            onDiscardSession = screenModel::discardSession,
-        )
-    }
-}
 
 /**
  * 確認頁一張截圖：底層 [UniFile] + 顯示名 + 該頁記錄的網址 [url]（讀同名 `.url` sidecar，沒有＝null）。
@@ -94,6 +45,7 @@ data class CapturePage(val file: UniFile, val name: String, val url: String? = n
 /**
  * 確認頁狀態：載入中 / 目前頁清單 / 已勾選（uri 字串集合）/ 儲存中。
  * [reloadKey] 每次重掃遞增，供縮圖破 coil 快取（重截同檔名覆蓋後顯示新圖，不留舊快取殘影）。
+ * [sessionPageCount]＝本次連續截圖存下的頁數（>0 才顯示「放棄這次截圖」），由 [CaptureReviewScreenModel.configure] 設。
  */
 data class CaptureReviewState(
     val loading: Boolean = true,
@@ -101,9 +53,15 @@ data class CaptureReviewState(
     val selected: Set<String> = emptySet(),
     val saving: Boolean = false,
     val reloadKey: Int = 0,
+    val sessionPageCount: Int = 0,
 )
 
-/** 一次性導覽事件：儲存後開漫畫詳情頁、（找不到漫畫時）退回上一頁、開重截或插入畫面。 */
+/**
+ * 一次性事件（由 [CaptureScreen] 收）：
+ * - [OpenManga]＝儲存完成 → 離開整個擷取畫面、跳該 local 漫畫詳情（此時 WebView 才銷毀）。
+ * - [Back]＝結束確認模式回到擷取模式（放棄這次截圖後，或儲存時找不到漫畫的退路）。
+ * - [ReCapture] / [Insert]＝切到單張擷取模式（WebView 原地不動、只在該頁有記網址時 loadUrl 過去）。
+ */
 sealed interface CaptureReviewEvent {
     data class OpenManga(val mangaId: Long) : CaptureReviewEvent
     data object Back : CaptureReviewEvent
@@ -112,10 +70,6 @@ sealed interface CaptureReviewEvent {
 }
 
 class CaptureReviewScreenModel(
-    bookName: String,
-    chapterName: String,
-    // 本次連續截圖存下的頁碼（供 [discardSession] 只刪這批）。
-    private val sessionPages: List<Int> = emptyList(),
     private val storageManager: StorageManager = Injekt.get(),
     private val networkToLocalManga: NetworkToLocalManga = Injekt.get(),
     // 寫整章 meta（.yakuyomi_meta.json）需 context 開截斷串流（見 [writeMeta]）。
@@ -123,9 +77,14 @@ class CaptureReviewScreenModel(
 ) : ScreenModel {
 
     // 章夾定位用「安全檔名」（與 CaptureScreenModel.saveCapture 落地時同一套 sanitise）。
-    private val safeBook = DiskUtil.buildValidFilename(bookName.trim())
-    private val safeChapter = DiskUtil.buildValidFilename(chapterName.trim())
-    private val title = bookName.trim()
+    // ★ 改成 var：本 model 的實例跟著常駐的 CaptureScreen 活著（不再每次進確認頁 new 一個），
+    // 進入確認模式時由 [configure] 設定當下的書名/章名/本次 session 頁碼。
+    private var safeBook = ""
+    private var safeChapter = ""
+    private var title = ""
+
+    // 本次連續截圖存下的頁碼（供 [discardSession] 只刪這批）。
+    private var sessionPages: List<Int> = emptyList()
 
     private val _state = MutableStateFlow(CaptureReviewState())
     val state: StateFlow<CaptureReviewState> = _state.asStateFlow()
@@ -133,7 +92,21 @@ class CaptureReviewScreenModel(
     private val _events = Channel<CaptureReviewEvent>()
     val events = _events.receiveAsFlow()
 
-    // 首次載入與返回重載都由畫面的 LaunchedEffect(Unit) 呼叫 loadPages()（見 CaptureReviewScreen.Content）。
+    /**
+     * 進入確認模式前設定目標章夾與本次 session 頁碼，並重掃該章夾。
+     * 每次由 [CaptureScreen] 切到 [CaptureMode.REVIEW] 時呼叫（含連續截圖停止、單張重截/插入完成後回來）。
+     * 重設勾選（上一輪的選取不該殘留），[loadPages] 會把 loading 關掉並帶新的 reloadKey 破縮圖快取。
+     */
+    fun configure(bookName: String, chapterName: String, sessionPages: List<Int>) {
+        this.safeBook = DiskUtil.buildValidFilename(bookName.trim())
+        this.safeChapter = DiskUtil.buildValidFilename(chapterName.trim())
+        this.title = bookName.trim()
+        this.sessionPages = sessionPages.toList()
+        _state.update {
+            CaptureReviewState(loading = true, reloadKey = it.reloadKey, sessionPageCount = this.sessionPages.size)
+        }
+        loadPages()
+    }
 
     /** 定位 `<local>/<safeBook>/<safeChapter>/`（任一層缺 → null）。 */
     private fun chapterDir(): UniFile? =
@@ -180,7 +153,7 @@ class CaptureReviewScreenModel(
         }
     }
 
-    /** 對某頁發起重截：帶該頁記錄的網址 [CapturePage.url] + 章夾定位 + 檔名，push 到重截畫面。 */
+    /** 對某頁發起重截：帶該頁記錄的網址 [CapturePage.url] + 章夾定位 + 檔名，切到單張擷取模式。 */
     fun reCapture(page: CapturePage) {
         screenModelScope.launch {
             _events.send(
@@ -190,8 +163,8 @@ class CaptureReviewScreenModel(
     }
 
     /**
-     * 在某頁前/後插入一張新截圖：算出插入位置頁碼（before＝該頁頁碼 N、after＝N+1）→ push 插入模式的擷取畫面，
-     * 並帶被長按那頁的網址 [CapturePage.url]（讓擷取畫面從相鄰頁開起、使用者捲到要插入的頁再截）。
+     * 在某頁前/後插入一張新截圖：算出插入位置頁碼（before＝該頁頁碼 N、after＝N+1）→ 切到單張擷取模式，
+     * 並帶被長按那頁的網址 [CapturePage.url]（有記網址才 loadUrl 過去、否則 WebView 保持現狀讓使用者自己捲）。
      * 頁碼取自檔名（`003.png` → 3；解析不到＝忽略）。實際騰位與存檔在 [CaptureScreenModel.saveInsert]。
      */
     fun insert(page: CapturePage, before: Boolean) {
@@ -236,7 +209,7 @@ class CaptureReviewScreenModel(
 
     /**
      * 放棄這次連續截圖：刪掉本 session 截的頁（[sessionPages] 對應的 `%03d.png`／其他副檔名同 basename 圖 + `%03d.url`），
-     * 只在該章夾內、存在才刪、找不到＝no-op；**不動接續截圖前既有的其他頁** → 發 Back 事件退回上一頁。
+     * 只在該章夾內、存在才刪、找不到＝no-op；**不動接續截圖前既有的其他頁** → 發 Back 事件回擷取模式（WebView 不動）。
      */
     fun discardSession() {
         screenModelScope.launch {
