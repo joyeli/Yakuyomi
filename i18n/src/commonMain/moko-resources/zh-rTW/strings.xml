@@ -318,6 +318,7 @@
     <string name="capture_recapture_saved">已取代第 %1$d 頁</string>
     <string name="capture_review_discard">放棄這次截圖</string>
     <string name="capture_review_discard_confirm">放棄這次截的 %1$d 頁？此動作無法復原。</string>
+    <string name="capture_review_cancel">取消擷取</string>
     <string name="capture_insert_before">在此頁前插入</string>
     <string name="capture_insert_after">在此頁後插入</string>
     <string name="capture_insert_title">插入頁</string>

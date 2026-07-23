@@ -224,6 +224,8 @@ class CaptureScreen(
                     // 由使用者自己按「開始」續截，新頁碼由存檔時掃章夾 max+1 天然接續。
                     onContinueCapture = { mode = CaptureMode.CAPTURING },
                     onDiscardSession = reviewModel::discardSession,
+                    // 本次 session 沒截到新頁時第三顆動作＝「取消擷取」：沒東西可刪，直接離開整個擷取工具。
+                    onExitCapture = navigator::pop,
                 )
             },
         )

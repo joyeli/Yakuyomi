@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.PhotoCamera
@@ -72,9 +73,11 @@ import tachiyomi.presentation.core.screens.LoadingScreen
  * - **繼續擷取**（[onContinueCapture]）＝這話還沒截完 → 不儲存、不重編號、不跳詳情，只回擷取模式續截
  *   （網頁還停在按停止時那一頁；頁碼由存檔時掃章夾 max+1 天然接續；回去後仍要自己按「開始」才續截）。
  * - **儲存**（[onSave]）＝這話完成 → 重新編號成連續頁碼 + 跳漫畫詳情（此時才離開擷取畫面）。
- * - **放棄**（[onDiscardSession]）＝丟掉這次 session 截的頁（error 色 + 確認對話框，與上面兩顆分列一行）。
+ * - **放棄**（[onDiscardSession]）＝丟掉這次 session 截的頁（error 色 + 確認對話框，與上面兩顆分列一行）；
+ *   本次 session 沒截到新頁時這顆改成**取消擷取**（[onExitCapture]，沒東西可刪 → 免確認框直接離開）。
  *
- * 底部排版：第一列「繼續擷取 / 儲存」兩顆主要動作，第二列「放棄這次截圖」（只在本次 session 有新頁時出現）；
+ * 底部排版：第一列「繼續擷取 / 儲存」兩顆主要動作，第二列「放棄這次截圖 / 取消擷取」（**一律顯示**，
+ * 否則沒截到新頁時使用者沒有退出的出口）；
  * **有勾選時才在最上面多一列「刪除選取 (N)」**，讓兩種破壞性動作與主要動作分得開。
  */
 @Composable
@@ -88,8 +91,10 @@ fun CaptureReviewScreenContent(
     // 回擷取模式續截這話（不儲存 / 不重編號 / 不跳詳情）；也是 TopAppBar 返回鍵與系統返回鍵的行為。
     onContinueCapture: () -> Unit = {},
     onDiscardSession: () -> Unit = {},
+    // 直接離開整個擷取工具（本次 session 沒截到新頁時第三顆動作＝「取消擷取」的行為）。
+    onExitCapture: () -> Unit = {},
 ) {
-    // 本次連續截圖存下的頁數（0＝非連續 session 進入或無新頁）；>0 才顯示「放棄這次截圖」。
+    // 本次連續截圖存下的頁數（0＝非連續 session 進入或無新頁）；決定第三顆動作是「放棄」還是「取消」。
     val sessionPageCount = state.sessionPageCount
     // 「放棄這次截圖」確認對話框（防誤觸，此動作刪頁不可復原）。
     var showDiscardDialog by remember { mutableStateOf(false) }
@@ -187,23 +192,32 @@ fun CaptureReviewScreenContent(
                             }
                         }
                     }
-                    // 放棄這次截圖：排在底部第三個動作（原本藏在 TopAppBar 掃把 icon、使用者找不到）。
-                    // 用 error 色的 TextButton 與上面兩顆主要動作區隔，按下仍走確認對話框。
-                    if (sessionPageCount > 0) {
-                        TextButton(
-                            onClick = { showDiscardDialog = true },
-                            enabled = !state.saving,
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.textButtonColors(
-                                contentColor = MaterialTheme.colorScheme.error,
-                            ),
-                        ) {
-                            Icon(imageVector = Icons.Outlined.DeleteSweep, contentDescription = null)
-                            Text(
-                                text = stringResource(MR.strings.capture_review_discard),
-                                modifier = Modifier.padding(start = 6.dp),
-                            )
-                        }
+                    // 底部第三個動作（原本藏在 TopAppBar 掃把 icon、使用者找不到）：**一律顯示**，
+                    // 否則「繼續擷取→按開始→停止」但這輪沒截到新頁時（sessionPageCount==0）整顆消失，
+                    // 確認頁只剩「繼續擷取 / 儲存」＝沒有退出的路。文案/行為依本次 session 有無新頁分兩種：
+                    // - 有新頁：放棄這次截圖（走確認對話框 → 刪本次 session 頁 + 回擷取模式）。
+                    // - 無新頁：取消擷取（沒東西可刪 → 不用確認框，直接離開擷取工具）。
+                    val hasSessionPages = sessionPageCount > 0
+                    TextButton(
+                        onClick = { if (hasSessionPages) showDiscardDialog = true else onExitCapture() },
+                        enabled = !state.saving,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.textButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error,
+                        ),
+                    ) {
+                        Icon(
+                            imageVector = if (hasSessionPages) Icons.Outlined.DeleteSweep else Icons.Outlined.Close,
+                            contentDescription = null,
+                        )
+                        Text(
+                            text = if (hasSessionPages) {
+                                stringResource(MR.strings.capture_review_discard)
+                            } else {
+                                stringResource(MR.strings.capture_review_cancel)
+                            },
+                            modifier = Modifier.padding(start = 6.dp),
+                        )
                     }
                 }
             }
