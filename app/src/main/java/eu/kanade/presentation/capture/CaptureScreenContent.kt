@@ -10,6 +10,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,9 +23,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
@@ -46,6 +49,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -81,6 +85,7 @@ import eu.kanade.presentation.webview.findActivity
 import eu.kanade.tachiyomi.ui.capture.CaptureMode
 import eu.kanade.tachiyomi.ui.capture.CaptureSaveResult
 import eu.kanade.tachiyomi.ui.capture.FrameGrabber
+import eu.kanade.tachiyomi.ui.capture.suggestCaptureChapterNames
 import eu.kanade.tachiyomi.util.system.setDefaultSettings
 import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.coroutines.launch
@@ -97,10 +102,19 @@ import tachiyomi.core.common.i18n.stringResource as contextStringResource
  *
  * 主工具列（頂部一條浮動 bar）＝**5 鍵**：返回 / 瀏覽 / 新漫畫 / 新話數 / 開始‧停止。
  * - **瀏覽**：toggle「瀏覽 panel」（網址列＋清除＋前往＋歷史＋上一頁/下一頁＋清除 Cookie）。
- * - **新漫畫**：階段 3 才做，此處 placeholder（toast 提示）。
- * - **新話數**：階段 1 先 toggle「書名＋章名」兩輸入框的簡易 panel（完整內容留階段 2）。
+ * - **新漫畫**：toggle「新漫畫 panel」＝書名輸入 ＋「從網頁標題帶入」（讀 [WebView.getTitle] **原生屬性**，
+ *   不注入 JS、不碰 DOM——本工具的護欄是「截像素」）；確定＝設定書名。封面框選 / 記網址留階段 3。
+ * - **新話數**：toggle「新話數 panel」＝已截話數總覽（掃該書夾下的話夾）＋話數建議按鈕
+ *   （[suggestCaptureChapterNames]）＋可手動編輯的輸入框；確定＝設定章名。
  * - **開始‧停止**：接現有連續截圖 [toggleContinuous]；書名/章名皆非空才可開始，連續中顯示紅色停止。
  * 重截 / 插入（[singleShotMode]）只留單張截圖鍵（底部浮動 bar），隱藏連續/新漫畫/新話數。
+ *
+ * ★ 漸進式解鎖（S0→S3）：5 鍵依「目前走到哪」逐一解鎖，沒到的鍵 disabled（M3 IconButton 自帶灰階弱化）——
+ * - **S0**（WebView 還在 `about:blank`／空網址）：只有「瀏覽」（且沿用既有的自動展開引導）。
+ * - **S1**（已有網址）：＋「新漫畫」。
+ * - **S2**（書名非空）：＋「新話數」。
+ * - **S3**（章名非空）：＋「開始」。
+ * 「返回」永遠可用；[CaptureMode.REVIEW] / [CaptureMode.SINGLE_SHOT] 不受此解鎖影響（那兩個模式本就只露單張鍵）。
  *
  * 浮動元件配色一律走 `surfaceContainerHigh`＋`onSurface`（與 app 其他 bar 同色階，非純黑膠帶）；工具列收起後
  * 只留一個貼右緣的 32×40dp 小把手。連續擷取進行中，底部置中顯示「已截 N 頁 · 翻到下一頁繼續」引導。
@@ -126,6 +140,8 @@ fun CaptureScreenContent(
     chapterName: String,
     onChapterNameChange: (String) -> Unit,
     onCapture: suspend (android.graphics.Bitmap, String?) -> CaptureSaveResult,
+    // 「新話數」panel 用：給書名 → 回該書已截的話夾名稱（總覽 + 話數建議的來源）。
+    existingChaptersProvider: suspend (String) -> List<String> = { emptyList() },
     continuousRunning: Boolean,
     capturedCount: Int,
     // 目前模式：擷取 / 確認（面板蓋在 WebView 上）/ 單張重截或插入。
@@ -170,13 +186,23 @@ fun CaptureScreenContent(
     // 抓 onCreated 給的原生 WebView：截圖 / 手動載址都要它。
     var webView by remember { mutableStateOf<WebView?>(null) }
     var address by remember { mutableStateOf(initialUrl) }
+    // WebView **實際載入**的網址（不是網址列草稿）：漸進式解鎖的 S1 判準，只由 WebViewClient 的導覽回呼更新
+    // ——否則使用者在網址列打幾個字（address 一路變動）就會誤判成「已有網址」。
+    var loadedUrl by remember { mutableStateOf(initialUrl) }
 
     // 工具列收起/展開（收起＝只剩 WebView + 展開小鈕）。
     var toolbarExpanded by remember { mutableStateOf(true) }
     // 全新入口（initialUrl 空）＝自動展開「瀏覽」panel 引導輸入網址；否則預設收合。
     var browseExpanded by remember { mutableStateOf(initialUrl.isBlank()) }
-    // 「新話數」簡易 panel（書名/章名輸入）展開與否。
+    // 「新漫畫」panel（書名輸入 + 從網頁標題帶入）展開與否。
+    var mangaPanelExpanded by remember { mutableStateOf(false) }
+    // 「新話數」panel（已截話數總覽 + 建議 + 章名輸入）展開與否。
     var chapterPanelExpanded by remember { mutableStateOf(false) }
+    // 兩個 panel 的暫存輸入：按「確定」才寫回 model 的 bookName / chapterName（panel 開啟時同步當前值）。
+    var bookDraft by remember { mutableStateOf(bookName) }
+    var chapterDraft by remember { mutableStateOf(chapterName) }
+    // 目前書名底下已截過的話夾名稱（開「新話數」panel 時掃一次）。
+    var existingChapters by remember { mutableStateOf(emptyList<String>()) }
     // 歷史清單展開與否。
     var historyExpanded by remember { mutableStateOf(false) }
     // 歷史清單在畫面內管理：初值來自 pref，刪除即時反映 UI 並同步寫回 pref；展開時再重讀（納入剛造訪的網址）。
@@ -193,13 +219,17 @@ fun CaptureScreenContent(
                 super.onPageStarted(view, url, favicon)
                 url?.let {
                     address = it
+                    loadedUrl = it
                     onAddUrl(it)
                 }
             }
 
             override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
                 super.doUpdateVisitedHistory(view, url, isReload)
-                url?.let { address = it }
+                url?.let {
+                    address = it
+                    loadedUrl = it
+                }
             }
 
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
@@ -318,6 +348,33 @@ fun CaptureScreenContent(
         }
     }
 
+    // ── 漸進式解鎖 S0→S3（見檔頭 KDoc）─────────────────────────────────────────
+    // S1 條件＝WebView 已載入真網址（[loadedUrl]＝initialUrl / WebViewClient 導覽回呼，非網址列草稿）。
+    val hasUrl = loadedUrl.isNotBlank() && loadedUrl.trim() != "about:blank"
+    val canNewManga = hasUrl // S1 → 解鎖「新漫畫」
+    val canNewChapter = canNewManga && bookName.isNotBlank() // S2 → 解鎖「新話數」
+    val canStart = canNewChapter && chapterName.isNotBlank() // S3 → 解鎖「開始」
+
+    // 條件退回（例如把書名清空）時收起對應 panel，免得停在一個已按不到的面板上。
+    LaunchedEffect(canNewManga, canNewChapter) {
+        if (!canNewManga) mangaPanelExpanded = false
+        if (!canNewChapter) chapterPanelExpanded = false
+    }
+
+    // 開「新漫畫」panel ＝草稿同步當前書名。
+    LaunchedEffect(mangaPanelExpanded) {
+        if (mangaPanelExpanded) bookDraft = bookName
+    }
+
+    // 開「新話數」panel（或書名換了）＝掃該書已截的話夾；章名還空就用第一個建議話數預填草稿。
+    LaunchedEffect(chapterPanelExpanded, bookName) {
+        if (!chapterPanelExpanded) return@LaunchedEffect
+        existingChapters = existingChaptersProvider(bookName)
+        chapterDraft = chapterName.ifBlank {
+            suggestCaptureChapterNames(existingChapters).firstOrNull().orEmpty()
+        }
+    }
+
     // 生命週期：畫面離開（onDispose）或 app 進背景（ON_STOP）都停止連續截圖，避免背景空轉抓幀。
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -418,11 +475,14 @@ fun CaptureScreenContent(
                                     contentDescription = stringResource(MR.strings.action_close),
                                 )
                             }
-                            // 2) 瀏覽（toggle 瀏覽 panel；開時關掉新話數 panel 免過高）
+                            // 2) 瀏覽（永遠可用；toggle 瀏覽 panel，開時關掉其他 panel 免過高）
                             IconButton(
                                 onClick = {
                                     browseExpanded = !browseExpanded
-                                    if (browseExpanded) chapterPanelExpanded = false
+                                    if (browseExpanded) {
+                                        mangaPanelExpanded = false
+                                        chapterPanelExpanded = false
+                                    }
                                 },
                             ) {
                                 Icon(
@@ -450,25 +510,38 @@ fun CaptureScreenContent(
                                         style = MaterialTheme.typography.bodyMedium,
                                     )
                                 } else {
-                                    // 3) 新漫畫（階段 3 才做，先 placeholder）
+                                    // 3) 新漫畫（S1：有網址才解鎖）：toggle 書名 panel
                                     IconButton(
                                         onClick = {
-                                            context.toast(
-                                                context.contextStringResource(MR.strings.capture_new_manga_todo),
-                                            )
+                                            mangaPanelExpanded = !mangaPanelExpanded
+                                            if (mangaPanelExpanded) {
+                                                browseExpanded = false
+                                                chapterPanelExpanded = false
+                                            }
                                         },
+                                        enabled = canNewManga,
                                     ) {
                                         Icon(
                                             imageVector = Icons.Outlined.CollectionsBookmark,
                                             contentDescription = stringResource(MR.strings.capture_new_manga),
+                                            // disabled 時 IconButton 已把 LocalContentColor 換成灰階弱化色。
+                                            tint = if (mangaPanelExpanded) {
+                                                MaterialTheme.colorScheme.primary
+                                            } else {
+                                                LocalContentColor.current
+                                            },
                                         )
                                     }
-                                    // 4) 新話數（toggle 書名/章名 panel；開時關掉瀏覽 panel）
+                                    // 4) 新話數（S2：書名非空才解鎖）：toggle 話數 panel
                                     IconButton(
                                         onClick = {
                                             chapterPanelExpanded = !chapterPanelExpanded
-                                            if (chapterPanelExpanded) browseExpanded = false
+                                            if (chapterPanelExpanded) {
+                                                browseExpanded = false
+                                                mangaPanelExpanded = false
+                                            }
                                         },
+                                        enabled = canNewChapter,
                                     ) {
                                         Icon(
                                             imageVector = Icons.Outlined.Edit,
@@ -480,8 +553,7 @@ fun CaptureScreenContent(
                                             },
                                         )
                                     }
-                                    // 5) 開始（書名/章名皆非空才可開始，否則灰）
-                                    val canStart = bookName.isNotBlank() && chapterName.isNotBlank()
+                                    // 5) 開始（S3：書名 + 章名皆非空才解鎖）
                                     IconButton(onClick = { toggleContinuous() }, enabled = canStart) {
                                         Icon(
                                             imageVector = Icons.Outlined.PlayArrow,
@@ -634,8 +706,9 @@ fun CaptureScreenContent(
                         }
                     }
 
-                    // 新話數 panel（階段 1 簡易＝書名 + 章名）；重截/插入與連續進行中不顯示。
-                    if (chapterPanelExpanded && !singleShotMode && !continuousRunning) {
+                    // 新漫畫 panel（階段 2 簡易版＝書名 + 從網頁標題帶入）；重截/插入與連續進行中不顯示。
+                    // 封面框選 / 記錄書籍網址 / 書櫃「繼續擷取」入口留階段 3。
+                    if (mangaPanelExpanded && !singleShotMode && !continuousRunning) {
                         Spacer(modifier = Modifier.height(6.dp))
                         Surface(
                             color = barColor,
@@ -645,20 +718,145 @@ fun CaptureScreenContent(
                         ) {
                             Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
                                 OutlinedTextField(
-                                    value = bookName,
-                                    onValueChange = onBookNameChange,
+                                    value = bookDraft,
+                                    onValueChange = { bookDraft = it },
                                     modifier = Modifier.fillMaxWidth(),
                                     label = { Text(stringResource(MR.strings.capture_book_name)) },
                                     singleLine = true,
                                 )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    // ★ 讀 WebView 的原生 title 屬性（不注入 JS、不碰 DOM）→ 填進輸入框，
+                                    // 讓使用者自己 trim/改（網頁標題常帶「- 第X話 - 站名」等雜訊）。
+                                    TextButton(
+                                        onClick = {
+                                            val title = webView?.title?.trim().orEmpty()
+                                            if (title.isEmpty() || title == "about:blank") {
+                                                context.toast(
+                                                    context.contextStringResource(
+                                                        MR.strings.capture_title_unavailable,
+                                                    ),
+                                                )
+                                            } else {
+                                                bookDraft = title
+                                            }
+                                        },
+                                    ) {
+                                        Text(text = stringResource(MR.strings.capture_use_page_title))
+                                    }
+                                    Spacer(modifier = Modifier.weight(1f))
+                                    Button(
+                                        onClick = {
+                                            val newBook = bookDraft.trim()
+                                            // 換一本書＝原本的章名不再適用（避免誤截進 <新書>/<舊章名>）→ 清空，
+                                            // 使用者接著走「新話數」panel（該書的已截話數/建議也才對得上）。
+                                            if (newBook != bookName) onChapterNameChange("")
+                                            onBookNameChange(newBook)
+                                            mangaPanelExpanded = false
+                                        },
+                                        enabled = bookDraft.isNotBlank(),
+                                    ) {
+                                        Text(text = stringResource(MR.strings.action_ok))
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 新話數 panel（階段 2 完整版＝已截話數總覽 + 話數建議 + 可手動編輯的章名）；
+                    // 重截/插入與連續進行中不顯示。
+                    if (chapterPanelExpanded && !singleShotMode && !continuousRunning) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Surface(
+                            color = barColor,
+                            contentColor = barContentColor,
+                            shape = MaterialTheme.shapes.large,
+                            shadowElevation = 3.dp,
+                        ) {
+                            Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
+                                // ① 已截話數總覽：掃 <local>/<書名>/ 下的話夾名稱（讓使用者知道這本截過哪些話）。
+                                Text(
+                                    text = stringResource(MR.strings.capture_existing_chapters),
+                                    style = MaterialTheme.typography.labelLarge,
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                if (existingChapters.isEmpty()) {
+                                    Text(
+                                        text = stringResource(MR.strings.capture_no_chapters),
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                } else {
+                                    FlowRow(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(max = 96.dp)
+                                            .verticalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    ) {
+                                        existingChapters.forEach { name ->
+                                            Surface(
+                                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                shape = MaterialTheme.shapes.small,
+                                            ) {
+                                                Text(
+                                                    text = name,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // ② 話數建議：依「已截的最後一話」推（整數 → n+1 / +0.1 / +0.5；小數 → +0.1 / 下一個整數；
+                                // 沒有已截話 → 01）。點一下填進輸入框，仍可手動改。
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = stringResource(MR.strings.capture_chapter_suggestions),
+                                    style = MaterialTheme.typography.labelLarge,
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                FlowRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    suggestCaptureChapterNames(existingChapters).forEach { suggestion ->
+                                        OutlinedButton(onClick = { chapterDraft = suggestion }) {
+                                            Text(text = suggestion)
+                                        }
+                                    }
+                                }
+
+                                // ③ 章名輸入（可直接手動編輯）+ 確定。
                                 Spacer(modifier = Modifier.height(8.dp))
                                 OutlinedTextField(
-                                    value = chapterName,
-                                    onValueChange = onChapterNameChange,
+                                    value = chapterDraft,
+                                    onValueChange = { chapterDraft = it },
                                     modifier = Modifier.fillMaxWidth(),
                                     label = { Text(stringResource(MR.strings.capture_chapter_name)) },
                                     singleLine = true,
                                 )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Spacer(modifier = Modifier.weight(1f))
+                                    Button(
+                                        onClick = {
+                                            onChapterNameChange(chapterDraft.trim())
+                                            chapterPanelExpanded = false
+                                        },
+                                        enabled = chapterDraft.isNotBlank(),
+                                    ) {
+                                        Text(text = stringResource(MR.strings.action_ok))
+                                    }
+                                }
                             }
                         }
                     }

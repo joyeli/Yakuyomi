@@ -334,7 +334,12 @@
     <string name="capture_browse">瀏覽</string>
     <string name="capture_new_manga">新漫畫</string>
     <string name="capture_new_chapter">新話數</string>
-    <string name="capture_new_manga_todo">新漫畫功能將於後續階段推出</string>
+    <!-- Yakuyomi: capture new-manga / new-chapter panels -->
+    <string name="capture_use_page_title">從網頁標題帶入</string>
+    <string name="capture_title_unavailable">這個頁面還沒有標題</string>
+    <string name="capture_existing_chapters">已截話數</string>
+    <string name="capture_no_chapters">尚未擷取任何話</string>
+    <string name="capture_chapter_suggestions">話數建議</string>
     <string name="capture_clear_cookies_confirm">清除內建瀏覽器的所有 Cookie？你可能需要重新登入各網站。</string>
     <string name="pref_category_library">書櫃</string>
     <string name="ext_obsolete">過舊</string>

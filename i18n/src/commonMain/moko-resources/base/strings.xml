@@ -289,7 +289,12 @@
     <string name="capture_browse">Browse</string>
     <string name="capture_new_manga">New manga</string>
     <string name="capture_new_chapter">New chapter</string>
-    <string name="capture_new_manga_todo">The new-manga picker arrives in a later stage</string>
+    <!-- Yakuyomi: capture new-manga / new-chapter panels -->
+    <string name="capture_use_page_title">Use page title</string>
+    <string name="capture_title_unavailable">This page has no title yet</string>
+    <string name="capture_existing_chapters">Captured chapters</string>
+    <string name="capture_no_chapters">No chapters captured yet</string>
+    <string name="capture_chapter_suggestions">Suggested chapter</string>
     <string name="capture_clear_cookies_confirm">Clear all cookies for the built-in browser? You may need to sign in to sites again.</string>
     <string name="action_start_downloading_now">Start downloading now</string>
     <string name="action_not_now">Not now</string>

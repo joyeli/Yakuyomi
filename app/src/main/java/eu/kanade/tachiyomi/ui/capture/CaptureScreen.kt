@@ -45,6 +45,9 @@ import uy.kohesive.injekt.api.get
 import java.io.OutputStream
 import kotlin.coroutines.resume
 import kotlin.math.abs
+import kotlin.math.floor
+import kotlin.math.roundToInt
+import kotlin.math.roundToLong
 
 /**
  * 抓一幀 WebView 畫面：呼叫端（Composable）把 [eu.kanade.presentation.webview.captureWebView] 綁好
@@ -177,6 +180,8 @@ class CaptureScreen(
             onBookNameChange = { screenModel.bookName = it },
             chapterName = screenModel.chapterName,
             onChapterNameChange = { screenModel.chapterName = it },
+            // 「新話數」panel 的已截話數總覽 / 話數建議來源：掃該書夾下的話夾名稱。
+            existingChaptersProvider = { book -> screenModel.existingChapters(book) },
             onCapture = when {
                 target != null -> {
                     { bitmap, url ->
@@ -289,6 +294,24 @@ class CaptureScreenModel(
     fun removeWebViewUrl(url: String) {
         val updated = webViewUrlHistory().filterNot { it == url }
         uiPreferences.lastWebViewUrls.set(webViewUrlJson.encodeToString(updated))
+    }
+
+    /**
+     * 掃 `<local>/<safeBook>/` 下的**話夾名稱**（給「新話數」panel 的「已截話數總覽 + 話數建議」用）。
+     * 只列目錄、不看內容；書名空 / 該書還沒有夾子 / local 目錄不可用 → 空清單。
+     * 排序見 [CHAPTER_ORDER]（數字話照數值、非數字話排後面）。
+     */
+    suspend fun existingChapters(book: String = bookName): List<String> = withIOContext {
+        val safeBook = DiskUtil.buildValidFilename(book.trim())
+        if (safeBook.isEmpty()) return@withIOContext emptyList()
+        runCatching {
+            storageManager.getLocalSourceDirectory()
+                ?.findFile(safeBook)?.takeIf { it.isDirectory }
+                ?.listFiles().orEmpty()
+                .filter { it.isDirectory }
+                .mapNotNull { it.name?.trim()?.takeIf(String::isNotEmpty) }
+                .sortedWith(CHAPTER_ORDER)
+        }.getOrElse { emptyList() }
     }
 
     // 本次連續截圖存下的頁碼（每次 startContinuous 重置）；供確認頁「放棄這次截圖」只刪這批、
@@ -615,6 +638,56 @@ class CaptureScreenModel(
                 "Cannot open output stream for ${f.uri}"
             }
         }
+}
+
+// ── 話數（章名）解析 / 格式化 / 建議 ────────────────────────────────────────
+// 純函式（不碰 I/O、不碰 Compose），給「新話數」panel 算建議用；抽在這裡也方便日後單測。
+
+/** 純數字話名的樣式：`12`、`12.1`、`012.25`（整數 or 一個小數點）。其餘（`第一話` / `extra`）視為非數字話。 */
+private val CHAPTER_NUMBER_RE = Regex("""\d+(\.\d+)?""")
+
+/**
+ * 已截話數的排序：能解析成數字的照數值排前（`01` < `1.5` < `02` < `10`），
+ * 解析不到數字的（`extra`、`第一話`）排在後面照名稱排。
+ */
+private val CHAPTER_ORDER = compareBy<String>(
+    { captureChapterNumber(it) ?: Double.MAX_VALUE },
+    { it.lowercase() },
+)
+
+/** 話名 → 數字；只接受純數字話名（見 [CHAPTER_NUMBER_RE]），其餘回 null（不參與「最後一話」推算）。 */
+fun captureChapterNumber(name: String): Double? =
+    name.trim().takeIf { CHAPTER_NUMBER_RE.matches(it) }?.toDoubleOrNull()
+
+/**
+ * 數字 → 話名字串：**整數部分預設補零到 2 位**（`1` → `01`、`12` → `12`），超過 99 就照實際長度
+ * （`100` → `100`，不強制補）；小數只保留 1 位（`12.1`、整數部分同樣補到 2 位）、`.0` 不顯示。
+ */
+fun formatCaptureChapterName(value: Double): String {
+    val rounded = (value * 10.0).roundToLong() / 10.0
+    val intPart = floor(rounded).toInt()
+    val frac = ((rounded - intPart) * 10).roundToInt().coerceIn(0, 9)
+    val intStr = if (intPart < 100) "%02d".format(intPart) else intPart.toString()
+    return if (frac == 0) intStr else "$intStr.$frac"
+}
+
+/**
+ * 依「已截的最後一話」（[existing] 中數值最大的純數字話）推建議話名：
+ * - 最後一話是整數 `12` → `13`(n+1) / `12.1`(+0.1) / `12.5`(+0.5)
+ * - 最後一話是小數 `12.1` → `12.2`(+0.1) / `13`（下一個整數）——小數通常 +0.1（`12.4` 的下一話多半是 `12.5`）
+ * - 完全沒有已截話（或全是非數字話名）→ `01`
+ * 使用者仍可在輸入框手動改（建議只是按鈕）。
+ */
+fun suggestCaptureChapterNames(existing: List<String>): List<String> {
+    val last = existing.mapNotNull(::captureChapterNumber).maxOrNull()
+        ?: return listOf(formatCaptureChapterName(1.0))
+    val isInteger = abs(last - floor(last)) < 1e-6
+    val candidates = if (isInteger) {
+        listOf(last + 1.0, last + 0.1, last + 0.5)
+    } else {
+        listOf(last + 0.1, floor(last) + 1.0)
+    }
+    return candidates.map(::formatCaptureChapterName).distinct()
 }
 
 /** 存檔結果：成功（頁碼 + 路徑）／未填書名章名／失敗（訊息）。 */
