@@ -341,6 +341,15 @@
     <string name="capture_no_chapters">尚未擷取任何話</string>
     <string name="capture_chapter_suggestions">話數建議</string>
     <string name="capture_clear_cookies_confirm">清除內建瀏覽器的所有 Cookie？你可能需要重新登入各網站。</string>
+    <!-- Yakuyomi：封面框選 -->
+    <string name="capture_select_cover">框選封面</string>
+    <string name="capture_cover_reframe">重框</string>
+    <string name="capture_cover_crop_hint">拖曳框選封面範圍</string>
+    <string name="capture_cover_capture">截取封面</string>
+    <string name="capture_cover_preview">封面預覽</string>
+    <string name="capture_cover_saved">封面已儲存</string>
+    <string name="capture_cover_failed">封面截取失敗</string>
+    <string name="capture_cover_too_small">框選範圍太小，請拖大一點</string>
     <string name="pref_category_library">書櫃</string>
     <string name="ext_obsolete">過舊</string>
     <string name="obsolete_extension_message">這個擴充套件已無法使用，其可能無法正確運作或導致本程式發生問題，建議解除安裝</string>

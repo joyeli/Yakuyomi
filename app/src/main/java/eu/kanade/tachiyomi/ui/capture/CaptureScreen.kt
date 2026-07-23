@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.ui.capture
 
 import android.app.Application
 import android.graphics.Bitmap
+import android.graphics.Rect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -80,6 +81,10 @@ private const val CAPTURE_PAUSE_MS = 1800L
 
 // 網址列輸入歷史保留上限（與 MoreScreenModel 一致）。
 private const val MAX_WEBVIEW_URL_HISTORY = 20
+
+// 封面檔名：對齊 LocalCoverManager 的 DEFAULT_COVER_NAME＝存書名夾根的 `cover.jpg`，LocalSource 才認得
+// （find() 找 nameWithoutExtension=="cover" 的圖）。存這個名字 → 書櫃自動顯示封面。
+private const val COVER_NAME = "cover.jpg"
 
 /**
  * 連續截圖狀態：是否進行中 + 本 session 已截頁數（給 UI 顯示「已截 N 頁」）+
@@ -216,6 +221,12 @@ class CaptureScreen(
             urlHistoryProvider = { screenModel.webViewUrlHistory() },
             onAddUrl = { screenModel.addWebViewUrl(it) },
             onRemoveUrl = { screenModel.removeWebViewUrl(it) },
+            // 封面框選：裁好的 bitmap + bitmap 座標系的裁切框 + 當前書名 → 存書名夾根 cover.jpg，回 uri（縮圖預覽）。
+            onSaveCover = { bitmap, rect, book -> screenModel.saveCover(bitmap, rect, book) },
+            // 開「新漫畫」panel 時撈該書已存的封面（重進顯示縮圖）。
+            coverProvider = { book -> screenModel.findCoverUri(book) },
+            // 「新漫畫」確定時記漫畫來源網址（供日後「繼續擷取」）。
+            onWriteMangaMeta = { book, url -> screenModel.writeMangaMeta(book, url) },
             // 確認面板＝疊在常駐 WebView 上的一層 composable（原本的獨立 Screen 內容，邏輯不變）。
             reviewContent = {
                 CaptureReviewScreenContent(
@@ -312,6 +323,84 @@ class CaptureScreenModel(
                 .mapNotNull { it.name?.trim()?.takeIf(String::isNotEmpty) }
                 .sortedWith(CHAPTER_ORDER)
         }.getOrElse { emptyList() }
+    }
+
+    /**
+     * 把 [bitmap] 依 [cropRect]（**已由呼叫端換算到 bitmap 座標系**）裁出封面，存成
+     * `<local>/<safeBook>/cover.jpg`（JPEG q90、覆蓋既有）。存**書名夾根**（非話夾）→ [COVER_NAME] 對齊
+     * LocalCoverManager，書櫃自動顯示。書名夾不存在就建。回傳 cover 檔 uri 字串（供縮圖預覽）；失敗回 null。
+     *
+     * [cropRect] 再 clamp 一次（呼叫端已 clamp、這裡防禦性再守）；裁切範圍面積 <=0 → null。
+     * SAF 走 ContentResolver `"wt"` 截斷寫（覆蓋舊封面不留舊尾）。
+     */
+    suspend fun saveCover(bitmap: Bitmap, cropRect: Rect, book: String): String? = withIOContext {
+        val safeBook = DiskUtil.buildValidFilename(book.trim())
+        if (safeBook.isEmpty() || bitmap.isRecycled) return@withIOContext null
+        val left = cropRect.left.coerceIn(0, bitmap.width)
+        val top = cropRect.top.coerceIn(0, bitmap.height)
+        val right = cropRect.right.coerceIn(0, bitmap.width)
+        val bottom = cropRect.bottom.coerceIn(0, bitmap.height)
+        val w = right - left
+        val h = bottom - top
+        if (w <= 0 || h <= 0) return@withIOContext null
+        runCatching {
+            val base = storageManager.getLocalSourceDirectory()
+                ?: error("Local source directory unavailable")
+            val mangaDir = base.findFile(safeBook)?.takeIf { it.isDirectory }
+                ?: base.createDirectory(safeBook)
+                ?: error("Cannot create manga directory")
+            // createBitmap(src, 0,0,W,H) 覆蓋整張時會回傳同一物件；用完別 recycle 掉呼叫端還要用的 bitmap。
+            val cropped = Bitmap.createBitmap(bitmap, left, top, w, h)
+            val file = mangaDir.findFile(COVER_NAME)?.takeIf { it.isFile }
+                ?: mangaDir.createFile(COVER_NAME)
+                ?: error("Cannot create cover file")
+            openTruncating(file).use { cropped.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+            if (cropped != bitmap && !cropped.isRecycled) cropped.recycle()
+            file.uri.toString()
+        }.getOrNull()
+    }
+
+    /** 找該書已存的封面 uri（`<local>/<safeBook>/cover.jpg`）供重進「新漫畫」panel 時顯示縮圖；沒有回 null。 */
+    suspend fun findCoverUri(book: String): String? = withIOContext {
+        val safeBook = DiskUtil.buildValidFilename(book.trim())
+        if (safeBook.isEmpty()) return@withIOContext null
+        runCatching {
+            storageManager.getLocalSourceDirectory()
+                ?.findFile(safeBook)?.takeIf { it.isDirectory }
+                ?.findFile(COVER_NAME)?.takeIf { it.isFile }
+                ?.uri?.toString()
+        }.getOrNull()
+    }
+
+    /**
+     * 記漫畫來源網址到**書名夾根**的 [MANGA_META_FILE]（供日後「繼續擷取」開回原站；這批只寫、不接讀取入口）。
+     * fire-and-forget（IO thread）；書名夾不存在就建。[url] 空白＝不寫（不建空夾）。
+     */
+    fun writeMangaMeta(book: String, url: String?) {
+        val trimmed = url?.trim().orEmpty()
+        if (trimmed.isEmpty()) return
+        val safeBook = DiskUtil.buildValidFilename(book.trim())
+        if (safeBook.isEmpty()) return
+        screenModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val base = storageManager.getLocalSourceDirectory() ?: return@launch
+                val mangaDir = base.findFile(safeBook)?.takeIf { it.isDirectory }
+                    ?: base.createDirectory(safeBook)
+                    ?: return@launch
+                writeMangaMeta(context, mangaDir, trimmed)
+            }
+        }
+    }
+
+    /** 讀某書記下的來源網址（下批「繼續擷取」用；這批先建好、不接入口）。找不到回 null。 */
+    suspend fun readMangaMeta(book: String): String? = withIOContext {
+        val safeBook = DiskUtil.buildValidFilename(book.trim())
+        if (safeBook.isEmpty()) return@withIOContext null
+        runCatching {
+            storageManager.getLocalSourceDirectory()
+                ?.findFile(safeBook)?.takeIf { it.isDirectory }
+                ?.let { readMangaMeta(it) }
+        }.getOrNull()
     }
 
     // 本次連續截圖存下的頁碼（每次 startContinuous 重置）；供確認頁「放棄這次截圖」只刪這批、

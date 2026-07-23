@@ -1,12 +1,17 @@
 package eu.kanade.presentation.capture
 
 import android.graphics.Bitmap
+import android.graphics.Rect
 import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,6 +39,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.CollectionsBookmark
+import androidx.compose.material.icons.outlined.Crop
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ExpandLess
@@ -58,6 +64,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -65,13 +72,25 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import coil3.request.crossfade
+import kotlin.math.roundToInt
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -92,6 +111,9 @@ import kotlinx.coroutines.launch
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.core.common.i18n.stringResource as contextStringResource
+
+// 封面框選最小邊長（px）：太小的框（多半是誤點的單擊）不截，提示重框。
+private const val MIN_COVER_CROP_PX = 24f
 
 /**
  * Yakuyomi 擷取漫畫畫面內容（階段 1：介面骨架重構）。
@@ -172,6 +194,12 @@ fun CaptureScreenContent(
     urlHistoryProvider: () -> List<String> = { emptyList() },
     onAddUrl: (String) -> Unit = {},
     onRemoveUrl: (String) -> Unit = {},
+    // 封面框選：裁好的整頁 bitmap + **bitmap 座標系**的裁切框 + 當前書名 → 存 cover.jpg，回封面 uri（失敗 null）。
+    onSaveCover: suspend (Bitmap, Rect, String) -> String? = { _, _, _ -> null },
+    // 開「新漫畫」panel 時撈該書已存的封面 uri（重進顯示縮圖）。
+    coverProvider: suspend (String) -> String? = { null },
+    // 「新漫畫」確定時記漫畫來源網址（供日後「繼續擷取」；這批只寫）。
+    onWriteMangaMeta: (String, String?) -> Unit = { _, _ -> },
 ) {
     val reCaptureMode = reCaptureTargetPage != null
     val insertMode = insertTargetPage != null
@@ -211,6 +239,18 @@ fun CaptureScreenContent(
     var hideOverlayForCapture by remember { mutableStateOf(false) }
     // 清除 Cookie 確認對話框（防誤觸）。
     var showClearCookiesDialog by remember { mutableStateOf(false) }
+    // ── 封面框選（件 1）─────────────────────────────────────────────────────
+    // 進封面框選模式（拖框選封面）：期間隱藏整個工具列（!coverCropMode gate）、只留 dim + 選取框 + 底部動作。
+    var coverCropMode by remember { mutableStateOf(false) }
+    // 拖框的起點/當前點（單位＝px，座標系＝框選 overlay 的左上；overlay 為 fillMaxSize 貼齊外層 Box）。
+    var cropStart by remember { mutableStateOf<Offset?>(null) }
+    var cropEnd by remember { mutableStateOf<Offset?>(null) }
+    // 框選 overlay 自身在 window 的左上（onGloballyPositioned 量）：把 overlay 局部座標 → window 座標，
+    // 再扣 WebView 在 window 的左上 → bitmap 座標。overlay 通常貼齊 window 原點（此值≈0），量出來更穩健。
+    var cropOverlayOrigin by remember { mutableStateOf(Offset.Zero) }
+    // 已存封面的 uri（縮圖預覽）；coverReloadKey 每次存封面 +1，破 coil 快取（同 uri 重存要換 cache key）。
+    var coverPreviewUri by remember { mutableStateOf<String?>(null) }
+    var coverReloadKey by remember { mutableIntStateOf(0) }
 
     // 網址列上的當前網址（隨 WebView 導覽同步）；造訪時記錄進歷史 pref。
     val webClient = remember {
@@ -305,6 +345,65 @@ fun CaptureScreenContent(
         }
     }
 
+    // 封面框選截圖：先隱藏所有 overlay（含框選框本身）→ 截乾淨全頁 → **把框選座標換算到 bitmap 座標系**
+    // （框選點 overlay 局部 + overlay 在 window 的原點 = window 座標；再扣 WebView 在 window 的左上 = bitmap 座標，
+    // clamp 在 bitmap 範圍內）→ 依框裁切存 cover.jpg → 顯示縮圖預覽。
+    fun captureCover() {
+        val start = cropStart
+        val end = cropEnd
+        if (start == null || end == null) return
+        // 框選在 overlay 局部座標；先算出（左,上,右,下）。
+        val selLeft = minOf(start.x, end.x)
+        val selTop = minOf(start.y, end.y)
+        val selRight = maxOf(start.x, end.x)
+        val selBottom = maxOf(start.y, end.y)
+        if (selRight - selLeft < MIN_COVER_CROP_PX || selBottom - selTop < MIN_COVER_CROP_PX) {
+            context.toast(context.contextStringResource(MR.strings.capture_cover_too_small))
+            return
+        }
+        val book = bookDraft.trim()
+        scope.launch {
+            // ★ 先隱藏所有浮動 overlay（含框選框），等兩 frame 讓「隱藏」重繪上螢幕，PixelCopy 才乾淨。
+            hideOverlayForCapture = true
+            withFrameNanos {}
+            withFrameNanos {}
+            val window = context.findActivity()?.window
+            val wv = webView
+            captureWebView(wv, window) { bitmap ->
+                hideOverlayForCapture = false
+                if (bitmap == null || wv == null) {
+                    coverCropMode = false
+                    cropStart = null
+                    cropEnd = null
+                    if (bitmap != null && !bitmap.isRecycled) bitmap.recycle()
+                    context.toast(context.contextStringResource(MR.strings.capture_cover_failed))
+                    return@captureWebView
+                }
+                // ★ 座標換算：overlay 局部 → window（+ overlay 在 window 的原點）→ bitmap（- WebView 在 window 左上）。
+                val loc = IntArray(2)
+                wv.getLocationInWindow(loc)
+                fun toBitmapX(v: Float) = (v + cropOverlayOrigin.x).roundToInt().minus(loc[0]).coerceIn(0, bitmap.width)
+                fun toBitmapY(v: Float) = (v + cropOverlayOrigin.y).roundToInt().minus(loc[1]).coerceIn(0, bitmap.height)
+                val rect = Rect(toBitmapX(selLeft), toBitmapY(selTop), toBitmapX(selRight), toBitmapY(selBottom))
+                scope.launch {
+                    val uri = onSaveCover(bitmap, rect, book)
+                    if (!bitmap.isRecycled) bitmap.recycle()
+                    coverCropMode = false
+                    cropStart = null
+                    cropEnd = null
+                    if (uri != null) {
+                        coverPreviewUri = uri
+                        coverReloadKey++
+                        mangaPanelExpanded = true // 回新漫畫 panel 看縮圖預覽
+                        context.toast(context.contextStringResource(MR.strings.capture_cover_saved))
+                    } else {
+                        context.toast(context.contextStringResource(MR.strings.capture_cover_failed))
+                    }
+                }
+            }
+        }
+    }
+
     // 連續截圖 toggle：進行中→停止（停止後切確認模式檢視/剔除/儲存這次的截圖，WebView 原地留著）；
     // 否則檢查書名/章名後把兩個「抓幀器」交給 ScreenModel 驅動迴圈。
     // 只有使用者「按停止」才進確認模式；生命週期 ON_STOP / onDispose 直接呼叫 onStopContinuous、不切模式。
@@ -366,6 +465,12 @@ fun CaptureScreenContent(
         if (mangaPanelExpanded) bookDraft = bookName
     }
 
+    // 開「新漫畫」panel（或書名換了）＝撈該書已存封面顯示縮圖（沒有＝清掉舊預覽）。
+    // 剛存完封面時 coverPreviewUri 由 captureCover 直接設好，這裡不覆蓋（mangaPanelExpanded 沒變不重跑）。
+    LaunchedEffect(mangaPanelExpanded, bookName) {
+        if (mangaPanelExpanded) coverPreviewUri = coverProvider(bookName.ifBlank { bookDraft })
+    }
+
     // 開「新話數」panel（或書名換了）＝掃該書已截的話夾；章名還空就用第一個建議話數預填草稿。
     LaunchedEffect(chapterPanelExpanded, bookName) {
         if (!chapterPanelExpanded) return@LaunchedEffect
@@ -390,8 +495,14 @@ fun CaptureScreenContent(
 
     // 系統返回：確認模式＝回擷取模式（等同「繼續擷取」，不刪任何頁）；單張模式＝取消回確認模式；
     // 擷取模式下 WebView 還能上一頁＝WebView 上一頁（而非直接關畫面）。
-    BackHandler(enabled = reviewMode || singleShotMode || navigator.canGoBack) {
+    BackHandler(enabled = coverCropMode || reviewMode || singleShotMode || navigator.canGoBack) {
         when {
+            // 封面框選中按返回＝取消框選（回工具列），不關畫面。
+            coverCropMode -> {
+                coverCropMode = false
+                cropStart = null
+                cropEnd = null
+            }
             reviewMode -> onReviewContinue()
             singleShotMode -> onSingleShotCancel()
             else -> navigator.navigateBack()
@@ -446,7 +557,8 @@ fun CaptureScreenContent(
 
         // ★ 截圖進行中：不 render 任何浮動 overlay（頂部 bar / 底部 bar / 收起小鈕 / panel / 對話框）。
         // 確認模式時整片被面板蓋住，浮動工具列一併不畫（免壓在面板下方漏出來）。
-        if (!hideOverlayForCapture && !reviewMode) {
+        // 封面框選模式（coverCropMode）也整個藏起工具列 → 使用者看得到畫面拖框（見下方框選 overlay）。
+        if (!hideOverlayForCapture && !reviewMode && !coverCropMode) {
             if (toolbarExpanded) {
                 // 頂部浮動工具列（5 鍵）+ 可展開的瀏覽 / 新話數 panel。
                 Column(
@@ -747,6 +859,65 @@ fun CaptureScreenContent(
                                     ) {
                                         Text(text = stringResource(MR.strings.capture_use_page_title))
                                     }
+                                    // 框選封面（需先有書名＝存檔目標夾）：進封面框選模式，工具列整個藏起讓使用者拖框。
+                                    TextButton(
+                                        onClick = {
+                                            cropStart = null
+                                            cropEnd = null
+                                            coverCropMode = true
+                                        },
+                                        enabled = bookDraft.isNotBlank(),
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Crop,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                        Text(
+                                            text = stringResource(MR.strings.capture_select_cover),
+                                            modifier = Modifier.padding(start = 4.dp),
+                                        )
+                                    }
+                                }
+
+                                // 封面縮圖預覽（存過封面才顯示）＋「重框」再來一次。coilReloadKey 破快取（同 uri 重存要換 key）。
+                                val previewUri = coverPreviewUri
+                                if (previewUri != null) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        AsyncImage(
+                                            model = ImageRequest.Builder(context)
+                                                .data(previewUri)
+                                                .memoryCacheKey("$previewUri#$coverReloadKey")
+                                                .diskCacheKey("$previewUri#$coverReloadKey")
+                                                .crossfade(true)
+                                                .build(),
+                                            contentDescription = stringResource(MR.strings.capture_cover_preview),
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier
+                                                .size(width = 44.dp, height = 60.dp)
+                                                .clip(MaterialTheme.shapes.small),
+                                        )
+                                        TextButton(
+                                            onClick = {
+                                                cropStart = null
+                                                cropEnd = null
+                                                coverCropMode = true
+                                            },
+                                            modifier = Modifier.padding(start = 8.dp),
+                                        ) {
+                                            Text(text = stringResource(MR.strings.capture_cover_reframe))
+                                        }
+                                    }
+                                }
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
                                     Spacer(modifier = Modifier.weight(1f))
                                     Button(
                                         onClick = {
@@ -755,6 +926,8 @@ fun CaptureScreenContent(
                                             // 使用者接著走「新話數」panel（該書的已截話數/建議也才對得上）。
                                             if (newBook != bookName) onChapterNameChange("")
                                             onBookNameChange(newBook)
+                                            // 記漫畫來源網址（當下網址＝漫畫首頁/目錄頁），供日後「繼續擷取」。
+                                            onWriteMangaMeta(newBook, webView?.url)
                                             mangaPanelExpanded = false
                                         },
                                         enabled = bookDraft.isNotBlank(),
@@ -1001,6 +1174,112 @@ fun CaptureScreenContent(
                         }
                     },
                 )
+            }
+        }
+
+        // ── 封面框選 overlay（件 1）─────────────────────────────────────────────
+        // 疊在**仍然活著**的 WebView 上（fillMaxSize 貼齊外層 Box，座標系＝window 近似；用 onGloballyPositioned
+        // 量出實際 window 原點做嚴謹換算）。拖框選封面範圍，dim 四周 + 主色框標示；底部「截取封面 / 取消」。
+        // 截圖前一併藏起（!hideOverlayForCapture gate）→ 框選框本身不會入鏡（護欄：截圖零 overlay）。
+        if (coverCropMode && !hideOverlayForCapture && !reviewMode) {
+            val cropStrokeColor = MaterialTheme.colorScheme.primary
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .onGloballyPositioned { cropOverlayOrigin = it.positionInWindow() }
+                    .pointerInput(Unit) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown()
+                            down.consume() // 吃掉觸控 → 框選期間 WebView 不捲/不點
+                            cropStart = down.position
+                            cropEnd = down.position
+                            drag(down.id) { change ->
+                                change.consume()
+                                cropEnd = change.position
+                            }
+                        }
+                    },
+            ) {
+                // dim 四周 + 選取框：不用 BlendMode（避免清到底下），改畫「選取框以外的四塊」半透明遮罩。
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val dim = Color.Black.copy(alpha = 0.5f)
+                    val s = cropStart
+                    val e = cropEnd
+                    if (s == null || e == null) {
+                        drawRect(color = dim)
+                    } else {
+                        val l = minOf(s.x, e.x)
+                        val t = minOf(s.y, e.y)
+                        val r = maxOf(s.x, e.x)
+                        val b = maxOf(s.y, e.y)
+                        drawRect(color = dim, topLeft = Offset(0f, 0f), size = Size(size.width, t))
+                        drawRect(color = dim, topLeft = Offset(0f, b), size = Size(size.width, size.height - b))
+                        drawRect(color = dim, topLeft = Offset(0f, t), size = Size(l, b - t))
+                        drawRect(color = dim, topLeft = Offset(r, t), size = Size(size.width - r, b - t))
+                        drawRect(
+                            color = cropStrokeColor,
+                            topLeft = Offset(l, t),
+                            size = Size(r - l, b - t),
+                            style = Stroke(width = 2.dp.toPx()),
+                        )
+                    }
+                }
+
+                // 頂部提示：拖曳框選封面範圍。
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .statusBarsPadding()
+                        .padding(8.dp),
+                    color = barColor,
+                    contentColor = barContentColor,
+                    shape = MaterialTheme.shapes.large,
+                    shadowElevation = 3.dp,
+                ) {
+                    Text(
+                        text = stringResource(MR.strings.capture_cover_crop_hint),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                }
+
+                // 底部動作：截取封面（有框才可按）/ 取消。
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .navigationBarsPadding()
+                        .padding(8.dp),
+                    color = barColor,
+                    contentColor = barContentColor,
+                    shape = MaterialTheme.shapes.large,
+                    shadowElevation = 3.dp,
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Button(
+                            onClick = { captureCover() },
+                            enabled = cropStart != null && cropEnd != null,
+                        ) {
+                            Icon(imageVector = Icons.Outlined.Crop, contentDescription = null)
+                            Text(
+                                text = stringResource(MR.strings.capture_cover_capture),
+                                modifier = Modifier.padding(start = 6.dp),
+                            )
+                        }
+                        TextButton(
+                            onClick = {
+                                coverCropMode = false
+                                cropStart = null
+                                cropEnd = null
+                            },
+                        ) {
+                            Text(text = stringResource(MR.strings.action_cancel))
+                        }
+                    }
+                }
             }
         }
 

@@ -59,6 +59,42 @@ fun writeMeta(context: Context, dir: UniFile, map: Map<String, String>) {
 }
 
 /**
+ * Yakuyomi 擷取：**漫畫層** meta 檔（放書名夾根、`.` 開頭隱藏、非圖副檔名 → LocalSource 掃描會略過）。
+ * 記這本漫畫的來源網址（首頁 / 目錄頁），供日後「繼續擷取」從書櫃開回原站。與整章 meta（[CAPTURE_META_FILE]）
+ * 分開放：整章 meta 在**話夾**、漫畫 meta 在**書名夾根**。
+ *
+ * 格式（Android 內建 `org.json`，無新依賴）：`{ "url": "..." }`。
+ */
+const val MANGA_META_FILE = ".yakuyomi_manga.json"
+
+/**
+ * 讀漫畫層 meta 的 `url` 欄位（[dir]＝書名夾）。檔不存在 / 內容空 / JSON 壞掉 / url 空 → 回 null
+ * （null-safe，任何解析例外都吞掉不 crash）。
+ */
+fun readMangaMeta(dir: UniFile): String? {
+    val file = dir.findFile(MANGA_META_FILE)?.takeIf { it.isFile } ?: return null
+    return runCatching {
+        val text = file.openInputStream().use { it.readBytes().toString(Charsets.UTF_8) }
+        if (text.isBlank()) return@runCatching null
+        JSONObject(text).optString("url").takeIf { it.isNotEmpty() }
+    }.getOrNull()
+}
+
+/**
+ * 寫漫畫層 meta（[dir]＝書名夾）：`{ "url": <trimmed url> }`，截斷寫（同 [writeMeta] 的截斷規則）。
+ * best-effort：檔案建立失敗或 I/O 例外一律吞掉不 crash。[url] 空/空白＝不寫（不建檔）。
+ */
+fun writeMangaMeta(context: Context, dir: UniFile, url: String?) {
+    val trimmed = url?.trim().orEmpty()
+    if (trimmed.isEmpty()) return
+    runCatching {
+        val root = JSONObject().put("url", trimmed)
+        val file = dir.findFile(MANGA_META_FILE) ?: dir.createFile(MANGA_META_FILE) ?: return
+        openTruncatingMeta(context, file).use { it.write(root.toString().toByteArray(Charsets.UTF_8)) }
+    }
+}
+
+/**
  * 覆寫用截斷串流：SAF DocumentFile 走 ContentResolver `"wt"`（DocumentFile `"w"` 不截斷、短內容留舊尾）；
  * `file://` 用一般 openOutputStream（FileOutputStream 本就截斷、且 `"wt"` 對 file:// 不落地）。
  */

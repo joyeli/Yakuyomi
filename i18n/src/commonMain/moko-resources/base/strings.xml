@@ -296,6 +296,15 @@
     <string name="capture_no_chapters">No chapters captured yet</string>
     <string name="capture_chapter_suggestions">Suggested chapter</string>
     <string name="capture_clear_cookies_confirm">Clear all cookies for the built-in browser? You may need to sign in to sites again.</string>
+    <!-- Yakuyomi: capture cover crop -->
+    <string name="capture_select_cover">Select cover</string>
+    <string name="capture_cover_reframe">Reframe</string>
+    <string name="capture_cover_crop_hint">Drag to frame the cover area</string>
+    <string name="capture_cover_capture">Capture cover</string>
+    <string name="capture_cover_preview">Cover preview</string>
+    <string name="capture_cover_saved">Cover saved</string>
+    <string name="capture_cover_failed">Cover capture failed</string>
+    <string name="capture_cover_too_small">Selection too small, drag a larger area</string>
     <string name="action_start_downloading_now">Start downloading now</string>
     <string name="action_not_now">Not now</string>
     <string name="action_add_anyway">Add anyway</string>
