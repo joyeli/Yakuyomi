@@ -76,7 +76,8 @@ fun readMangaMeta(dir: UniFile): String? {
     return runCatching {
         val text = file.openInputStream().use { it.readBytes().toString(Charsets.UTF_8) }
         if (text.isBlank()) return@runCatching null
-        JSONObject(text).optString("url").takeIf { it.isNotEmpty() }
+        // about:blank 是無效來源網址（舊 bug 可能寫入）→ 當作沒有，讓「繼續擷取」走空 url 的引導路徑。
+        JSONObject(text).optString("url").trim().takeIf { it.isNotEmpty() && it != "about:blank" }
     }.getOrNull()
 }
 
@@ -86,7 +87,8 @@ fun readMangaMeta(dir: UniFile): String? {
  */
 fun writeMangaMeta(context: Context, dir: UniFile, url: String?) {
     val trimmed = url?.trim().orEmpty()
-    if (trimmed.isEmpty()) return
+    // 空白 / about:blank ＝無效來源網址，寫了會讓「繼續擷取」開回 about:blank。
+    if (trimmed.isEmpty() || trimmed == "about:blank") return
     runCatching {
         val root = JSONObject().put("url", trimmed)
         val file = dir.findFile(MANGA_META_FILE) ?: dir.createFile(MANGA_META_FILE) ?: return

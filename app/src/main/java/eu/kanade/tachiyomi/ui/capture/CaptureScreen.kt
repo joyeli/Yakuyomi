@@ -35,9 +35,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 import org.json.JSONArray
 import org.json.JSONObject
 import tachiyomi.core.common.util.lang.withIOContext
@@ -228,9 +225,9 @@ class CaptureScreen(
             onSingleShotCancel = ::enterReview,
             // 確認模式按系統返回＝繼續擷取（回擷取模式、不刪頁）。
             onReviewContinue = { mode = CaptureMode.CAPTURING },
-            // 網址列輸入歷史（帶出歷史清單 + 逐筆刪除 + 造訪時記錄）。
+            // 網址列輸入歷史（帶出歷史清單 + 逐筆刪除 + 造訪時記錄；帶頁面標題）。
             urlHistoryProvider = { screenModel.webViewUrlHistory() },
-            onAddUrl = { screenModel.addWebViewUrl(it) },
+            onAddUrl = { url, title -> screenModel.addWebViewUrl(url, title) },
             onRemoveUrl = { screenModel.removeWebViewUrl(it) },
             // 我的最愛（手動存常用站 + 命名別名；置頂快選、與自動歷史分開）。
             bookmarksProvider = { screenModel.listBookmarks() },
@@ -296,6 +293,15 @@ data class CaptureBookmark(
     val alias: String,
 )
 
+/**
+ * 網址歷史的一筆：造訪過的網址 + 當下 WebView 的原生標題（[android.webkit.WebView.getTitle]，非 JS/DOM）。
+ * [title] 可能為空（頁面尚未載到標題 / 相容舊純 url 歷史）→ UI 退回顯示 [url]。
+ */
+data class CaptureUrlEntry(
+    val url: String,
+    val title: String,
+)
+
 class CaptureScreenModel(
     private val context: Application = Injekt.get(),
     private val storageManager: StorageManager = Injekt.get(),
@@ -306,26 +312,76 @@ class CaptureScreenModel(
     var bookName by mutableStateOf("")
     var chapterName by mutableStateOf("")
 
-    // Yakuyomi：擷取畫面網址列的輸入歷史——與 More 瀏覽入口共用同一份 pref（UiPreferences.lastWebViewUrls，
-    // JSON 字串陣列、最近的在最前）。仿 MoreScreenModel 的 add/remove（去重 → 放最前 → 截斷上限）。
-    private val webViewUrlJson = Json { ignoreUnknownKeys = true }
+    // Yakuyomi：擷取畫面網址列的輸入歷史（**帶頁面標題**）——存 UiPreferences.captureUrlHistory，JSON 陣列
+    // `[{"url":..,"title":..}]`、最近的在最前。與 More 共用的純 url 歷史（lastWebViewUrls）分開（見 UiPreferences
+    // 註解）。add/remove 仿 MoreScreenModel（去重 → 放最前 → 截斷上限）。
 
-    /** 讀出歷史清單（最近的在最前）；解析失敗回空清單。 */
-    fun webViewUrlHistory(): List<String> = uiPreferences.lastWebViewUrls.get()
-        .let { raw -> runCatching { webViewUrlJson.decodeFromString<List<String>>(raw) }.getOrElse { emptyList() } }
+    /**
+     * 讀出歷史清單（最近的在最前，帶標題）。新 pref（captureUrlHistory）有資料就用它；
+     * 還空時**讀取時相容**回退讀 More 的舊純 url 歷史（標題留空、不在讀取時寫檔），待下次 add/remove 才以新格式落地。
+     * 解析失敗（任一 pref 內容壞掉）回空清單。
+     */
+    fun webViewUrlHistory(): List<CaptureUrlEntry> {
+        val fromNew = parseUrlEntries(uiPreferences.captureUrlHistory.get())
+        if (fromNew.isNotEmpty()) return fromNew
+        return parseLegacyUrls(uiPreferences.lastWebViewUrls.get())
+    }
 
-    /** 記錄一筆網址（造訪／輸入送出時）：忽略空白 / about:blank；移除既有同值 → 加到最前 → 截斷上限。 */
-    fun addWebViewUrl(url: String) {
+    /** 解析新格式 `[{url,title}]`（也容忍夾雜舊的純 url 字串元素）。 */
+    private fun parseUrlEntries(raw: String): List<CaptureUrlEntry> = runCatching {
+        val arr = JSONArray(raw)
+        buildList {
+            for (i in 0 until arr.length()) {
+                when (val el = arr.opt(i)) {
+                    is JSONObject -> {
+                        val url = el.optString("url").trim()
+                        if (url.isNotEmpty()) add(CaptureUrlEntry(url, el.optString("title").trim()))
+                    }
+                    is String -> {
+                        val url = el.trim()
+                        if (url.isNotEmpty()) add(CaptureUrlEntry(url, ""))
+                    }
+                    else -> {}
+                }
+            }
+        }
+    }.getOrElse { emptyList() }
+
+    /** 解析 More 舊格式（純 url 字串陣列 `["a","b"]`）→ 標題留空的 entry。 */
+    private fun parseLegacyUrls(raw: String): List<CaptureUrlEntry> = runCatching {
+        val arr = JSONArray(raw)
+        buildList {
+            for (i in 0 until arr.length()) {
+                val url = arr.optString(i).trim()
+                if (url.isNotEmpty() && url != "about:blank") add(CaptureUrlEntry(url, ""))
+            }
+        }
+    }.getOrElse { emptyList() }
+
+    /**
+     * 記錄一筆網址（造訪／輸入送出時）：忽略空白 / about:blank；移除既有同值 → 帶標題加到最前 → 截斷上限。
+     * [title] 空白時**保留該網址原本記過的標題**（頁面剛開始載入時 title 常還沒到，onPageFinished 再補）。
+     */
+    fun addWebViewUrl(url: String, title: String = "") {
         val trimmed = url.trim()
         if (trimmed.isEmpty() || trimmed == "about:blank") return
-        val updated = (listOf(trimmed) + webViewUrlHistory().filterNot { it == trimmed }).take(MAX_WEBVIEW_URL_HISTORY)
-        uiPreferences.lastWebViewUrls.set(webViewUrlJson.encodeToString(updated))
+        val current = webViewUrlHistory()
+        val cleanTitle = title.trim().takeIf { it != "about:blank" }.orEmpty()
+        val keptTitle = cleanTitle.ifEmpty { current.firstOrNull { it.url == trimmed }?.title.orEmpty() }
+        val updated = (listOf(CaptureUrlEntry(trimmed, keptTitle)) + current.filterNot { it.url == trimmed })
+            .take(MAX_WEBVIEW_URL_HISTORY)
+        writeUrlHistory(updated)
     }
 
     /** 逐筆刪除歷史中的某筆網址。 */
     fun removeWebViewUrl(url: String) {
-        val updated = webViewUrlHistory().filterNot { it == url }
-        uiPreferences.lastWebViewUrls.set(webViewUrlJson.encodeToString(updated))
+        writeUrlHistory(webViewUrlHistory().filterNot { it.url == url })
+    }
+
+    private fun writeUrlHistory(list: List<CaptureUrlEntry>) {
+        val arr = JSONArray()
+        list.forEach { arr.put(JSONObject().put("url", it.url).put("title", it.title)) }
+        uiPreferences.captureUrlHistory.set(arr.toString())
     }
 
     // ── 我的最愛（手動存常用站 + 命名別名）─────────────────────────────────────
@@ -440,7 +496,8 @@ class CaptureScreenModel(
      */
     fun writeMangaMeta(book: String, url: String?) {
         val trimmed = url?.trim().orEmpty()
-        if (trimmed.isEmpty()) return
+        // about:blank／空白＝不是有效來源網址，寫了會讓「繼續擷取」開回 about:blank（等於沒修）。
+        if (trimmed.isEmpty() || trimmed == "about:blank") return
         val safeBook = DiskUtil.buildValidFilename(book.trim())
         if (safeBook.isEmpty()) return
         screenModelScope.launch(Dispatchers.IO) {
@@ -658,6 +715,10 @@ class CaptureScreenModel(
             val file = chapterDir.createFile(name) ?: error("Cannot create page file")
             openTruncating(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
             updateMetaUrl(chapterDir, page, url)
+            // ★ 安全網（件 1）：確保**漫畫層** meta（.yakuyomi_manga.json）存在——供日後「繼續擷取」開回原站。
+            // 不再只靠「新漫畫 panel 按確定」那一條（continue-capture 帶著書名進來根本不開該 panel、就漏寫）；
+            // 只在缺檔且有有效網址時補寫（write-if-absent，保留 panel 當初記的目錄/首頁網址）。
+            ensureMangaMeta(mangaDir, url)
 
             CaptureSaveResult.Saved(page, file.uri.toString())
         }.getOrElse { CaptureSaveResult.Failed(it.message) }
@@ -769,6 +830,19 @@ class CaptureScreenModel(
         val trimmed = url?.trim().orEmpty()
         if (trimmed.isEmpty()) map.remove(key) else map[key] = trimmed
         writeMeta(context, chapterDir, map)
+    }
+
+    /**
+     * 缺檔補寫漫畫層 meta：[mangaDir]＝書名夾。只在該夾**尚無** [MANGA_META_FILE] 且 [url] 為有效來源網址時寫入
+     * （write-if-absent；保留「新漫畫 panel」當初記的首頁/目錄網址，不被逐頁的深層網址覆蓋）。best-effort、吞例外。
+     */
+    private fun ensureMangaMeta(mangaDir: UniFile, url: String?) {
+        val trimmed = url?.trim().orEmpty()
+        if (trimmed.isEmpty() || trimmed == "about:blank") return
+        runCatching {
+            if (mangaDir.findFile(MANGA_META_FILE)?.isFile == true) return
+            writeMangaMeta(context, mangaDir, trimmed)
+        }
     }
 
     private fun nextPageNumber(chapterDir: UniFile): Int =

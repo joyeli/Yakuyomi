@@ -13,6 +13,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.drag
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,7 +44,6 @@ import androidx.compose.material.icons.outlined.CollectionsBookmark
 import androidx.compose.material.icons.outlined.Crop
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.Edit
-import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.PlayArrow
@@ -107,6 +107,7 @@ import eu.kanade.presentation.webview.findActivity
 import eu.kanade.tachiyomi.ui.capture.CaptureBookmark
 import eu.kanade.tachiyomi.ui.capture.CaptureMode
 import eu.kanade.tachiyomi.ui.capture.CaptureSaveResult
+import eu.kanade.tachiyomi.ui.capture.CaptureUrlEntry
 import eu.kanade.tachiyomi.ui.capture.FrameGrabber
 import eu.kanade.tachiyomi.ui.capture.suggestCaptureChapterNames
 import eu.kanade.tachiyomi.util.system.setDefaultSettings
@@ -118,6 +119,12 @@ import tachiyomi.core.common.i18n.stringResource as contextStringResource
 
 // 封面框選最小邊長（px）：太小的框（多半是誤點的單擊）不截，提示重框。
 private const val MIN_COVER_CROP_PX = 24f
+
+// 全屏清單類型（件 4）：歷史 / 我的最愛。塞在瀏覽 panel 容量小、易爆版面 → 各做成全屏可捲清單。
+private enum class CaptureListSheet { HISTORY, BOOKMARKS }
+
+// 瀏覽 panel 內「我的最愛」快選最多顯示幾筆（其餘走全屏清單）；再多會把 panel 撐爆。
+private const val BROWSE_BOOKMARK_PREVIEW = 3
 
 // 「加入最愛」對話框的別名預設草稿：取網址 host（去掉 www.）當好記名字；取不到就退回整串網址。
 private fun defaultBookmarkAlias(url: String): String =
@@ -198,9 +205,9 @@ fun CaptureScreenContent(
     onReviewContinue: () -> Unit = {},
     // 確認模式的面板內容（疊在常駐 WebView 上）。
     reviewContent: @Composable () -> Unit = {},
-    // 網址列輸入歷史（帶出歷史清單 + 逐筆刪除 + 造訪時記錄）。
-    urlHistoryProvider: () -> List<String> = { emptyList() },
-    onAddUrl: (String) -> Unit = {},
+    // 網址列輸入歷史（帶出歷史清單 + 逐筆刪除 + 造訪時記錄；每筆帶頁面標題）。
+    urlHistoryProvider: () -> List<CaptureUrlEntry> = { emptyList() },
+    onAddUrl: (String, String) -> Unit = { _, _ -> },
     onRemoveUrl: (String) -> Unit = {},
     // 我的最愛（手動存常用站 + 命名別名）：置頂快選、與自動記錄的歷史分開。
     bookmarksProvider: () -> List<CaptureBookmark> = { emptyList() },
@@ -232,8 +239,11 @@ fun CaptureScreenContent(
 
     // 工具列收起/展開（收起＝只剩 WebView + 展開小鈕）。
     var toolbarExpanded by remember { mutableStateOf(true) }
-    // 全新入口（initialUrl 空）＝自動展開「瀏覽」panel 引導輸入網址；否則預設收合。
-    var browseExpanded by remember { mutableStateOf(initialUrl.isBlank()) }
+    // 全新入口（initialUrl 空 / about:blank，含「繼續擷取」卻沒記到來源網址）＝自動展開「瀏覽」panel 引導使用者
+    // 自己瀏覽到漫畫（loadedUrl 有值後 hasUrl=true、解鎖後續）；否則預設收合（件 1b fallback）。
+    var browseExpanded by remember {
+        mutableStateOf(initialUrl.isBlank() || initialUrl.trim() == "about:blank")
+    }
     // 「新漫畫」panel（書名輸入 + 從網頁標題帶入）展開與否。
     var mangaPanelExpanded by remember { mutableStateOf(false) }
     // 「新話數」panel（已截話數總覽 + 建議 + 章名輸入）展開與否。
@@ -243,9 +253,9 @@ fun CaptureScreenContent(
     var chapterDraft by remember { mutableStateOf(chapterName) }
     // 目前書名底下已截過的話夾名稱（開「新話數」panel 時掃一次）。
     var existingChapters by remember { mutableStateOf(emptyList<String>()) }
-    // 歷史清單展開與否。
-    var historyExpanded by remember { mutableStateOf(false) }
-    // 歷史清單在畫面內管理：初值來自 pref，刪除即時反映 UI 並同步寫回 pref；展開時再重讀（納入剛造訪的網址）。
+    // 全屏清單（歷史 / 我的最愛）：null＝不顯示。原本塞在瀏覽 panel 容量太小 → 改成點入口開全屏可捲清單（件 4）。
+    var listSheet by remember { mutableStateOf<CaptureListSheet?>(null) }
+    // 歷史清單在畫面內管理：初值來自 pref；造訪 / 刪除即時重讀刷新（件 2/3，帶標題、相容舊純 url）。
     var history by remember { mutableStateOf(urlHistoryProvider()) }
     // 我的最愛清單（畫面內管理：初值來自 pref，加入/刪除即時反映 UI 並同步寫回 pref）。
     var bookmarks by remember { mutableStateOf(bookmarksProvider()) }
@@ -277,7 +287,20 @@ fun CaptureScreenContent(
                 url?.let {
                     address = it
                     loadedUrl = it
-                    onAddUrl(it)
+                    // 造訪即記 url；此時 WebView 原生 title 多半還是前一頁的 → 先不帶標題，onPageFinished 補正確的。
+                    onAddUrl(it, "")
+                    if (listSheet == CaptureListSheet.HISTORY) history = urlHistoryProvider()
+                }
+            }
+
+            override fun onPageFinished(view: WebView, url: String?) {
+                super.onPageFinished(view, url)
+                url?.let {
+                    address = it
+                    loadedUrl = it
+                    // 頁面載完＝WebView 原生 title 可讀（非 JS/DOM）→ 補標題（件 3）；歷史清單開著就即時刷新（件 2）。
+                    onAddUrl(it, view.title.orEmpty())
+                    if (listSheet == CaptureListSheet.HISTORY) history = urlHistoryProvider()
                 }
             }
 
@@ -306,10 +329,11 @@ fun CaptureScreenContent(
         if (trimmed.isEmpty()) return
         val normalized = if (trimmed.startsWith("http")) trimmed else "https://$trimmed"
         address = normalized
-        historyExpanded = false
-        // 載入後收起瀏覽 panel（回到乾淨看漫畫視野）。
+        // 載入後收起瀏覽 panel + 關掉全屏清單（回到乾淨看漫畫視野）。
         browseExpanded = false
-        onAddUrl(normalized)
+        listSheet = null
+        // 標題此刻未知（頁面還沒載），onPageFinished 會補上。
+        onAddUrl(normalized, "")
         webView?.loadUrl(normalized)
     }
 
@@ -467,9 +491,12 @@ fun CaptureScreenContent(
     // ── 漸進式解鎖 S0→S3（見檔頭 KDoc）─────────────────────────────────────────
     // S1 條件＝WebView 已載入真網址（[loadedUrl]＝initialUrl / WebViewClient 導覽回呼，非網址列草稿）。
     val hasUrl = loadedUrl.isNotBlank() && loadedUrl.trim() != "about:blank"
-    val canNewManga = hasUrl // S1 → 解鎖「新漫畫」
-    val canNewChapter = canNewManga && bookName.isNotBlank() // S2 → 解鎖「新話數」
-    val canStart = canNewChapter && chapterName.isNotBlank() // S3 → 解鎖「開始」
+    val canNewManga = hasUrl // S1 → 解鎖「新漫畫」（要有頁面才能從標題命名 / 框封面）
+    // S2 → 解鎖「新話數」：**只需書名非空、不強制 hasUrl**（件 1b）。「繼續擷取」帶著書名進來（initialUrl 空 /
+    // about:blank）可先設話數、再自己瀏覽到頁面；正常流程走過 S1 時 hasUrl 本就成立、行為不變。
+    val canNewChapter = bookName.isNotBlank()
+    // S3 → 解鎖「開始」：真的要截需有實際頁面（about:blank 會被空白判斷丟棄）→ 仍要求 hasUrl，避免對著空白頁空跑。
+    val canStart = bookName.isNotBlank() && chapterName.isNotBlank() && hasUrl
 
     // 條件退回（例如把書名清空）時收起對應 panel，免得停在一個已按不到的面板上。
     LaunchedEffect(canNewManga, canNewChapter) {
@@ -512,8 +539,12 @@ fun CaptureScreenContent(
 
     // 系統返回：確認模式＝回擷取模式（等同「繼續擷取」，不刪任何頁）；單張模式＝取消回確認模式；
     // 擷取模式下 WebView 還能上一頁＝WebView 上一頁（而非直接關畫面）。
-    BackHandler(enabled = coverCropMode || reviewMode || singleShotMode || navigator.canGoBack) {
+    BackHandler(
+        enabled = listSheet != null || coverCropMode || reviewMode || singleShotMode || navigator.canGoBack,
+    ) {
         when {
+            // 全屏清單開著＝先關清單（回瀏覽 panel），不關畫面 / 不上一頁。
+            listSheet != null -> listSheet = null
             // 封面框選中按返回＝取消框選（回工具列），不關畫面。
             coverCropMode -> {
                 coverCropMode = false
@@ -712,15 +743,16 @@ fun CaptureScreenContent(
                             shadowElevation = 3.dp,
                         ) {
                             Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
-                                // 我的最愛（置頂快選、不滾動）：每筆＝別名（主）+ 網址（次要小字，ellipsis）；
-                                // 點一筆＝載入並收 panel、右側叉叉＝移除。清單空＝整區不顯示。
+                                // 我的最愛快選（置頂、最多 [BROWSE_BOOKMARK_PREVIEW] 筆，panel 不爆版）：每筆＝別名（主）
+                                // + 網址（次要小字，ellipsis）；點一筆＝載入並收 panel、右側叉叉＝移除。完整清單（含大量）
+                                // 走下方導覽列「我的最愛」全屏入口。清單空＝整區不顯示。
                                 if (bookmarks.isNotEmpty()) {
                                     Text(
                                         text = stringResource(MR.strings.capture_bookmarks),
                                         style = MaterialTheme.typography.labelLarge,
                                         modifier = Modifier.padding(start = 4.dp, bottom = 2.dp),
                                     )
-                                    bookmarks.forEach { bm ->
+                                    bookmarks.take(BROWSE_BOOKMARK_PREVIEW).forEach { bm ->
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
@@ -805,7 +837,7 @@ fun CaptureScreenContent(
                                     }
                                 }
 
-                                // 導覽列：上一頁 / 下一頁 / 歷史 toggle / 清除 Cookie。
+                                // 導覽列：上一頁 / 下一頁 / 我的最愛（全屏）/ 歷史（全屏）/ 清除 Cookie。
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically,
@@ -828,23 +860,29 @@ fun CaptureScreenContent(
                                             contentDescription = stringResource(MR.strings.action_webview_forward),
                                         )
                                     }
-                                    // 歷史下拉 toggle（有歷史才顯示）；展開時重讀 pref 納入剛造訪的網址。
-                                    if (history.isNotEmpty() || historyExpanded) {
-                                        IconButton(
-                                            onClick = {
-                                                if (!historyExpanded) history = urlHistoryProvider()
-                                                historyExpanded = !historyExpanded
-                                            },
-                                        ) {
-                                            Icon(
-                                                imageVector = if (historyExpanded) {
-                                                    Icons.Outlined.ExpandLess
-                                                } else {
-                                                    Icons.Outlined.History
-                                                },
-                                                contentDescription = stringResource(MR.strings.capture_url_history),
-                                            )
-                                        }
+                                    // 我的最愛：開全屏清單（管理大量最愛；先重讀 pref 取最新）。
+                                    IconButton(
+                                        onClick = {
+                                            bookmarks = bookmarksProvider()
+                                            listSheet = CaptureListSheet.BOOKMARKS
+                                        },
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.CollectionsBookmark,
+                                            contentDescription = stringResource(MR.strings.capture_bookmarks),
+                                        )
+                                    }
+                                    // 歷史：開全屏清單（容納大量紀錄；先重讀 pref 納入剛造訪的網址）。
+                                    IconButton(
+                                        onClick = {
+                                            history = urlHistoryProvider()
+                                            listSheet = CaptureListSheet.HISTORY
+                                        },
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.History,
+                                            contentDescription = stringResource(MR.strings.capture_url_history),
+                                        )
                                     }
                                     Spacer(modifier = Modifier.weight(1f))
                                     IconButton(onClick = { showClearCookiesDialog = true }) {
@@ -854,55 +892,7 @@ fun CaptureScreenContent(
                                         )
                                     }
                                 }
-
-                                // 網址輸入歷史清單：點列＝填入並載入、每筆叉叉＝刪除。
-                                if (historyExpanded && history.isNotEmpty()) {
-                                    LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
-                                        items(items = history, key = { it }) { url ->
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clickable { go(urlOverride = url) },
-                                                verticalAlignment = Alignment.CenterVertically,
-                                            ) {
-                                                Text(
-                                                    text = url,
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                    modifier = Modifier
-                                                        .weight(1f)
-                                                        .padding(start = 12.dp, top = 8.dp, bottom = 8.dp),
-                                                )
-                                                // 加入最愛：彈對話框輸入別名（預設帶該網址 host）。
-                                                IconButton(
-                                                    onClick = {
-                                                        bookmarkAliasDraft = defaultBookmarkAlias(url)
-                                                        bookmarkDialogUrl = url
-                                                    },
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Outlined.StarBorder,
-                                                        contentDescription = stringResource(
-                                                            MR.strings.capture_bookmark_add,
-                                                        ),
-                                                    )
-                                                }
-                                                IconButton(
-                                                    onClick = {
-                                                        history = history.filterNot { it == url }
-                                                        onRemoveUrl(url)
-                                                    },
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Outlined.Close,
-                                                        contentDescription = stringResource(MR.strings.action_delete),
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+                                // 網址歷史清單改成全屏可捲清單（件 4，見下方 listSheet overlay），不再擠在 panel 裡。
                             }
                         }
                     }
@@ -1016,7 +1006,12 @@ fun CaptureScreenContent(
                                             if (newBook != bookName) onChapterNameChange("")
                                             onBookNameChange(newBook)
                                             // 記漫畫來源網址（當下網址＝漫畫首頁/目錄頁），供日後「繼續擷取」。
-                                            onWriteMangaMeta(newBook, webView?.url)
+                                            // webView.url 偶爾讀到空 → 退回 loadedUrl（WebViewClient 追蹤的實際載入
+                                            // 網址）；about:blank 由底層 writeMangaMeta 擋掉不寫（件 1a）。
+                                            val srcUrl = webView?.url
+                                                ?.takeIf { it.isNotBlank() && it != "about:blank" }
+                                                ?: loadedUrl
+                                            onWriteMangaMeta(newBook, srcUrl)
                                             mangaPanelExpanded = false
                                         },
                                         enabled = bookDraft.isNotBlank(),
@@ -1411,6 +1406,205 @@ fun CaptureScreenContent(
                             },
                         ) {
                             Text(text = stringResource(MR.strings.action_cancel))
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── 全屏清單（歷史 / 我的最愛）overlay（件 4）─────────────────────────────
+        // 塞在瀏覽 panel 容量太小 → 點導覽列入口開這層全屏可捲清單（LazyColumn 捲全部、容納大量紀錄）。
+        // ★ 用「同 composition 內的 overlay」而非 push 新 Screen：護欄「WebView 常駐」——push 會 dispose 本
+        // composition → WebView 重建（捲動 / 登入 / JS 全丟）。與截圖同一組 gate（!hideOverlay/!review/!coverCrop）
+        // → 截圖不入鏡。底層工具列仍在（被不透明 Surface 蓋住）→ 用無漣漪 clickable 吸收空白處觸控、避免穿透誤觸。
+        val sheet = listSheet
+        if (sheet != null && !hideOverlayForCapture && !reviewMode && !coverCropMode) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = MaterialTheme.colorScheme.background,
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) {}
+                        .statusBarsPadding()
+                        .navigationBarsPadding(),
+                ) {
+                    // 頂列：返回（關清單）+ 標題。
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(onClick = { listSheet = null }) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
+                                contentDescription = stringResource(MR.strings.action_close),
+                            )
+                        }
+                        Text(
+                            text = stringResource(
+                                if (sheet == CaptureListSheet.HISTORY) {
+                                    MR.strings.capture_url_history
+                                } else {
+                                    MR.strings.capture_bookmarks
+                                },
+                            ),
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.padding(start = 4.dp),
+                        )
+                    }
+
+                    when (sheet) {
+                        // 歷史：title（主，空退回 url）+ url（次要小字）；點載入、加入最愛、刪除。
+                        CaptureListSheet.HISTORY -> {
+                            if (history.isEmpty()) {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        text = stringResource(MR.strings.capture_history_empty),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            } else {
+                                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                                    items(items = history, key = { it.url }) { entry ->
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable { go(urlOverride = entry.url) },
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.History,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier
+                                                    .padding(start = 12.dp, end = 12.dp)
+                                                    .size(20.dp),
+                                            )
+                                            Column(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .padding(vertical = 10.dp),
+                                            ) {
+                                                Text(
+                                                    text = entry.title.ifBlank { entry.url },
+                                                    style = MaterialTheme.typography.bodyLarge,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                                Text(
+                                                    text = entry.url,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                            }
+                                            // 加入最愛：別名預設帶標題（沒有就帶 host）。
+                                            IconButton(
+                                                onClick = {
+                                                    bookmarkAliasDraft = entry.title
+                                                        .ifBlank { defaultBookmarkAlias(entry.url) }
+                                                    bookmarkDialogUrl = entry.url
+                                                },
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Outlined.StarBorder,
+                                                    contentDescription = stringResource(
+                                                        MR.strings.capture_bookmark_add,
+                                                    ),
+                                                )
+                                            }
+                                            // 刪除該筆歷史。
+                                            IconButton(
+                                                onClick = {
+                                                    history = history.filterNot { it.url == entry.url }
+                                                    onRemoveUrl(entry.url)
+                                                },
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Outlined.Close,
+                                                    contentDescription = stringResource(MR.strings.action_delete),
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        // 我的最愛：alias（主）+ url（次要小字）；點載入、刪除。
+                        CaptureListSheet.BOOKMARKS -> {
+                            if (bookmarks.isEmpty()) {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        text = stringResource(MR.strings.capture_bookmarks_empty),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            } else {
+                                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                                    items(items = bookmarks, key = { it.url }) { bm ->
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable { go(urlOverride = bm.url) },
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.Star,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier
+                                                    .padding(start = 12.dp, end = 12.dp)
+                                                    .size(20.dp),
+                                            )
+                                            Column(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .padding(vertical = 10.dp),
+                                            ) {
+                                                Text(
+                                                    text = bm.alias,
+                                                    style = MaterialTheme.typography.bodyLarge,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                                Text(
+                                                    text = bm.url,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                            }
+                                            IconButton(
+                                                onClick = {
+                                                    bookmarks = bookmarks.filterNot { it.url == bm.url }
+                                                    onRemoveBookmark(bm.url)
+                                                },
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Outlined.Close,
+                                                    contentDescription = stringResource(MR.strings.action_delete),
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }

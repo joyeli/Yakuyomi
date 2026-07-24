@@ -334,6 +334,8 @@
     <string name="capture_bookmarks">我的最愛</string>
     <string name="capture_bookmark_add">加入最愛</string>
     <string name="capture_bookmark_alias">別名</string>
+    <string name="capture_bookmarks_empty">尚無我的最愛</string>
+    <string name="capture_history_empty">尚無瀏覽紀錄</string>
     <!-- Yakuyomi：擷取工具列 5 鍵骨架 -->
     <string name="capture_browse">瀏覽</string>
     <string name="capture_new_manga">新漫畫</string>

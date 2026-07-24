@@ -289,6 +289,8 @@
     <string name="capture_bookmarks">Favorites</string>
     <string name="capture_bookmark_add">Add to favorites</string>
     <string name="capture_bookmark_alias">Alias</string>
+    <string name="capture_bookmarks_empty">No favorites yet</string>
+    <string name="capture_history_empty">No history yet</string>
     <!-- Yakuyomi: capture toolbar 5-key skeleton -->
     <string name="capture_browse">Browse</string>
     <string name="capture_new_manga">New manga</string>
