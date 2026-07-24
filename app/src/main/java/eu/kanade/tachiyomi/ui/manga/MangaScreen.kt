@@ -44,6 +44,7 @@ import eu.kanade.tachiyomi.source.isLocalOrStub
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceScreen
 import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
+import eu.kanade.tachiyomi.ui.capture.CaptureScreen
 import eu.kanade.tachiyomi.ui.category.CategoryScreen
 import eu.kanade.tachiyomi.ui.home.HomeScreen
 import eu.kanade.tachiyomi.ui.manga.notes.MangaNotesScreen
@@ -63,6 +64,7 @@ import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.translation.service.TranslationPreferences
+import tachiyomi.source.local.LocalSource
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.screens.LoadingScreen
@@ -177,6 +179,14 @@ class MangaScreen(
             }.takeIf { successState.manga.favorite },
             // 重繪全本：用目前去字設定重做本作已下載且已翻的章（空集合由 screenModel 提示）。硬總開關關時隱藏。
             onReRenderAllClicked = screenModel::runMangaReRenderAction.takeIf { translationMasterEnabled },
+            // Yakuyomi 繼續擷取（只 local 漫畫）：讀漫畫層來源網址 + 選對得回原夾的書名 → 開回擷取工具（S2）。
+            onContinueCaptureClicked = {
+                scope.launch {
+                    val (book, url) = screenModel.buildContinueCaptureArgs()
+                    navigator.push(CaptureScreen(initialUrl = url ?: "", initialBook = book))
+                }
+                Unit
+            }.takeIf { successState.source is LocalSource },
             onEditNotesClicked = { navigator.push(MangaNotesScreen(manga = successState.manga)) },
             onMultiBookmarkClicked = screenModel::bookmarkChapters,
             onMultiMarkAsReadClicked = screenModel::markChaptersRead,

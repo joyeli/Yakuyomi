@@ -40,6 +40,7 @@ import androidx.compose.material.icons.outlined.DoneAll
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.Pause
+import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Sync
@@ -187,6 +188,8 @@ fun MangaActionRow(
     // Yakuyomi：設此本為其來源的探索錨點（null＝不顯示，如本地源）。isAnchor＝本書已是該來源錨點（鈕變實心/主色）。
     onSetAnchorClicked: (() -> Unit)? = null,
     isAnchor: Boolean = false,
+    // Yakuyomi：繼續擷取（只 local 漫畫非 null）——開回擷取工具續截這本、書名帶入、續截存回原夾。
+    onContinueCaptureClicked: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val defaultActionButtonColor = MaterialTheme.colorScheme.onSurface.copy(alpha = DISABLED_ALPHA)
@@ -256,6 +259,15 @@ fun MangaActionRow(
                 color = defaultActionButtonColor,
                 onClick = onWebViewClicked,
                 onLongClick = onWebViewLongClicked,
+            )
+        }
+        // Yakuyomi：繼續擷取（只 local 漫畫；開回擷取工具續截這本）。
+        if (onContinueCaptureClicked != null) {
+            MangaActionButton(
+                title = stringResource(MR.strings.capture_continue),
+                icon = Icons.Outlined.PhotoCamera,
+                color = defaultActionButtonColor,
+                onClick = onContinueCaptureClicked,
             )
         }
     }

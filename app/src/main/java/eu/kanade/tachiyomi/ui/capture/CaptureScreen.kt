@@ -121,12 +121,21 @@ enum class CaptureMode { CAPTURING, REVIEW, SINGLE_SHOT }
  */
 class CaptureScreen(
     private val initialUrl: String = "",
+    // 「繼續擷取」帶入的書名（詳情頁 overflow 入口）：非空時進畫面即設 [CaptureScreenModel.bookName]，
+    // 漸進解鎖直接到 S2（書名已定、只差設話數）；null/空＝全新擷取（走 S0）。★ 這個書名必須讓
+    // saveCapture 的 safeBook=buildValidFilename(book) 對回原夾（詳見詳情頁 MangaScreenModel.buildContinueCaptureArgs）。
+    private val initialBook: String? = null,
 ) : Screen() {
 
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.currentOrThrow
         val screenModel = rememberScreenModel { CaptureScreenModel() }
+
+        // 「繼續擷取」：進畫面把帶入的書名塞進 model（一次性；bookName 非空 → 漸進解鎖到 S2）。
+        LaunchedEffect(Unit) {
+            initialBook?.trim()?.takeIf { it.isNotEmpty() }?.let { screenModel.bookName = it }
+        }
         // 確認面板的 model 與擷取畫面同壽命（不再是獨立 Screen 的 model）：邏輯完全沿用，
         // 只在每次進入確認模式時 configure 目標章夾 + 本次 session 頁碼。
         val reviewModel = rememberScreenModel(tag = "capture-review") { CaptureReviewScreenModel() }

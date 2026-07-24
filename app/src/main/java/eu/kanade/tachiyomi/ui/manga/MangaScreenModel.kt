@@ -40,8 +40,10 @@ import eu.kanade.tachiyomi.data.translation.TranslationManager
 import eu.kanade.tachiyomi.data.translation.model.TranslationItem
 import eu.kanade.tachiyomi.network.HttpException
 import eu.kanade.tachiyomi.source.Source
+import eu.kanade.tachiyomi.ui.capture.readMangaMeta
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.util.chapter.getNextUnread
+import eu.kanade.tachiyomi.util.storage.DiskUtil
 import eu.kanade.tachiyomi.util.removeCovers
 import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.coroutines.CancellationException
@@ -63,6 +65,7 @@ import tachiyomi.core.common.preference.getAndSet
 import tachiyomi.core.common.preference.mapAsCheckboxState
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.lang.launchNonCancellable
+import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.lang.withUIContext
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.category.interactor.GetCategories
@@ -836,6 +839,31 @@ class MangaScreenModel(
             }
             translationManager.translate(manga, toTranslate)
         }
+    }
+
+    /**
+     * Yakuyomi 繼續擷取（詳情頁 overflow → [eu.kanade.tachiyomi.ui.capture.CaptureScreen]）：組出要帶入的
+     * （書名, 來源網址）。只對 local 漫畫有意義（呼叫端已 gate）。
+     *
+     * - **書名**：`buildValidFilename(title)` 若恰好等於夾名 [Manga.url]（LocalSource 用夾名當 url）→ 用 `title`
+     *   （顯示自然）；否則用夾名 `url`。★ 關鍵：CaptureScreenModel.saveCapture 以 `safeBook =
+     *   buildValidFilename(book)` 定位存檔夾——回傳夾名時 `buildValidFilename(夾名) == 夾名`（夾名本就由
+     *   buildValidFilename 產生、冪等），保證續截的頁**存回原本那個夾**、不會新建一本。
+     * - **來源網址**：讀書名夾根的 `.yakuyomi_manga.json`（擷取來的漫畫才寫過）。一般 local 漫畫沒有 → null →
+     *   CaptureScreen initialUrl 空 → 照 S0 自動展開瀏覽（等於手動繼續擷取這本，不 crash）。
+     */
+    suspend fun buildContinueCaptureArgs(): Pair<String, String?> {
+        val manga = successState?.manga ?: return "" to null
+        val folderName = manga.url
+        val book = if (DiskUtil.buildValidFilename(manga.title) == folderName) manga.title else folderName
+        val url = withIOContext {
+            runCatching {
+                storageManager.getLocalSourceDirectory()
+                    ?.findFile(folderName)?.takeIf { it.isDirectory }
+                    ?.let { readMangaMeta(it) }
+            }.getOrNull()
+        }
+        return book to url
     }
 
     /** 重繪選取章（換 [method] 去字法重做去字+排版，復用素材、不重跑 OCR/翻譯）。對象＝已下載章（同翻譯）。 */

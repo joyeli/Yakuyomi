@@ -305,6 +305,8 @@
     <string name="capture_cover_saved">Cover saved</string>
     <string name="capture_cover_failed">Cover capture failed</string>
     <string name="capture_cover_too_small">Selection too small, drag a larger area</string>
+    <!-- Yakuyomi: continue capturing from a local manga's detail page -->
+    <string name="capture_continue">Continue capturing</string>
     <string name="action_start_downloading_now">Start downloading now</string>
     <string name="action_not_now">Not now</string>
     <string name="action_add_anyway">Add anyway</string>

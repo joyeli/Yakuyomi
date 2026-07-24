@@ -127,6 +127,8 @@ fun MangaScreen(
     onSetAnchorClicked: (() -> Unit)?,
     onMigrateClicked: (() -> Unit)?,
     onReRenderAllClicked: (() -> Unit)?,
+    // Yakuyomi：繼續擷取（只 local 漫畫非 null）。
+    onContinueCaptureClicked: (() -> Unit)?,
     onEditNotesClicked: () -> Unit,
 
     // For bottom action menu
@@ -186,6 +188,7 @@ fun MangaScreen(
                 onSetAnchorClicked = onSetAnchorClicked,
                 onMigrateClicked = onMigrateClicked,
                 onReRenderAllClicked = onReRenderAllClicked,
+                onContinueCaptureClicked = onContinueCaptureClicked,
                 onEditNotesClicked = onEditNotesClicked,
                 onMultiBookmarkClicked = onMultiBookmarkClicked,
                 onMultiMarkAsReadClicked = onMultiMarkAsReadClicked,
@@ -226,6 +229,7 @@ fun MangaScreen(
                 onSetAnchorClicked = onSetAnchorClicked,
                 onMigrateClicked = onMigrateClicked,
                 onReRenderAllClicked = onReRenderAllClicked,
+                onContinueCaptureClicked = onContinueCaptureClicked,
                 onEditNotesClicked = onEditNotesClicked,
                 onMultiBookmarkClicked = onMultiBookmarkClicked,
                 onMultiMarkAsReadClicked = onMultiMarkAsReadClicked,
@@ -277,6 +281,7 @@ private fun MangaScreenSmallImpl(
     onSetAnchorClicked: (() -> Unit)?,
     onMigrateClicked: (() -> Unit)?,
     onReRenderAllClicked: (() -> Unit)?,
+    onContinueCaptureClicked: (() -> Unit)?,
     onEditNotesClicked: () -> Unit,
 
     // For bottom action menu
@@ -441,6 +446,7 @@ private fun MangaScreenSmallImpl(
                             onSetAnchorClicked = onSetAnchorClicked,
                             isAnchor = state.isAnchor,
                             onEditCategory = onEditCategoryClicked,
+                            onContinueCaptureClicked = onContinueCaptureClicked,
                         )
                     }
 
@@ -528,6 +534,7 @@ fun MangaScreenLargeImpl(
     onSetAnchorClicked: (() -> Unit)?,
     onMigrateClicked: (() -> Unit)?,
     onReRenderAllClicked: (() -> Unit)?,
+    onContinueCaptureClicked: (() -> Unit)?,
     onEditNotesClicked: () -> Unit,
 
     // For bottom action menu
@@ -680,6 +687,7 @@ fun MangaScreenLargeImpl(
                             onSetAnchorClicked = onSetAnchorClicked,
                             isAnchor = state.isAnchor,
                             onEditCategory = onEditCategoryClicked,
+                            onContinueCaptureClicked = onContinueCaptureClicked,
                         )
                         ExpandableMangaDescription(
                             description = state.manga.description,
