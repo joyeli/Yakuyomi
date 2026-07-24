@@ -49,6 +49,10 @@ class UiPreferences(
     // Yakuyomi：「以 WebView 開啟網址」的輸入歷史（JSON 字串陣列，最近的在最前、去重、上限見 MoreScreenModel）。
     val lastWebViewUrls: Preference<String> = preferenceStore.getString("last_webview_urls", "[]")
 
+    // Yakuyomi：擷取瀏覽器的「我的最愛」（手動存常用站 + 命名別名）。JSON 陣列
+    // `[{"url":"...","alias":"..."}]`，最新加入的在最前；與自動記錄的網址歷史（lastWebViewUrls）分開。
+    val captureBookmarks: Preference<String> = preferenceStore.getString("capture_bookmarks", "[]")
+
     companion object {
         fun dateFormat(format: String): DateTimeFormatter = when (format) {
             "" -> DateTimeFormatter.ofLocalizedDate(FormatStyle.SHORT)

@@ -330,6 +330,10 @@
     <string name="capture_toolbar_show">展開工具列</string>
     <string name="capture_toolbar_hide">收起工具列</string>
     <string name="capture_url_history">網址歷史</string>
+    <!-- Yakuyomi：擷取瀏覽器的我的最愛（手動存、命名別名） -->
+    <string name="capture_bookmarks">我的最愛</string>
+    <string name="capture_bookmark_add">加入最愛</string>
+    <string name="capture_bookmark_alias">別名</string>
     <!-- Yakuyomi：擷取工具列 5 鍵骨架 -->
     <string name="capture_browse">瀏覽</string>
     <string name="capture_new_manga">新漫畫</string>

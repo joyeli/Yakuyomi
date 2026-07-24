@@ -2,6 +2,7 @@ package eu.kanade.presentation.capture
 
 import android.graphics.Bitmap
 import android.graphics.Rect
+import android.net.Uri
 import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -47,6 +48,8 @@ import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Public
+import androidx.compose.material.icons.outlined.Star
+import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.outlined.UnfoldLess
 import androidx.compose.material.icons.outlined.UnfoldMore
 import androidx.compose.material3.AlertDialog
@@ -101,6 +104,7 @@ import com.kevinnzou.web.WebViewNavigator
 import com.kevinnzou.web.WebViewState
 import eu.kanade.presentation.webview.captureWebView
 import eu.kanade.presentation.webview.findActivity
+import eu.kanade.tachiyomi.ui.capture.CaptureBookmark
 import eu.kanade.tachiyomi.ui.capture.CaptureMode
 import eu.kanade.tachiyomi.ui.capture.CaptureSaveResult
 import eu.kanade.tachiyomi.ui.capture.FrameGrabber
@@ -114,6 +118,10 @@ import tachiyomi.core.common.i18n.stringResource as contextStringResource
 
 // 封面框選最小邊長（px）：太小的框（多半是誤點的單擊）不截，提示重框。
 private const val MIN_COVER_CROP_PX = 24f
+
+// 「加入最愛」對話框的別名預設草稿：取網址 host（去掉 www.）當好記名字；取不到就退回整串網址。
+private fun defaultBookmarkAlias(url: String): String =
+    Uri.parse(url).host?.removePrefix("www.")?.takeIf { it.isNotEmpty() } ?: url
 
 /**
  * Yakuyomi 擷取漫畫畫面內容（階段 1：介面骨架重構）。
@@ -194,6 +202,10 @@ fun CaptureScreenContent(
     urlHistoryProvider: () -> List<String> = { emptyList() },
     onAddUrl: (String) -> Unit = {},
     onRemoveUrl: (String) -> Unit = {},
+    // 我的最愛（手動存常用站 + 命名別名）：置頂快選、與自動記錄的歷史分開。
+    bookmarksProvider: () -> List<CaptureBookmark> = { emptyList() },
+    onAddBookmark: (String, String) -> Unit = { _, _ -> },
+    onRemoveBookmark: (String) -> Unit = {},
     // 封面框選：裁好的整頁 bitmap + **bitmap 座標系**的裁切框 + 當前書名 → 存 cover.jpg，回封面 uri（失敗 null）。
     onSaveCover: suspend (Bitmap, Rect, String) -> String? = { _, _, _ -> null },
     // 開「新漫畫」panel 時撈該書已存的封面 uri（重進顯示縮圖）。
@@ -235,6 +247,11 @@ fun CaptureScreenContent(
     var historyExpanded by remember { mutableStateOf(false) }
     // 歷史清單在畫面內管理：初值來自 pref，刪除即時反映 UI 並同步寫回 pref；展開時再重讀（納入剛造訪的網址）。
     var history by remember { mutableStateOf(urlHistoryProvider()) }
+    // 我的最愛清單（畫面內管理：初值來自 pref，加入/刪除即時反映 UI 並同步寫回 pref）。
+    var bookmarks by remember { mutableStateOf(bookmarksProvider()) }
+    // 「加入最愛」對話框：非 null＝正為此網址輸入別名；aliasDraft＝別名草稿（預設帶該 url 的 host）。
+    var bookmarkDialogUrl by remember { mutableStateOf<String?>(null) }
+    var bookmarkAliasDraft by remember { mutableStateOf("") }
     // ★ 截圖當下把所有浮動 overlay 隱藏，避免進到 PixelCopy 的截圖裡。
     var hideOverlayForCapture by remember { mutableStateOf(false) }
     // 清除 Cookie 確認對話框（防誤觸）。
@@ -695,6 +712,64 @@ fun CaptureScreenContent(
                             shadowElevation = 3.dp,
                         ) {
                             Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
+                                // 我的最愛（置頂快選、不滾動）：每筆＝別名（主）+ 網址（次要小字，ellipsis）；
+                                // 點一筆＝載入並收 panel、右側叉叉＝移除。清單空＝整區不顯示。
+                                if (bookmarks.isNotEmpty()) {
+                                    Text(
+                                        text = stringResource(MR.strings.capture_bookmarks),
+                                        style = MaterialTheme.typography.labelLarge,
+                                        modifier = Modifier.padding(start = 4.dp, bottom = 2.dp),
+                                    )
+                                    bookmarks.forEach { bm ->
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(MaterialTheme.shapes.small)
+                                                .clickable { go(urlOverride = bm.url) },
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.Star,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier
+                                                    .padding(start = 4.dp, end = 8.dp)
+                                                    .size(18.dp),
+                                            )
+                                            Column(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .padding(vertical = 6.dp),
+                                            ) {
+                                                Text(
+                                                    text = bm.alias,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                                Text(
+                                                    text = bm.url,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                            }
+                                            IconButton(
+                                                onClick = {
+                                                    bookmarks = bookmarks.filterNot { it.url == bm.url }
+                                                    onRemoveBookmark(bm.url)
+                                                },
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Outlined.Close,
+                                                    contentDescription = stringResource(MR.strings.action_delete),
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                }
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically,
@@ -799,6 +874,20 @@ fun CaptureScreenContent(
                                                         .weight(1f)
                                                         .padding(start = 12.dp, top = 8.dp, bottom = 8.dp),
                                                 )
+                                                // 加入最愛：彈對話框輸入別名（預設帶該網址 host）。
+                                                IconButton(
+                                                    onClick = {
+                                                        bookmarkAliasDraft = defaultBookmarkAlias(url)
+                                                        bookmarkDialogUrl = url
+                                                    },
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Outlined.StarBorder,
+                                                        contentDescription = stringResource(
+                                                            MR.strings.capture_bookmark_add,
+                                                        ),
+                                                    )
+                                                }
                                                 IconButton(
                                                     onClick = {
                                                         history = history.filterNot { it == url }
@@ -1148,6 +1237,51 @@ fun CaptureScreenContent(
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
                     )
                 }
+            }
+
+            // 加入最愛對話框：輸入別名（預設帶 host）→ 確定＝addBookmark（同 url 覆蓋別名並移到最前）。
+            val dialogUrl = bookmarkDialogUrl
+            if (dialogUrl != null) {
+                AlertDialog(
+                    onDismissRequest = { bookmarkDialogUrl = null },
+                    title = { Text(stringResource(MR.strings.capture_bookmark_add)) },
+                    text = {
+                        Column {
+                            Text(
+                                text = dialogUrl,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = bookmarkAliasDraft,
+                                onValueChange = { bookmarkAliasDraft = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                label = { Text(stringResource(MR.strings.capture_bookmark_alias)) },
+                                singleLine = true,
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                onAddBookmark(dialogUrl, bookmarkAliasDraft)
+                                bookmarks = bookmarksProvider()
+                                bookmarkDialogUrl = null
+                            },
+                            enabled = bookmarkAliasDraft.isNotBlank(),
+                        ) {
+                            Text(text = stringResource(MR.strings.action_ok))
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { bookmarkDialogUrl = null }) {
+                            Text(text = stringResource(MR.strings.action_cancel))
+                        }
+                    },
+                )
             }
 
             // 清除 Cookie 確認對話框（清整個內建瀏覽器的 Cookie，防誤觸）。

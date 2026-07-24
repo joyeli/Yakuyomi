@@ -285,6 +285,10 @@
     <string name="capture_toolbar_show">Show toolbar</string>
     <string name="capture_toolbar_hide">Hide toolbar</string>
     <string name="capture_url_history">URL history</string>
+    <!-- Yakuyomi: capture browser favorites (manual, named aliases) -->
+    <string name="capture_bookmarks">Favorites</string>
+    <string name="capture_bookmark_add">Add to favorites</string>
+    <string name="capture_bookmark_alias">Alias</string>
     <!-- Yakuyomi: capture toolbar 5-key skeleton -->
     <string name="capture_browse">Browse</string>
     <string name="capture_new_manga">New manga</string>

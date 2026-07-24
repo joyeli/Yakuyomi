@@ -38,6 +38,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import org.json.JSONArray
+import org.json.JSONObject
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.lang.withUIContext
 import tachiyomi.domain.storage.service.StorageManager
@@ -230,6 +232,10 @@ class CaptureScreen(
             urlHistoryProvider = { screenModel.webViewUrlHistory() },
             onAddUrl = { screenModel.addWebViewUrl(it) },
             onRemoveUrl = { screenModel.removeWebViewUrl(it) },
+            // 我的最愛（手動存常用站 + 命名別名；置頂快選、與自動歷史分開）。
+            bookmarksProvider = { screenModel.listBookmarks() },
+            onAddBookmark = { url, alias -> screenModel.addBookmark(url, alias) },
+            onRemoveBookmark = { screenModel.removeBookmark(it) },
             // 封面框選：裁好的 bitmap + bitmap 座標系的裁切框 + 當前書名 → 存書名夾根 cover.jpg，回 uri（縮圖預覽）。
             onSaveCover = { bitmap, rect, book -> screenModel.saveCover(bitmap, rect, book) },
             // 開「新漫畫」panel 時撈該書已存的封面（重進顯示縮圖）。
@@ -284,6 +290,12 @@ data class InsertTarget(
     val url: String? = null,
 )
 
+/** 我的最愛的一筆：常用站網址 + 使用者命名的別名（別名空白時退回顯示網址）。 */
+data class CaptureBookmark(
+    val url: String,
+    val alias: String,
+)
+
 class CaptureScreenModel(
     private val context: Application = Injekt.get(),
     private val storageManager: StorageManager = Injekt.get(),
@@ -314,6 +326,47 @@ class CaptureScreenModel(
     fun removeWebViewUrl(url: String) {
         val updated = webViewUrlHistory().filterNot { it == url }
         uiPreferences.lastWebViewUrls.set(webViewUrlJson.encodeToString(updated))
+    }
+
+    // ── 我的最愛（手動存常用站 + 命名別名）─────────────────────────────────────
+    // 與自動記錄的網址歷史不同：這是使用者手動加、命名別名（例：m.manhuagui.com → 「看漫画」），
+    // 置頂快選。存進 UiPreferences.captureBookmarks（JSON 陣列，最新在最前）；用 org.json 解析／序列化。
+
+    /** 讀出我的最愛（最新加入的在最前）；解析失敗回空清單、別名空白時退回顯示網址。 */
+    fun listBookmarks(): List<CaptureBookmark> = runCatching {
+        val arr = JSONArray(uiPreferences.captureBookmarks.get())
+        buildList {
+            for (i in 0 until arr.length()) {
+                val obj = arr.optJSONObject(i) ?: continue
+                val url = obj.optString("url").trim()
+                if (url.isEmpty()) continue
+                val alias = obj.optString("alias").trim().ifEmpty { url }
+                add(CaptureBookmark(url, alias))
+            }
+        }
+    }.getOrElse { emptyList() }
+
+    /** 加入／更新一筆最愛：忽略空白 / about:blank；同 url 覆蓋別名並移到最前；別名空白＝退回網址。 */
+    fun addBookmark(url: String, alias: String) {
+        val trimmedUrl = url.trim()
+        if (trimmedUrl.isEmpty() || trimmedUrl == "about:blank") return
+        val trimmedAlias = alias.trim().ifEmpty { trimmedUrl }
+        val updated = listOf(CaptureBookmark(trimmedUrl, trimmedAlias)) +
+            listBookmarks().filterNot { it.url == trimmedUrl }
+        writeBookmarks(updated)
+    }
+
+    /** 逐筆移除某筆最愛（依 url）。 */
+    fun removeBookmark(url: String) {
+        writeBookmarks(listBookmarks().filterNot { it.url == url })
+    }
+
+    private fun writeBookmarks(list: List<CaptureBookmark>) {
+        val arr = JSONArray()
+        list.forEach { bm ->
+            arr.put(JSONObject().put("url", bm.url).put("alias", bm.alias))
+        }
+        uiPreferences.captureBookmarks.set(arr.toString())
     }
 
     /**
