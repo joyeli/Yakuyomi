@@ -715,7 +715,7 @@ class CaptureScreenModel(
             val file = chapterDir.createFile(name) ?: error("Cannot create page file")
             openTruncating(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
             updateMetaUrl(chapterDir, page, url)
-            // ★ 安全網（件 1）：確保**漫畫層** meta（.yakuyomi_manga.json）存在——供日後「繼續擷取」開回原站。
+            // ★ 安全網（件 1）：確保**漫畫層** meta（.yakuyomi_manga）存在——供日後「繼續擷取」開回原站。
             // 不再只靠「新漫畫 panel 按確定」那一條（continue-capture 帶著書名進來根本不開該 panel、就漏寫）；
             // 只在缺檔且有有效網址時補寫（write-if-absent，保留 panel 當初記的目錄/首頁網址）。
             ensureMangaMeta(mangaDir, url)
@@ -738,8 +738,9 @@ class CaptureScreenModel(
         runCatching {
             val base = storageManager.getLocalSourceDirectory()
                 ?: error("Local source directory unavailable")
-            val chapterDir = base.findFile(safeBook)?.takeIf { it.isDirectory }
-                ?.findFile(safeChapter)?.takeIf { it.isDirectory }
+            val mangaDir = base.findFile(safeBook)?.takeIf { it.isDirectory }
+                ?: error("Manga directory not found")
+            val chapterDir = mangaDir.findFile(safeChapter)?.takeIf { it.isDirectory }
                 ?: error("Chapter directory not found")
 
             val file = chapterDir.findFile(pageName)
@@ -749,6 +750,8 @@ class CaptureScreenModel(
 
             val page = pageName.substringBeforeLast('.').toIntOrNull() ?: 0
             updateMetaUrl(chapterDir, page, url)
+            // 安全網同 [saveCapture]：純靠重截補頁的書也要有漫畫層 meta（否則「繼續擷取」開不回原站）。
+            ensureMangaMeta(mangaDir, url)
             CaptureSaveResult.Saved(page, file.uri.toString())
         }.getOrElse { CaptureSaveResult.Failed(it.message) }
     }
@@ -769,8 +772,9 @@ class CaptureScreenModel(
         runCatching {
             val base = storageManager.getLocalSourceDirectory()
                 ?: error("Local source directory unavailable")
-            val chapterDir = base.findFile(safeBook)?.takeIf { it.isDirectory }
-                ?.findFile(safeChapter)?.takeIf { it.isDirectory }
+            val mangaDir = base.findFile(safeBook)?.takeIf { it.isDirectory }
+                ?: error("Manga directory not found")
+            val chapterDir = mangaDir.findFile(safeChapter)?.takeIf { it.isDirectory }
                 ?: error("Chapter directory not found")
 
             // 騰位：頁碼 >= insertAtPage 的圖（含 legacy .url sidecar）皆 +1，降序（尾端先）避免改名撞到既有目標名。
@@ -803,6 +807,8 @@ class CaptureScreenModel(
             val file = chapterDir.findFile(name) ?: chapterDir.createFile(name) ?: error("Cannot create page file")
             openTruncating(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
 
+            // 安全網同 [saveCapture]：純靠插入補頁的書也要有漫畫層 meta。
+            ensureMangaMeta(mangaDir, url)
             CaptureSaveResult.Saved(insertAtPage, file.uri.toString())
         }.getOrElse { CaptureSaveResult.Failed(it.message) }
     }
@@ -833,14 +839,18 @@ class CaptureScreenModel(
     }
 
     /**
-     * 缺檔補寫漫畫層 meta：[mangaDir]＝書名夾。只在該夾**尚無** [MANGA_META_FILE] 且 [url] 為有效來源網址時寫入
-     * （write-if-absent；保留「新漫畫 panel」當初記的首頁/目錄網址，不被逐頁的深層網址覆蓋）。best-effort、吞例外。
+     * 缺**有效內容**就補寫漫畫層 meta：[mangaDir]＝書名夾。[url] 為有效來源網址時，**讀得到既有的有效 url 才 skip**，
+     * 否則覆寫（保留「新漫畫 panel」當初記的首頁/目錄網址，不被逐頁的深層網址覆蓋）。best-effort、吞例外。
+     *
+     * ★ 為何不是「檔在不在」（2026-07 修）：舊版寫過 `{"url":"about:blank"}` 的檔（或被 LocalSource 刪到只剩空殼、
+     * 內容壞掉的檔）永遠通不過驗證卻擋住補寫 → 那本書的「繼續擷取」永遠修不回來。改成看內容。
      */
     private fun ensureMangaMeta(mangaDir: UniFile, url: String?) {
         val trimmed = url?.trim().orEmpty()
         if (trimmed.isEmpty() || trimmed == "about:blank") return
         runCatching {
-            if (mangaDir.findFile(MANGA_META_FILE)?.isFile == true) return
+            // 頂層 readMangaMeta(UniFile)：新檔名優先、讀到舊檔名會順手 migrate；回 null＝沒有有效來源網址。
+            if (readMangaMeta(mangaDir) != null) return
             writeMangaMeta(context, mangaDir, trimmed)
         }
     }

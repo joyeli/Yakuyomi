@@ -3,6 +3,7 @@ package eu.kanade.presentation.capture
 import android.graphics.Bitmap
 import android.graphics.Rect
 import android.net.Uri
+import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -131,6 +132,15 @@ private fun defaultBookmarkAlias(url: String): String =
     Uri.parse(url).host?.removePrefix("www.")?.takeIf { it.isNotEmpty() } ?: url
 
 /**
+ * 畫面層級的 WebView 持有者（`remember` 在 CaptureScreenContent 裡，與整個 composition 同生命週期）。
+ * compose 的 interop 節點被丟棄/重建時（例：摺疊展開工具列），`factory` 拿這顆既有實例回填 → 不新建 WebView，
+ * 頁面 / 捲動 / 登入 / JS 狀態全保留。仿 [eu.kanade.presentation.webview.WebViewScreenContent] 的既有寫法。
+ */
+private class CaptureWebViewHolder {
+    var webView: WebView? = null
+}
+
+/**
  * Yakuyomi 擷取漫畫畫面內容（階段 1：介面骨架重構）。
  *
  * 版面：WebView **鋪滿全螢幕**（底層），但 status bar / navigation bar 讓出（[statusBarsPadding] /
@@ -229,7 +239,18 @@ fun CaptureScreenContent(
     val scope = rememberCoroutineScope()
 
     val navigator = remember { WebViewNavigator(scope) }
-    val state = remember { WebViewState(WebContent.Url(initialUrl.ifBlank { "about:blank" })) }
+    // ★ 種子不能是 about:blank（2026-07 修）：compose-webview 內部有
+    // `LaunchedEffect(wv, state){ snapshotFlow{state.content}.collect{ wv.loadUrl(it.url) } }`——interop 節點一被重建
+    // （例：摺疊/展開工具列）就把 `state.content` 回灌進 WebView。舊碼把 content 永遠停在 about:blank（導覽全繞過它
+    // 直接 webView.loadUrl）⇒ 重建＝白頁 ⇒ loadedUrl 變 about:blank ⇒ hasUrl=false（鈕鎖回 S0）⇒ meta 永不寫。
+    // 沒有初始網址時用 [WebContent.NavigatorOnly]（內部 collect 是 NO-OP、也不會在歷史留一筆 about:blank）。
+    val state = remember {
+        val seed = initialUrl.trim()
+        WebViewState(if (seed.isEmpty() || seed == "about:blank") WebContent.NavigatorOnly else WebContent.Url(seed))
+    }
+    // WebView 實例 screen-scoped 持有：interop 節點被重建時**復用同一顆**（頁面 / 捲動 / 登入 / JS 狀態全保留），
+    // 而不是新建一顆再被 state.content 回灌初始網址（＝上面那條白頁鏈的另一半）。仿 WebViewScreenContent 的既有寫法。
+    val webViewHolder = remember { CaptureWebViewHolder() }
     // 抓 onCreated 給的原生 WebView：截圖 / 手動載址都要它。
     var webView by remember { mutableStateOf<WebView?>(null) }
     var address by remember { mutableStateOf(initialUrl) }
@@ -324,6 +345,26 @@ fun CaptureScreenContent(
         }
     }
 
+    /**
+     * 取「當前真實網址」：`webView.url` 偶爾讀到空（剛建 / 導覽中）→ 退回 [loadedUrl]（WebViewClient 追蹤的實際載入
+     * 網址）；兩者都無效（空 / about:blank）回 null。截圖記網址、連續擷取 urlProvider、記漫畫來源網址三處共用，
+     * 避免其中一處漏了 fallback 就寫不出 meta。
+     */
+    fun currentUrl(): String? {
+        fun String?.valid(): String? = this?.trim()?.takeIf { it.isNotEmpty() && it != "about:blank" }
+        return webView?.url.valid() ?: loadedUrl.valid()
+    }
+
+    /**
+     * 導覽單一入口（★ 2026-07 修）：一律透過 [WebViewState] 下指令，**不要裸 `webView.loadUrl`**——
+     * 讓 `state.content` 恆為「真實網址」，interop 節點重建時內部 collect 回灌的也就是正確的那一頁。
+     * 同一個網址再載一次時 `snapshotFlow` 會去重（不會再發），改叫 [WebViewNavigator] 直接載（重截同一頁要能重載）。
+     */
+    fun navigate(url: String) {
+        val target = WebContent.Url(url)
+        if (state.content == target) navigator.loadUrl(url) else state.content = target
+    }
+
     fun go(urlOverride: String? = null) {
         val trimmed = (urlOverride ?: address).trim()
         if (trimmed.isEmpty()) return
@@ -334,7 +375,7 @@ fun CaptureScreenContent(
         listSheet = null
         // 標題此刻未知（頁面還沒載），onPageFinished 會補上。
         onAddUrl(normalized, "")
-        webView?.loadUrl(normalized)
+        navigate(normalized)
     }
 
     fun capture() {
@@ -345,7 +386,7 @@ fun CaptureScreenContent(
             withFrameNanos {}
             val window = context.findActivity()?.window
             // WebView 網址須在主執行緒讀；captureWebView 回呼在主執行緒，這裡先取好再帶進存檔。
-            val url = webView?.url
+            val url = currentUrl()
             captureWebView(webView, window) { bitmap ->
                 // 拿到（含失敗的 null）像素後即可還原 overlay，存檔在背景進行。
                 hideOverlayForCapture = false
@@ -477,14 +518,14 @@ fun CaptureScreenContent(
                 }
             }
         }
-        onStartContinuous(compareGrabber, cleanGrabber) { webView?.url }
+        onStartContinuous(compareGrabber, cleanGrabber) { currentUrl() }
     }
 
     // 進單張模式（重截 / 插入）：該頁有記網址才開回去；沒有就**保持 WebView 現狀**（讓使用者自己捲到位）。
     LaunchedEffect(singleShotToken) {
         if (mode == CaptureMode.SINGLE_SHOT && !singleShotUrl.isNullOrBlank()) {
             address = singleShotUrl
-            webView?.loadUrl(singleShotUrl)
+            navigate(singleShotUrl)
         }
     }
 
@@ -600,6 +641,16 @@ fun CaptureScreenContent(
                     webView = wv
                 },
                 client = webClient,
+                // ★ 復用同一顆 WebView（見 [webViewHolder]）：interop 節點重建時不新建、頁面 / 捲動 / 登入全保留。
+                // 若舊節點還沒把它從 parent 摘掉，先摘再交還（免 addView 撞 "already has a parent"）。
+                factory = { ctx ->
+                    webViewHolder.webView
+                        ?.also { (it.parent as? ViewGroup)?.removeView(it) }
+                        ?: android.webkit.WebView(ctx).also { webViewHolder.webView = it }
+                },
+                // 節點被丟棄時把 content 歸零：重建後內部 collect 收到 NavigatorOnly＝NO-OP，
+                // 不會拿舊網址覆蓋 WebView 現在停的那一頁（同 WebViewScreenContent 的既有寫法）。
+                onDispose = { state.content = WebContent.NavigatorOnly },
             )
         }
 
@@ -1006,12 +1057,9 @@ fun CaptureScreenContent(
                                             if (newBook != bookName) onChapterNameChange("")
                                             onBookNameChange(newBook)
                                             // 記漫畫來源網址（當下網址＝漫畫首頁/目錄頁），供日後「繼續擷取」。
-                                            // webView.url 偶爾讀到空 → 退回 loadedUrl（WebViewClient 追蹤的實際載入
-                                            // 網址）；about:blank 由底層 writeMangaMeta 擋掉不寫（件 1a）。
-                                            val srcUrl = webView?.url
-                                                ?.takeIf { it.isNotBlank() && it != "about:blank" }
-                                                ?: loadedUrl
-                                            onWriteMangaMeta(newBook, srcUrl)
+                                            // 取址走共用的 currentUrl()（webView.url 空 → 退回 loadedUrl）；
+                                            // 無效網址回 null、底層 writeMangaMeta 也會再擋一次（件 1a）。
+                                            onWriteMangaMeta(newBook, currentUrl())
                                             mangaPanelExpanded = false
                                         },
                                         enabled = bookDraft.isNotBlank(),

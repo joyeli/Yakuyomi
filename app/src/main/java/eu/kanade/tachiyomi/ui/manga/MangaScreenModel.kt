@@ -849,7 +849,8 @@ class MangaScreenModel(
      *   （顯示自然）；否則用夾名 `url`。★ 關鍵：CaptureScreenModel.saveCapture 以 `safeBook =
      *   buildValidFilename(book)` 定位存檔夾——回傳夾名時 `buildValidFilename(夾名) == 夾名`（夾名本就由
      *   buildValidFilename 產生、冪等），保證續截的頁**存回原本那個夾**、不會新建一本。
-     * - **來源網址**：讀書名夾根的 `.yakuyomi_manga.json`（擷取來的漫畫才寫過）。一般 local 漫畫沒有 → null →
+     * - **來源網址**：讀書名夾根的 `.yakuyomi_manga`（擷取來的漫畫才寫過；舊檔名 `.yakuyomi_manga.json` 會被
+     *   LocalSource 當 legacy json 刪掉 → 已改無副檔名，readMangaMeta 讀到舊檔會自動 migrate）。一般 local 漫畫沒有 → null →
      *   CaptureScreen initialUrl 空 → 照 S0 自動展開瀏覽（等於手動繼續擷取這本，不 crash）。
      */
     suspend fun buildContinueCaptureArgs(): Pair<String, String?> {
