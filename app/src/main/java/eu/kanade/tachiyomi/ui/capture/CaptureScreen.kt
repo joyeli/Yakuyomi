@@ -13,18 +13,21 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import com.hippo.unifile.UniFile
+import dev.icerock.moko.resources.StringResource
 import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.presentation.capture.CaptureReviewScreenContent
 import eu.kanade.presentation.capture.CaptureScreenContent
 import eu.kanade.presentation.util.Screen
 import eu.kanade.tachiyomi.ui.manga.MangaScreen
 import eu.kanade.tachiyomi.util.storage.DiskUtil
+import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -42,6 +45,7 @@ import org.json.JSONObject
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.lang.withUIContext
 import tachiyomi.domain.storage.service.StorageManager
+import tachiyomi.i18n.MR
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.io.OutputStream
@@ -112,6 +116,10 @@ private const val CAPTURE_TAP_GRACE_MS = 3000L
 // 連續幾次點擊都沒讓畫面換頁就自動停止（到最後一頁 / 位置點錯 / 頁數填錯時的保險，避免無限空轉）。
 private const val CAPTURE_MAX_IDLE_TAPS = 2
 
+// 連續幾頁「存檔失敗」就自動停止（避免整話翻完才發現一張都沒存）。1 次可能只是偶發的 SAF 失敗，
+// 2 次就該停下來告訴使用者；書名/章名沒填那種「設定不完整」不吃這個門檻、直接停。
+private const val CAPTURE_MAX_SAVE_FAILS = 2
+
 /**
  * 自動翻頁的點擊派送器：連續擷取存完一頁（或補點）時由 model 呼叫，回 true＝已派送。
  * 實作在畫面層（[eu.kanade.presentation.capture.CaptureScreenContent]）——需要 WebView 的**本地座標**
@@ -133,19 +141,32 @@ typealias StartContinuous = (
 ) -> Unit
 
 /**
+ * 連續擷取為什麼停下來（一次性事件，帶進確認頁顯示一行提示）。
+ * - [TARGET_REACHED]＝截滿使用者填的本話頁數。
+ * - [TAP_NO_EFFECT]＝自動翻頁連點 [CAPTURE_MAX_IDLE_TAPS] 次畫面都沒換（到最後一頁 / 位置點錯）。
+ * - [SAVE_FAILED]＝存檔失敗（書名章名沒填＝立刻停；寫檔失敗＝連 2 頁都失敗才停），細節見
+ *   [ContinuousCaptureState.stopDetail]。★ 這條以前不存在：存檔一直失敗時迴圈會每 500ms 重試到天荒地老、
+ *   進度永遠停在「已截 0 頁」，使用者可能翻完整話才發現一張都沒存。
+ * - [MANUAL]＝使用者按停止 / 畫面離開 / app 進背景（畫面層**不**據此自動進確認頁，按停止那條路自己會進）。
+ */
+enum class CaptureStopReason { TARGET_REACHED, TAP_NO_EFFECT, SAVE_FAILED, MANUAL }
+
+/**
  * 連續截圖狀態：是否進行中 + 本 session 已截頁數（給 UI 顯示「已截 N 頁」）+
  * [justCapturedPage]＝剛存下的頁碼（非 null 時 UI 顯示「已擷取第 N 頁 · 請翻下一頁」提示，[CAPTURE_PAUSE_MS] 後回 null）。
  *
  * [targetPages]＝本話頁數（使用者選填，null＝沒設）：有值時 UI 顯示「已截 5/16 頁」、截滿即自動停止。
- * [autoStopped]＝迴圈**自己**停下來了（截滿頁數 / 連續點擊沒反應），畫面層據此比照按停止進確認頁；
- * 消費後要呼叫 [CaptureScreenModel.consumeAutoStop] 歸零（一次性事件）。
+ * [stopReason]＝這一輪為什麼停（見 [CaptureStopReason]）；非 null 且非 [CaptureStopReason.MANUAL] 時畫面層
+ * 比照按停止進確認頁並顯示原因，消費後要呼叫 [CaptureScreenModel.consumeStopReason] 歸零（一次性事件）。
+ * [stopDetail]＝[CaptureStopReason.SAVE_FAILED] 時的失敗細項（供確認頁講清楚是哪一種失敗）。
  */
 data class ContinuousCaptureState(
     val running: Boolean = false,
     val count: Int = 0,
     val justCapturedPage: Int? = null,
     val targetPages: Int? = null,
-    val autoStopped: Boolean = false,
+    val stopReason: CaptureStopReason? = null,
+    val stopDetail: CaptureSaveError? = null,
 )
 
 /**
@@ -182,6 +203,7 @@ class CaptureScreen(
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.currentOrThrow
+        val context = LocalContext.current
         val screenModel = rememberScreenModel { CaptureScreenModel() }
 
         // 「繼續擷取」：進畫面把帶入的書名塞進 model（一次性；bookName 非空 → 漸進解鎖到 S2）。
@@ -200,12 +222,24 @@ class CaptureScreen(
         var insertTarget by remember { mutableStateOf<InsertTarget?>(null) }
         var shotToken by remember { mutableIntStateOf(0) }
 
-        /** 進確認模式：WebView 原地不動，只是被確認面板蓋住。 */
-        fun enterReview() {
+        /**
+         * 進確認模式：WebView 原地不動，只是被確認面板蓋住。
+         * [stopReason]/[stopDetail]＝連續擷取**自己**停下來的原因（按停止 / 重截插入完成回來＝null，不顯示提示）。
+         */
+        fun enterReview(
+            stopReason: CaptureStopReason? = null,
+            stopDetail: CaptureSaveError? = null,
+        ) {
             reCaptureTarget = null
             insertTarget = null
             mode = CaptureMode.REVIEW
-            reviewModel.configure(screenModel.bookName, screenModel.chapterName, screenModel.sessionPages)
+            reviewModel.configure(
+                screenModel.bookName,
+                screenModel.chapterName,
+                screenModel.sessionPages,
+                stopReason,
+                stopDetail,
+            )
         }
 
         LaunchedEffect(Unit) {
@@ -213,6 +247,8 @@ class CaptureScreen(
                 when (event) {
                     // 儲存完成＝整個擷取流程結束，這時才離開畫面（WebView 到此才銷毀）。
                     is CaptureReviewEvent.OpenManga -> navigator.replace(MangaScreen(event.mangaId))
+                    // 儲存失敗＝**停在確認頁**（不靜默把人踢回擷取模式），只吐一則可讀訊息讓使用者重試。
+                    is CaptureReviewEvent.Error -> context.toast(event.messageRes)
                     // 放棄這次截圖（或儲存找不到漫畫）→ 回擷取模式續用同一顆 WebView。
                     CaptureReviewEvent.Back -> {
                         reCaptureTarget = null
@@ -235,12 +271,15 @@ class CaptureScreen(
             }
         }
 
-        // 連續擷取的**自動**停止（截滿本話頁數 / 連續點擊沒反應）＝比照按停止：進確認模式帶 sessionPages。
+        // 連續擷取的**自動**停止（截滿本話頁數 / 連續點擊沒反應 / 存檔一直失敗）＝比照按停止：
+        // 進確認模式帶 sessionPages，並把「為什麼停」帶進去讓確認頁講清楚。
+        // [CaptureStopReason.MANUAL]（按停止 / 生命週期）不在此處理——那條路自己會呼叫 enterReview。
         // 一次性事件：切完模式即 consume 歸零，免 recomposition 重複觸發。
-        LaunchedEffect(continuous.autoStopped) {
-            if (continuous.autoStopped) {
-                enterReview()
-                screenModel.consumeAutoStop()
+        LaunchedEffect(continuous.stopReason) {
+            val reason = continuous.stopReason
+            if (reason != null && reason != CaptureStopReason.MANUAL) {
+                enterReview(reason, continuous.stopDetail)
+                screenModel.consumeStopReason()
             }
         }
 
@@ -277,16 +316,16 @@ class CaptureScreen(
             justCapturedPage = continuous.justCapturedPage,
             onStartContinuous = screenModel::startContinuous,
             onStopContinuous = screenModel::stopContinuous,
-            // 按停止＝進確認模式（不 push Screen、WebView 續活）。
-            onEnterReview = ::enterReview,
+            // 按停止＝進確認模式（不 push Screen、WebView 續活）；使用者主動停＝不顯示停止原因提示。
+            onEnterReview = { enterReview() },
             reCaptureTargetPage = target?.pageNumber,
             insertTargetPage = insert?.insertAtPage,
             // 單張模式：該頁有記網址才開回去；沒有就保持 WebView 現狀（不是每個站的網址都帶頁資訊）。
             singleShotUrl = target?.url ?: insert?.url,
             singleShotToken = shotToken,
             // 重截 / 插入皆為單張、成功或取消後回確認模式並重掃（顯示更新後的序）。
-            onReCaptureDone = ::enterReview,
-            onSingleShotCancel = ::enterReview,
+            onReCaptureDone = { enterReview() },
+            onSingleShotCancel = { enterReview() },
             // 確認模式按系統返回＝繼續擷取（回擷取模式、不刪頁）。
             onReviewContinue = { mode = CaptureMode.CAPTURING },
             // 網址列輸入歷史（帶出歷史清單 + 逐筆刪除 + 造訪時記錄；帶頁面標題）。
@@ -307,7 +346,9 @@ class CaptureScreen(
             siteSettingProvider = { url -> screenModel.siteSettingFor(url) },
             onSaveSiteSetting = { url, setting -> screenModel.saveSiteSetting(url, setting) },
             // 確認面板＝疊在常駐 WebView 上的一層 composable（原本的獨立 Screen 內容，邏輯不變）。
-            reviewContent = {
+            // 參數 onAdjustTapPoint 由**內容層**提供（點擊位置設定模式的 state 住在那裡）：確認頁的
+            // 「自動翻頁沒反應」提示列附一顆鈕直通該模式。
+            reviewContent = { onAdjustTapPoint ->
                 CaptureReviewScreenContent(
                     state = reviewState,
                     onToggleSelect = reviewModel::toggleSelection,
@@ -321,6 +362,8 @@ class CaptureScreen(
                     onDiscardSession = reviewModel::discardSession,
                     // 本次 session 沒截到新頁時第三顆動作＝「取消擷取」：沒東西可刪，直接離開整個擷取工具。
                     onExitCapture = navigator::pop,
+                    // 停止原因＝自動翻頁沒反應時，提示列那顆「調整點擊位置」→ 回擷取模式並直接進位置設定。
+                    onAdjustTapPoint = onAdjustTapPoint,
                 )
             },
         )
@@ -802,7 +845,11 @@ class CaptureScreenModel(
      * ① 截滿 [targetPages]（使用者填的本話頁數，null＝不設上限）；
      * ② 連續 [CAPTURE_MAX_IDLE_TAPS] 次點擊後畫面仍**與上次截的那頁一模一樣**（到最後一頁 / 位置點錯）；
      * ③ 使用者按停止（[stopContinuous]，行為不變）。
-     * ①② 會把 [ContinuousCaptureState.autoStopped] 設 true，畫面層據此比照按停止進確認頁。
+     * ★ ④ **存檔失敗**（2026-07 補）：[CaptureSaveResult.MissingName] 立刻停（設定不完整、重試無意義）、
+     * [CaptureSaveResult.Failed] 連 [CAPTURE_MAX_SAVE_FAILS] 頁都失敗才停。舊版這兩種結果都直接落到
+     * 「等 500ms 再試」，於是整話翻完進度還停在「已截 0 頁」都沒人告訴使用者。
+     * ①②④ 會把 [ContinuousCaptureState.stopReason] 設成對應的 [CaptureStopReason]，畫面層據此比照按停止
+     * 進確認頁並顯示原因。
      */
     fun startContinuous(
         compareGrabber: FrameGrabber,
@@ -824,8 +871,11 @@ class CaptureScreenModel(
             // 自動翻頁：派送點擊後「還在等新頁」的截止時刻（null＝沒在等）＋連續無效點擊次數。
             var tapDeadline: Long? = null
             var idleTaps = 0
-            // 迴圈自己停下來（截滿頁數 / 點了沒反應）→ finally 把它落進 state 給畫面層進確認頁。
-            var autoStopped = false
+            // 迴圈自己停下來（截滿頁數 / 點了沒反應 / 存檔失敗）→ finally 把它落進 state 給畫面層進確認頁。
+            var stopReason: CaptureStopReason? = null
+            var stopDetail: CaptureSaveError? = null
+            // 連續存檔失敗次數（成功即歸零）：達 [CAPTURE_MAX_SAVE_FAILS] 就別再空轉了。
+            var saveFails = 0
             _sessionPages.clear()
             _continuous.update {
                 it.copy(
@@ -833,7 +883,8 @@ class CaptureScreenModel(
                     count = 0,
                     justCapturedPage = null,
                     targetPages = target,
-                    autoStopped = false,
+                    stopReason = null,
+                    stopDetail = null,
                 )
             }
             try {
@@ -861,7 +912,7 @@ class CaptureScreenModel(
                         } else {
                             idleTaps++
                             if (idleTaps >= CAPTURE_MAX_IDLE_TAPS) {
-                                autoStopped = true
+                                stopReason = CaptureStopReason.TAP_NO_EFFECT
                                 break
                             }
                             // 還沒到上限＝再點一次（第一次可能剛好沒點中 / 頁面沒反應）。
@@ -903,6 +954,7 @@ class CaptureScreenModel(
                         _sessionPages.add(result.page)
                         lastCaptured = thumb // ★ 存比較幀縮圖（與比較基準一致）
                         lastRejected = null
+                        saveFails = 0 // 成功即歸零（門檻看的是「連續」失敗）
                         val captured = _continuous.value.count + 1
                         _continuous.update { it.copy(count = captured, justCapturedPage = result.page) }
                         // ⑤ 暫停偵測 + 顯示「已擷取第 N 頁 · 請翻下一頁」；期間畫面可能被翻動 →
@@ -915,7 +967,7 @@ class CaptureScreenModel(
                         _continuous.update { it.copy(justCapturedPage = null) }
                         // ★ 停止條件①：截滿使用者填的本話頁數 → 自動停（畫面層進確認頁）。
                         if (target != null && captured >= target) {
-                            autoStopped = true
+                            stopReason = CaptureStopReason.TARGET_REACHED
                             break
                         }
                         // ★ 自動翻頁：延遲後派送點擊，之後交回上面的 frame-diff 偵測新頁。
@@ -925,11 +977,42 @@ class CaptureScreenModel(
                         }
                         continue
                     }
+
+                    // ★ 停止條件④：存檔沒成功（2026-07 補；舊版直接落到下面的「等 500ms 再試」＝無限重試、
+                    // 進度永遠 0 頁、使用者毫無所悉）。
+                    when (result) {
+                        // 書名 / 章名沒填＝設定不完整，再試一百次也一樣 → 立刻停。
+                        CaptureSaveResult.MissingName -> {
+                            stopReason = CaptureStopReason.SAVE_FAILED
+                            stopDetail = CaptureSaveError.MISSING_NAME
+                        }
+                        // 寫檔失敗可能只是偶發（SAF 短暫失敗）→ 連 [CAPTURE_MAX_SAVE_FAILS] 頁失敗才停。
+                        is CaptureSaveResult.Failed -> {
+                            saveFails++
+                            if (saveFails >= CAPTURE_MAX_SAVE_FAILS) {
+                                stopReason = CaptureStopReason.SAVE_FAILED
+                                stopDetail = result.reason
+                            }
+                        }
+                    }
+                    if (stopReason != null) break
+
                     prev = thumb
                     delay(CAPTURE_INTERVAL_MS)
                 }
             } finally {
-                _continuous.update { it.copy(running = false, justCapturedPage = null, autoStopped = autoStopped) }
+                // 停止原因：迴圈自己判定的優先；被 [stopContinuous] 取消時本地變數是 null，保留它已寫進去的
+                // [CaptureStopReason.MANUAL]（cancel() 非同步、finally 晚一步跑，不能無條件覆蓋）。
+                val reason = stopReason
+                val detail = stopDetail
+                _continuous.update {
+                    it.copy(
+                        running = false,
+                        justCapturedPage = null,
+                        stopReason = reason ?: it.stopReason,
+                        stopDetail = if (reason != null) detail else it.stopDetail,
+                    )
+                }
             }
         }
     }
@@ -943,17 +1026,27 @@ class CaptureScreenModel(
         return SystemClock.elapsedRealtime() + (if (tapped) tapDelay else 0L) + CAPTURE_TAP_GRACE_MS
     }
 
-    /** 停止連續截圖（使用者按停止 / 畫面離開 / 生命週期 ON_STOP 都走這；idempotent）。 */
+    /**
+     * 停止連續截圖（使用者按停止 / 畫面離開 / 生命週期 ON_STOP 都走這；idempotent）。
+     * 標成 [CaptureStopReason.MANUAL]＝畫面層**不**自動進確認頁（按停止那條路自己會進、也不顯示原因提示）。
+     */
     fun stopContinuous() {
         continuousJob?.cancel()
         continuousJob = null
-        _continuous.update { it.copy(running = false, justCapturedPage = null, autoStopped = false) }
+        _continuous.update {
+            it.copy(
+                running = false,
+                justCapturedPage = null,
+                stopReason = CaptureStopReason.MANUAL,
+                stopDetail = null,
+            )
+        }
     }
 
-    /** 畫面層消費完 [ContinuousCaptureState.autoStopped]（已切進確認頁）後歸零，免重複觸發。 */
-    fun consumeAutoStop() {
+    /** 畫面層消費完 [ContinuousCaptureState.stopReason]（已切進確認頁）後歸零，免重複觸發。 */
+    fun consumeStopReason() {
         continuousJob = null
-        _continuous.update { it.copy(autoStopped = false) }
+        _continuous.update { it.copy(stopReason = null, stopDetail = null) }
     }
 
     override fun onDispose() {
@@ -1022,19 +1115,20 @@ class CaptureScreenModel(
         }
         runCatching {
             val base = storageManager.getLocalSourceDirectory()
-                ?: error("Local source directory unavailable")
+                ?: throw CaptureSaveException(CaptureSaveError.NO_STORAGE)
             val safeBook = DiskUtil.buildValidFilename(book)
             val safeChapter = DiskUtil.buildValidFilename(chapter)
             val mangaDir = base.findFile(safeBook)?.takeIf { it.isDirectory }
                 ?: base.createDirectory(safeBook)
-                ?: error("Cannot create manga directory")
+                ?: throw CaptureSaveException(CaptureSaveError.MANGA_DIR)
             val chapterDir = mangaDir.findFile(safeChapter)?.takeIf { it.isDirectory }
                 ?: mangaDir.createDirectory(safeChapter)
-                ?: error("Cannot create chapter directory")
+                ?: throw CaptureSaveException(CaptureSaveError.CHAPTER_DIR)
 
             val page = nextPageNumber(chapterDir)
             val name = "%03d.png".format(page)
-            val file = chapterDir.createFile(name) ?: error("Cannot create page file")
+            val file = chapterDir.createFile(name)
+                ?: throw CaptureSaveException(CaptureSaveError.WRITE)
             // 依該站的「去頭去尾」設定裁掉上下（沒設定＝原樣存）。
             writePage(file, bitmap, url)
             updateMetaUrl(chapterDir, page, url)
@@ -1044,7 +1138,7 @@ class CaptureScreenModel(
             ensureMangaMeta(mangaDir, url)
 
             CaptureSaveResult.Saved(page, file.uri.toString())
-        }.getOrElse { CaptureSaveResult.Failed(it.message) }
+        }.getOrElse { it.toCaptureFailure() }
     }
 
     /**
@@ -1060,15 +1154,15 @@ class CaptureScreenModel(
     ): CaptureSaveResult = withIOContext {
         runCatching {
             val base = storageManager.getLocalSourceDirectory()
-                ?: error("Local source directory unavailable")
+                ?: throw CaptureSaveException(CaptureSaveError.NO_STORAGE)
             val mangaDir = base.findFile(safeBook)?.takeIf { it.isDirectory }
-                ?: error("Manga directory not found")
+                ?: throw CaptureSaveException(CaptureSaveError.MANGA_DIR)
             val chapterDir = mangaDir.findFile(safeChapter)?.takeIf { it.isDirectory }
-                ?: error("Chapter directory not found")
+                ?: throw CaptureSaveException(CaptureSaveError.CHAPTER_DIR)
 
             val file = chapterDir.findFile(pageName)
                 ?: chapterDir.createFile(pageName)
-                ?: error("Cannot create page file")
+                ?: throw CaptureSaveException(CaptureSaveError.WRITE)
             writePage(file, bitmap, url)
 
             val page = pageName.substringBeforeLast('.').toIntOrNull() ?: 0
@@ -1076,7 +1170,7 @@ class CaptureScreenModel(
             // 安全網同 [saveCapture]：純靠重截補頁的書也要有漫畫層 meta（否則「繼續擷取」開不回原站）。
             ensureMangaMeta(mangaDir, url)
             CaptureSaveResult.Saved(page, file.uri.toString())
-        }.getOrElse { CaptureSaveResult.Failed(it.message) }
+        }.getOrElse { it.toCaptureFailure() }
     }
 
     /**
@@ -1094,11 +1188,11 @@ class CaptureScreenModel(
     ): CaptureSaveResult = withIOContext {
         runCatching {
             val base = storageManager.getLocalSourceDirectory()
-                ?: error("Local source directory unavailable")
+                ?: throw CaptureSaveException(CaptureSaveError.NO_STORAGE)
             val mangaDir = base.findFile(safeBook)?.takeIf { it.isDirectory }
-                ?: error("Manga directory not found")
+                ?: throw CaptureSaveException(CaptureSaveError.MANGA_DIR)
             val chapterDir = mangaDir.findFile(safeChapter)?.takeIf { it.isDirectory }
-                ?: error("Chapter directory not found")
+                ?: throw CaptureSaveException(CaptureSaveError.CHAPTER_DIR)
 
             // 騰位：頁碼 >= insertAtPage 的圖（含 legacy .url sidecar）皆 +1，降序（尾端先）避免改名撞到既有目標名。
             // meta 檔（.yakuyomi_meta.json）basename 非數字 → 不被此迴圈掃到、不會被誤改名。
@@ -1127,13 +1221,15 @@ class CaptureScreenModel(
             writeMeta(context, chapterDir, shifted)
 
             val name = "%03d.png".format(insertAtPage)
-            val file = chapterDir.findFile(name) ?: chapterDir.createFile(name) ?: error("Cannot create page file")
+            val file = chapterDir.findFile(name)
+                ?: chapterDir.createFile(name)
+                ?: throw CaptureSaveException(CaptureSaveError.WRITE)
             writePage(file, bitmap, url)
 
             // 安全網同 [saveCapture]：純靠插入補頁的書也要有漫畫層 meta。
             ensureMangaMeta(mangaDir, url)
             CaptureSaveResult.Saved(insertAtPage, file.uri.toString())
-        }.getOrElse { CaptureSaveResult.Failed(it.message) }
+        }.getOrElse { it.toCaptureFailure() }
     }
 
     /** 改名；[UniFile.renameTo] 失敗（回 false / 丟例外）→ 退回 copy 到新名 + 刪舊檔。 */
@@ -1420,9 +1516,40 @@ fun suggestCaptureChapterNames(existing: List<String>): List<String> {
     return candidates.map(::formatCaptureChapterName).distinct()
 }
 
-/** 存檔結果：成功（頁碼 + 路徑）／未填書名章名／失敗（訊息）。 */
+/**
+ * 存檔失敗的**可辨識**原因（每一項對應一則可翻譯訊息）。
+ *
+ * ★ 為什麼要有它（2026-07）：舊版 `Failed(message)` 帶的是 `error("Local source directory unavailable")`
+ * 這類英文例外訊息，直接被 toast 出去——使用者看到一句英文、也不知道下一步該做什麼。改成列舉後
+ * 畫面層自己挑字串（[messageRes]），連續擷取停下來的原因也講得出是哪一種失敗。
+ */
+enum class CaptureSaveError(val messageRes: StringResource) {
+    /** 書名 / 章名沒填（[CaptureSaveResult.MissingName] 的對應項，供停止原因共用同一套訊息）。 */
+    MISSING_NAME(MR.strings.capture_missing_name),
+
+    /** 取不到 local 來源目錄＝還沒設定儲存位置（或該位置已失效）。 */
+    NO_STORAGE(MR.strings.capture_save_error_no_storage),
+
+    /** 書名夾建不出來 / 找不到。 */
+    MANGA_DIR(MR.strings.capture_save_error_manga_dir),
+
+    /** 章夾建不出來 / 找不到。 */
+    CHAPTER_DIR(MR.strings.capture_save_error_chapter_dir),
+
+    /** 圖檔建不出來 / 寫入失敗（空間不足、SAF 權限被撤等）。 */
+    WRITE(MR.strings.capture_save_error_write),
+}
+
+/** 存檔流程內部用的例外：把失敗點標成 [CaptureSaveError]，由各 save* 的 runCatching 收斂成結果。 */
+private class CaptureSaveException(val reason: CaptureSaveError) : Exception(reason.name)
+
+/** 存檔結果：成功（頁碼 + 路徑）／未填書名章名／失敗（可辨識原因 + 原始訊息供 log）。 */
 sealed interface CaptureSaveResult {
     data class Saved(val page: Int, val path: String) : CaptureSaveResult
     data object MissingName : CaptureSaveResult
-    data class Failed(val message: String?) : CaptureSaveResult
+    data class Failed(val reason: CaptureSaveError, val message: String? = null) : CaptureSaveResult
 }
+
+/** 例外 → 存檔結果：本檔丟的 [CaptureSaveException] 帶原因，其餘（IO/SAF 例外）一律歸到寫入失敗。 */
+private fun Throwable.toCaptureFailure(): CaptureSaveResult.Failed =
+    CaptureSaveResult.Failed((this as? CaptureSaveException)?.reason ?: CaptureSaveError.WRITE, message)

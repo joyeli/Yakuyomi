@@ -347,6 +347,23 @@
     <string name="capture_continuous_hint_target">Captured %1$d/%2$d · turn to the next page to continue</string>
     <string name="capture_continuous_hint_auto">Turning pages automatically · captured %1$d</string>
     <string name="capture_continuous_hint_auto_target">Turning pages automatically · captured %1$d/%2$d</string>
+    <!-- Yakuyomi: capture feedback + guard rails (toolbar target, next-step hint, stop reasons, save errors) -->
+    <string name="capture_current_target">%1$s · %2$s</string>
+    <string name="capture_next_step_browse">Next: browse to the manga page</string>
+    <string name="capture_next_step_book">Next: set the manga title</string>
+    <string name="capture_next_step_chapter">Next: set the chapter</string>
+    <string name="capture_stop_target_reached">Reached the page count you set — capture stopped</string>
+    <string name="capture_stop_tap_no_effect">Auto page turn had no effect — last page reached, or the tap position is off</string>
+    <string name="capture_stop_save_failed">Capture stopped, pages could not be saved: %1$s</string>
+    <string name="capture_stop_adjust_tap">Adjust position</string>
+    <string name="capture_save_error_no_storage">Storage location unavailable — set it in Settings › Data and storage</string>
+    <string name="capture_save_error_manga_dir">Could not create the manga folder</string>
+    <string name="capture_save_error_chapter_dir">Could not find or create the chapter folder</string>
+    <string name="capture_save_error_write">Could not write the page file</string>
+    <string name="capture_review_save_failed">Could not save this chapter, try again</string>
+    <string name="capture_review_delete_confirm">Delete the %1$d selected pages? This cannot be undone.</string>
+    <string name="capture_bookmark_remove">Remove favorite</string>
+    <string name="capture_bookmark_remove_confirm">Remove “%1$s” from favorites?</string>
     <string name="action_start_downloading_now">Start downloading now</string>
     <string name="action_not_now">Not now</string>
     <string name="action_add_anyway">Add anyway</string>

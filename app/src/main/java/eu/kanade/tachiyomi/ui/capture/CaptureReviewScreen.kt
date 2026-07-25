@@ -4,6 +4,7 @@ import android.app.Application
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.hippo.unifile.UniFile
+import dev.icerock.moko.resources.StringResource
 import eu.kanade.tachiyomi.util.storage.DiskUtil
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,6 +17,7 @@ import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.domain.manga.interactor.NetworkToLocalManga
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.storage.service.StorageManager
+import tachiyomi.i18n.MR
 import tachiyomi.source.local.LocalSource
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -46,6 +48,8 @@ data class CapturePage(val file: UniFile, val name: String, val url: String? = n
  * 確認頁狀態：載入中 / 目前頁清單 / 已勾選（uri 字串集合）/ 儲存中。
  * [reloadKey] 每次重掃遞增，供縮圖破 coil 快取（重截同檔名覆蓋後顯示新圖，不留舊快取殘影）。
  * [sessionPageCount]＝本次連續截圖存下的頁數（>0 才顯示「放棄這次截圖」），由 [CaptureReviewScreenModel.configure] 設。
+ * [stopReason]/[stopDetail]＝連續擷取**自己**停下來的原因（按停止進來＝null）：頂端顯示一行提示，
+ * 讓使用者知道「為什麼突然跳到這裡」（尤其是存檔失敗那種以前完全無聲的情況）。
  */
 data class CaptureReviewState(
     val loading: Boolean = true,
@@ -54,17 +58,21 @@ data class CaptureReviewState(
     val saving: Boolean = false,
     val reloadKey: Int = 0,
     val sessionPageCount: Int = 0,
+    val stopReason: CaptureStopReason? = null,
+    val stopDetail: CaptureSaveError? = null,
 )
 
 /**
  * 一次性事件（由 [CaptureScreen] 收）：
  * - [OpenManga]＝儲存完成 → 離開整個擷取畫面、跳該 local 漫畫詳情（此時 WebView 才銷毀）。
- * - [Back]＝結束確認模式回到擷取模式（放棄這次截圖後，或儲存時找不到漫畫的退路）。
+ * - [Back]＝結束確認模式回到擷取模式（放棄這次截圖後）。
+ * - [Error]＝出錯了但**留在確認頁**（例：儲存時找不到 local 漫畫）→ 畫面層吐一則訊息，使用者可重試。
  * - [ReCapture] / [Insert]＝切到單張擷取模式（WebView 原地不動、只在該頁有記網址時 loadUrl 過去）。
  */
 sealed interface CaptureReviewEvent {
     data class OpenManga(val mangaId: Long) : CaptureReviewEvent
     data object Back : CaptureReviewEvent
+    data class Error(val messageRes: StringResource) : CaptureReviewEvent
     data class ReCapture(val target: ReCaptureTarget) : CaptureReviewEvent
     data class Insert(val target: InsertTarget) : CaptureReviewEvent
 }
@@ -97,13 +105,25 @@ class CaptureReviewScreenModel(
      * 每次由 [CaptureScreen] 切到 [CaptureMode.REVIEW] 時呼叫（含連續截圖停止、單張重截/插入完成後回來）。
      * 重設勾選（上一輪的選取不該殘留），[loadPages] 會把 loading 關掉並帶新的 reloadKey 破縮圖快取。
      */
-    fun configure(bookName: String, chapterName: String, sessionPages: List<Int>) {
+    fun configure(
+        bookName: String,
+        chapterName: String,
+        sessionPages: List<Int>,
+        stopReason: CaptureStopReason? = null,
+        stopDetail: CaptureSaveError? = null,
+    ) {
         this.safeBook = DiskUtil.buildValidFilename(bookName.trim())
         this.safeChapter = DiskUtil.buildValidFilename(chapterName.trim())
         this.title = bookName.trim()
         this.sessionPages = sessionPages.toList()
         _state.update {
-            CaptureReviewState(loading = true, reloadKey = it.reloadKey, sessionPageCount = this.sessionPages.size)
+            CaptureReviewState(
+                loading = true,
+                reloadKey = it.reloadKey,
+                sessionPageCount = this.sessionPages.size,
+                stopReason = stopReason,
+                stopDetail = stopDetail,
+            )
         }
         loadPages()
     }
@@ -233,7 +253,13 @@ class CaptureReviewScreenModel(
         }
     }
 
-    /** 把剩餘頁重新編號成連續 001/002…（兩階段防覆蓋）→ 找到該 local 漫畫 → 發導覽事件。 */
+    /**
+     * 把剩餘頁重新編號成連續 001/002…（兩階段防覆蓋）→ 找到該 local 漫畫 → 發導覽事件。
+     *
+     * ★ 找不到漫畫時（2026-07 修）：**留在確認頁**、復位 [CaptureReviewState.saving]、發 [CaptureReviewEvent.Error]
+     * 讓畫面層講一聲。舊版直接發 [CaptureReviewEvent.Back]＝畫面無聲切回擷取模式，使用者以為自己誤觸，
+     * 也不知道重新編號其實已經做完了。
+     */
     fun save() {
         if (_state.value.saving) return
         screenModelScope.launch {
@@ -245,7 +271,8 @@ class CaptureReviewScreenModel(
             if (mangaId != null) {
                 _events.send(CaptureReviewEvent.OpenManga(mangaId))
             } else {
-                _events.send(CaptureReviewEvent.Back)
+                _state.update { it.copy(saving = false) }
+                _events.send(CaptureReviewEvent.Error(MR.strings.capture_review_save_failed))
             }
         }
     }

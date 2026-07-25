@@ -392,6 +392,23 @@
     <string name="capture_continuous_hint_target">已截 %1$d/%2$d 頁 · 翻到下一頁繼續</string>
     <string name="capture_continuous_hint_auto">自動翻頁中 · 已截 %1$d 頁</string>
     <string name="capture_continuous_hint_auto_target">自動翻頁中 · 已截 %1$d/%2$d 頁</string>
+    <!-- Yakuyomi：擷取的回饋與防呆（工具列目標、下一步提示、停止原因、存檔失敗原因） -->
+    <string name="capture_current_target">%1$s · %2$s</string>
+    <string name="capture_next_step_browse">下一步：先瀏覽到漫畫頁面</string>
+    <string name="capture_next_step_book">下一步：設定書名</string>
+    <string name="capture_next_step_chapter">下一步：設定話數</string>
+    <string name="capture_stop_target_reached">已截滿設定的頁數，自動停止</string>
+    <string name="capture_stop_tap_no_effect">自動翻頁點了沒反應（可能已到最後一頁，或點擊位置不對），已自動停止</string>
+    <string name="capture_stop_save_failed">存檔失敗，已自動停止：%1$s</string>
+    <string name="capture_stop_adjust_tap">調整點擊位置</string>
+    <string name="capture_save_error_no_storage">找不到儲存位置，請到「設定 › 資料與儲存空間」設定</string>
+    <string name="capture_save_error_manga_dir">建立漫畫資料夾失敗</string>
+    <string name="capture_save_error_chapter_dir">找不到（或建不了）章節資料夾</string>
+    <string name="capture_save_error_write">頁面寫入失敗</string>
+    <string name="capture_review_save_failed">儲存失敗，請再試一次</string>
+    <string name="capture_review_delete_confirm">刪除選取的 %1$d 頁？此動作無法復原。</string>
+    <string name="capture_bookmark_remove">移除最愛</string>
+    <string name="capture_bookmark_remove_confirm">把「%1$s」從我的最愛移除？</string>
     <string name="pref_category_library">書櫃</string>
     <string name="ext_obsolete">過舊</string>
     <string name="obsolete_extension_message">這個擴充套件已無法使用，其可能無法正確運作或導致本程式發生問題，建議解除安裝</string>

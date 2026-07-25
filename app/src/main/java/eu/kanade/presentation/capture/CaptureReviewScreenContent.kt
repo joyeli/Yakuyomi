@@ -23,6 +23,8 @@ import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DeleteSweep
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Save
@@ -57,6 +59,8 @@ import coil3.request.ImageRequest
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.tachiyomi.ui.capture.CapturePage
 import eu.kanade.tachiyomi.ui.capture.CaptureReviewState
+import eu.kanade.tachiyomi.ui.capture.CaptureSaveError
+import eu.kanade.tachiyomi.ui.capture.CaptureStopReason
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.components.material.padding
@@ -79,6 +83,9 @@ import tachiyomi.presentation.core.screens.LoadingScreen
  * 底部排版：第一列「繼續擷取 / 儲存」兩顆主要動作，第二列「放棄這次截圖 / 取消擷取」（**一律顯示**，
  * 否則沒截到新頁時使用者沒有退出的出口）；
  * **有勾選時才在最上面多一列「刪除選取 (N)」**，讓兩種破壞性動作與主要動作分得開。
+ *
+ * ★ 破壞性動作保護一致（2026-07 修）：「刪除選取」以前一點就永久刪、無確認無復原，反而「放棄這次截圖」有
+ * 對話框＝保護等級相反。現在兩者都走同款 [AlertDialog]。
  */
 @Composable
 fun CaptureReviewScreenContent(
@@ -93,11 +100,38 @@ fun CaptureReviewScreenContent(
     onDiscardSession: () -> Unit = {},
     // 直接離開整個擷取工具（本次 session 沒截到新頁時第三顆動作＝「取消擷取」的行為）。
     onExitCapture: () -> Unit = {},
+    // 停止原因＝自動翻頁點了沒反應時，提示列那顆「調整點擊位置」→ 回擷取模式並直接進點擊位置設定。
+    onAdjustTapPoint: () -> Unit = {},
 ) {
     // 本次連續截圖存下的頁數（0＝非連續 session 進入或無新頁）；決定第三顆動作是「放棄」還是「取消」。
     val sessionPageCount = state.sessionPageCount
     // 「放棄這次截圖」確認對話框（防誤觸，此動作刪頁不可復原）。
     var showDiscardDialog by remember { mutableStateOf(false) }
+    // 「刪除選取」確認對話框（同上：刪檔不可復原，與「放棄」同一套保護）。
+    var showDeleteDialog by remember { mutableStateOf(false) }
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text(stringResource(MR.strings.capture_review_delete_selected, state.selected.size)) },
+            text = { Text(stringResource(MR.strings.capture_review_delete_confirm, state.selected.size)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteDialog = false
+                        onDeleteSelected()
+                    },
+                ) {
+                    Text(stringResource(MR.strings.action_ok))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text(stringResource(MR.strings.action_cancel))
+                }
+            },
+        )
+    }
 
     if (showDiscardDialog) {
         AlertDialog(
@@ -142,7 +176,7 @@ fun CaptureReviewScreenContent(
                     // 刪除列：只在有勾選時出現（平時底部只剩「繼續擷取 / 儲存」兩顆主要動作）。
                     if (state.selected.isNotEmpty()) {
                         OutlinedButton(
-                            onClick = onDeleteSelected,
+                            onClick = { showDeleteDialog = true },
                             enabled = !state.saving,
                             modifier = Modifier.fillMaxWidth(),
                             colors = ButtonDefaults.outlinedButtonColors(
@@ -223,41 +257,116 @@ fun CaptureReviewScreenContent(
             }
         },
     ) { contentPadding ->
-        when {
-            state.loading -> LoadingScreen(modifier = Modifier.padding(contentPadding))
-            state.pages.isEmpty() -> Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(contentPadding)
-                    .padding(24.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = stringResource(MR.strings.capture_review_empty),
-                    textAlign = TextAlign.Center,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            else -> LazyVerticalGrid(
-                columns = GridCells.Fixed(3),
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(contentPadding),
-                contentPadding = PaddingValues(MaterialTheme.padding.small),
-                verticalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small),
-                horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small),
-            ) {
-                itemsIndexed(state.pages, key = { _, page -> page.uri }) { index, page ->
-                    ReviewGridItem(
-                        page = page,
-                        number = index + 1,
-                        selected = page.uri in state.selected,
-                        reloadKey = state.reloadKey,
-                        onToggle = { onToggleSelect(page.uri) },
-                        onReCapture = { onReCapture(page) },
-                        onInsert = { before -> onInsert(page, before) },
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(contentPadding),
+        ) {
+            // 為什麼會跳到這一頁（連續擷取自己停下來時）：截滿頁數 / 自動翻頁沒反應 / 存檔失敗。
+            // 使用者按停止進來＝不顯示（他自己知道）。
+            CaptureStopReasonBanner(
+                stopReason = state.stopReason,
+                stopDetail = state.stopDetail,
+                onAdjustTapPoint = onAdjustTapPoint,
+            )
+            when {
+                state.loading -> LoadingScreen()
+                state.pages.isEmpty() -> Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = stringResource(MR.strings.capture_review_empty),
+                        textAlign = TextAlign.Center,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+                else -> LazyVerticalGrid(
+                    columns = GridCells.Fixed(3),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(MaterialTheme.padding.small),
+                    verticalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small),
+                    horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small),
+                ) {
+                    itemsIndexed(state.pages, key = { _, page -> page.uri }) { index, page ->
+                        ReviewGridItem(
+                            page = page,
+                            number = index + 1,
+                            selected = page.uri in state.selected,
+                            reloadKey = state.reloadKey,
+                            onToggle = { onToggleSelect(page.uri) },
+                            onReCapture = { onReCapture(page) },
+                            onInsert = { before -> onInsert(page, before) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 連續擷取「自己停下來」的原因提示（確認頁頂端一行）。
+ *
+ * 為什麼需要：迴圈可能因三種原因自動停（截滿頁數 / 自動翻頁點了沒反應 / 存檔連續失敗），但畫面只會突然
+ * 跳出確認頁——尤其存檔失敗那條，以前使用者可能整話都翻完了才發現一張都沒存。
+ * [CaptureStopReason.TAP_NO_EFFECT] 額外附一顆「調整點擊位置」直通設定（最常見的原因就是點錯位置）。
+ * [CaptureStopReason.MANUAL]（使用者自己按停止）不顯示——他知道自己按了什麼。
+ */
+@Composable
+private fun CaptureStopReasonBanner(
+    stopReason: CaptureStopReason?,
+    stopDetail: CaptureSaveError?,
+    onAdjustTapPoint: () -> Unit,
+) {
+    if (stopReason == null || stopReason == CaptureStopReason.MANUAL) return
+    val failed = stopReason == CaptureStopReason.SAVE_FAILED
+    val message = when (stopReason) {
+        CaptureStopReason.TARGET_REACHED -> stringResource(MR.strings.capture_stop_target_reached)
+        CaptureStopReason.TAP_NO_EFFECT -> stringResource(MR.strings.capture_stop_tap_no_effect)
+        CaptureStopReason.SAVE_FAILED -> stringResource(
+            MR.strings.capture_stop_save_failed,
+            stringResource(stopDetail?.messageRes ?: MR.strings.capture_save_error_write),
+        )
+        CaptureStopReason.MANUAL -> return
+    }
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = if (failed) {
+            MaterialTheme.colorScheme.errorContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant
+        },
+        contentColor = if (failed) {
+            MaterialTheme.colorScheme.onErrorContainer
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = if (failed) Icons.Outlined.ErrorOutline else Icons.Outlined.Info,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 8.dp),
+            )
+            if (stopReason == CaptureStopReason.TAP_NO_EFFECT) {
+                TextButton(onClick = onAdjustTapPoint) {
+                    Text(text = stringResource(MR.strings.capture_stop_adjust_tap))
                 }
             }
         }

@@ -79,11 +79,16 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TooltipAnchorPosition
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults.rememberTooltipPositionProvider
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -248,6 +253,31 @@ private fun DrawScope.drawTapMarker(
 }
 
 /**
+ * 浮動工具列的 icon 鈕：加上停留 / 長按會跳出的 tooltip 說明。
+ *
+ * 為什麼：這條工具列全是圖示、語意只存在 `contentDescription`（螢幕閱讀器看得到、眼睛看不到），
+ * 而且沒解鎖的鍵只是灰階、按下毫無回饋。tooltip 文字直接沿用同一組既有字串（＝也是 contentDescription），
+ * 不新增翻譯。寫法對照 [eu.kanade.presentation.components.AppBar] 的 AppBarActions；差別只在工具列位於畫面
+ * **頂端**，tooltip 錨在下方（[TooltipAnchorPosition.Below]）才不會被狀態列切掉。
+ */
+@Composable
+private fun CaptureToolbarIconButton(
+    tooltip: String,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    icon: @Composable () -> Unit,
+) {
+    TooltipBox(
+        positionProvider = rememberTooltipPositionProvider(TooltipAnchorPosition.Below),
+        tooltip = { PlainTooltip { Text(tooltip) } },
+        state = rememberTooltipState(),
+        focusable = false,
+    ) {
+        IconButton(onClick = onClick, enabled = enabled, content = icon)
+    }
+}
+
+/**
  * 畫面層級的 WebView 持有者（`remember` 在 CaptureScreenContent 裡，與整個 composition 同生命週期）。
  * compose 的 interop 節點被丟棄/重建時（例：摺疊展開工具列），`factory` 拿這顆既有實例回填 → 不新建 WebView，
  * 頁面 / 捲動 / 登入 / JS 狀態全保留。仿 [eu.kanade.presentation.webview.WebViewScreenContent] 的既有寫法。
@@ -333,8 +363,9 @@ fun CaptureScreenContent(
     onSingleShotCancel: () -> Unit = {},
     // 確認模式按系統返回＝「繼續擷取」（回擷取模式、不刪頁）。
     onReviewContinue: () -> Unit = {},
-    // 確認模式的面板內容（疊在常駐 WebView 上）。
-    reviewContent: @Composable () -> Unit = {},
+    // 確認模式的面板內容（疊在常駐 WebView 上）。參數＝面板要用的「調整點擊位置」動作：
+    // 點擊位置設定模式的 state 住在本 composable，所以由這裡往下遞（而非由外面傳進來）。
+    reviewContent: @Composable (onAdjustTapPoint: () -> Unit) -> Unit = {},
     // 網址列輸入歷史（帶出歷史清單 + 逐筆刪除 + 造訪時記錄；每筆帶頁面標題）。
     urlHistoryProvider: () -> List<CaptureUrlEntry> = { emptyList() },
     onAddUrl: (String, String) -> Unit = { _, _ -> },
@@ -406,6 +437,8 @@ fun CaptureScreenContent(
     // 「加入最愛」對話框：非 null＝正為此網址輸入別名；aliasDraft＝別名草稿（預設帶該 url 的 host）。
     var bookmarkDialogUrl by remember { mutableStateOf<String?>(null) }
     var bookmarkAliasDraft by remember { mutableStateOf("") }
+    // 「移除最愛」確認對話框（非 null＝正要移除這一筆）：叉叉緊鄰整列點擊區，誤觸就永久少一筆常用站。
+    var bookmarkDeleteTarget by remember { mutableStateOf<CaptureBookmark?>(null) }
     // ★ 截圖當下把所有浮動 overlay 隱藏，避免進到 PixelCopy 的截圖裡。
     var hideOverlayForCapture by remember { mutableStateOf(false) }
     // 清除 Cookie 確認對話框（防誤觸）。
@@ -595,10 +628,10 @@ fun CaptureScreenContent(
                         }
                         CaptureSaveResult.MissingName ->
                             context.toast(context.contextStringResource(MR.strings.capture_missing_name))
+                        // ★ 存檔失敗吐**可辨識**的中文訊息（無儲存空間 / 建不了漫畫夾 / 找不到章夾 / 寫入失敗），
+                        // 不再把 `error("Local source directory unavailable")` 這種英文例外原封丟給使用者。
                         is CaptureSaveResult.Failed ->
-                            context.toast(
-                                result.message ?: context.contextStringResource(MR.strings.webview_capture_failed),
-                            )
+                            context.toast(context.contextStringResource(result.reason.messageRes))
                     }
                     if (!bitmap.isRecycled) bitmap.recycle()
                 }
@@ -870,6 +903,9 @@ fun CaptureScreenContent(
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
             onStopContinuous()
+            // Yakuyomi：離開擷取畫面時把 session cookie 寫盤（對照 WebViewScreenContent 的 onDispose）。
+            // 擷取正是最常在裡面登入的流程，漏了 flush＝行程被殺前未持久化的登入 cookie 遺失＝每次都要重登入。
+            CookieManager.getInstance().flush()
         }
     }
 
@@ -1070,14 +1106,18 @@ fun CaptureScreenContent(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             // 1) 返回（單張模式＝取消回確認面板，其餘＝關掉整個擷取畫面）
-                            IconButton(onClick = { if (singleShotMode) onSingleShotCancel() else onNavigateUp() }) {
+                            CaptureToolbarIconButton(
+                                tooltip = stringResource(MR.strings.action_close),
+                                onClick = { if (singleShotMode) onSingleShotCancel() else onNavigateUp() },
+                            ) {
                                 Icon(
                                     imageVector = Icons.Outlined.Close,
                                     contentDescription = stringResource(MR.strings.action_close),
                                 )
                             }
                             // 2) 瀏覽（永遠可用；toggle 瀏覽 panel，開時關掉其他 panel 免過高）
-                            IconButton(
+                            CaptureToolbarIconButton(
+                                tooltip = stringResource(MR.strings.capture_browse),
                                 onClick = {
                                     browseExpanded = !browseExpanded
                                     if (browseExpanded) {
@@ -1100,7 +1140,10 @@ fun CaptureScreenContent(
                             if (!singleShotMode) {
                                 if (continuousRunning) {
                                     // 連續中：紅色停止 + 進度「已截 N 頁」（隱藏新漫畫/新話數，翻頁自動截）。
-                                    IconButton(onClick = { toggleContinuous() }) {
+                                    CaptureToolbarIconButton(
+                                        tooltip = stringResource(MR.strings.capture_continuous_stop),
+                                        onClick = { toggleContinuous() },
+                                    ) {
                                         Icon(
                                             imageVector = Icons.Filled.Stop,
                                             contentDescription = stringResource(MR.strings.capture_continuous_stop),
@@ -1122,7 +1165,8 @@ fun CaptureScreenContent(
                                     )
                                 } else {
                                     // 3) 新漫畫（S1：有網址才解鎖）：toggle 書名 panel
-                                    IconButton(
+                                    CaptureToolbarIconButton(
+                                        tooltip = stringResource(MR.strings.capture_new_manga),
                                         onClick = {
                                             mangaPanelExpanded = !mangaPanelExpanded
                                             if (mangaPanelExpanded) {
@@ -1145,7 +1189,8 @@ fun CaptureScreenContent(
                                         )
                                     }
                                     // 4) 新話數（S2：書名非空才解鎖）：toggle 話數 panel
-                                    IconButton(
+                                    CaptureToolbarIconButton(
+                                        tooltip = stringResource(MR.strings.capture_new_chapter),
                                         onClick = {
                                             chapterPanelExpanded = !chapterPanelExpanded
                                             if (chapterPanelExpanded) {
@@ -1167,14 +1212,19 @@ fun CaptureScreenContent(
                                         )
                                     }
                                     // 5) 開始（S3：書名 + 章名皆非空才解鎖）
-                                    IconButton(onClick = { toggleContinuous() }, enabled = canStart) {
+                                    CaptureToolbarIconButton(
+                                        tooltip = stringResource(MR.strings.capture_continuous_start),
+                                        onClick = { toggleContinuous() },
+                                        enabled = canStart,
+                                    ) {
                                         Icon(
                                             imageVector = Icons.Outlined.PlayArrow,
                                             contentDescription = stringResource(MR.strings.capture_continuous_start),
                                         )
                                     }
                                     // 6) 頁面設定（逐站的畫布寬度% + 去頭去尾裁切）：要有網址（host 是設定的 key）。
-                                    IconButton(
+                                    CaptureToolbarIconButton(
+                                        tooltip = stringResource(MR.strings.capture_page_settings),
                                         onClick = {
                                             pagePanelExpanded = !pagePanelExpanded
                                             if (pagePanelExpanded) {
@@ -1197,14 +1247,77 @@ fun CaptureScreenContent(
                                     }
                                 }
                             }
-                            Spacer(modifier = Modifier.weight(1f))
+                            // ★ 常駐顯示「會存到哪本 · 哪話」（2026-07 補）：書名/話數以前只活在 panel 草稿裡，
+                            // panel 一關就看不見 → 截錯話要到確認頁才發現，且那些頁已經寫進舊章夾了。
+                            // 佔用原本的 weight(1f) 空位、單行 ellipsize（不撐爆工具列）；連續中與「已截 N/M 頁」並存。
+                            // 點一下開「新話數」panel（書名通常一設定就固定、每次要換的是話數；要改書名走左邊的圖示）。
+                            val targetLabel = when {
+                                singleShotMode || bookName.isBlank() -> ""
+                                chapterName.isBlank() -> bookName
+                                else -> stringResource(MR.strings.capture_current_target, bookName, chapterName)
+                            }
+                            if (targetLabel.isEmpty()) {
+                                Spacer(modifier = Modifier.weight(1f))
+                            } else {
+                                Text(
+                                    text = targetLabel,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    textAlign = TextAlign.End,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(MaterialTheme.shapes.small)
+                                        // 連續擷取中 panel 不會顯示（見下方各 panel 的 !continuousRunning gate）
+                                        // → 那時純顯示、不吃點擊。
+                                        .then(
+                                            if (continuousRunning) {
+                                                Modifier
+                                            } else {
+                                                Modifier.clickable {
+                                                    chapterPanelExpanded = true
+                                                    browseExpanded = false
+                                                    mangaPanelExpanded = false
+                                                    pagePanelExpanded = false
+                                                }
+                                            },
+                                        )
+                                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                                )
+                            }
                             // 收起工具列（清爽看漫畫；截圖本就不含 overlay，收起純為視覺）。
-                            IconButton(onClick = { toolbarExpanded = false }) {
+                            CaptureToolbarIconButton(
+                                tooltip = stringResource(MR.strings.capture_toolbar_hide),
+                                onClick = { toolbarExpanded = false },
+                            ) {
                                 Icon(
                                     imageVector = Icons.Outlined.UnfoldLess,
                                     contentDescription = stringResource(MR.strings.capture_toolbar_hide),
                                 )
                             }
+                        }
+                    }
+
+                    // ★ 灰鍵說原因（2026-07 補）：漸進解鎖 S0→S3 只把沒解鎖的鍵畫成灰階、按下毫無反應，
+                    // 使用者不知道卡在哪一步 → 工具列下緣補一行「下一步」動態提示，達成（canStart）即消失。
+                    // 連續中 / 單張模式不顯示（那時沒有「下一步」可言）。
+                    if (!singleShotMode && !continuousRunning && !canStart) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Surface(
+                            color = barColor,
+                            contentColor = barContentColor,
+                            shape = MaterialTheme.shapes.large,
+                            shadowElevation = 3.dp,
+                        ) {
+                            Text(
+                                text = when {
+                                    !hasUrl -> stringResource(MR.strings.capture_next_step_browse)
+                                    bookName.isBlank() -> stringResource(MR.strings.capture_next_step_book)
+                                    else -> stringResource(MR.strings.capture_next_step_chapter)
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            )
                         }
                     }
 
@@ -1262,12 +1375,9 @@ fun CaptureScreenContent(
                                                     overflow = TextOverflow.Ellipsis,
                                                 )
                                             }
-                                            IconButton(
-                                                onClick = {
-                                                    bookmarks = bookmarks.filterNot { it.url == bm.url }
-                                                    onRemoveBookmark(bm.url)
-                                                },
-                                            ) {
+                                            // 叉叉與整列點擊區之間留一段間距（免「想點載入卻按到移除」）。
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            IconButton(onClick = { bookmarkDeleteTarget = bm }) {
                                                 Icon(
                                                     imageVector = Icons.Outlined.Close,
                                                     contentDescription = stringResource(MR.strings.action_delete),
@@ -2130,6 +2240,35 @@ fun CaptureScreenContent(
                 )
             }
 
+            // 移除最愛確認對話框（防誤觸）：兩處叉叉（瀏覽 panel 快選 / 全屏最愛清單）共用這一個。
+            // 與「清除 Cookie」「放棄這次截圖」同一套保護等級——都是一點就回不去的事。
+            val deleteTarget = bookmarkDeleteTarget
+            if (deleteTarget != null) {
+                AlertDialog(
+                    onDismissRequest = { bookmarkDeleteTarget = null },
+                    title = { Text(stringResource(MR.strings.capture_bookmark_remove)) },
+                    text = {
+                        Text(stringResource(MR.strings.capture_bookmark_remove_confirm, deleteTarget.alias))
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                bookmarks = bookmarks.filterNot { it.url == deleteTarget.url }
+                                onRemoveBookmark(deleteTarget.url)
+                                bookmarkDeleteTarget = null
+                            },
+                        ) {
+                            Text(text = stringResource(MR.strings.action_ok))
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { bookmarkDeleteTarget = null }) {
+                            Text(text = stringResource(MR.strings.action_cancel))
+                        }
+                    },
+                )
+            }
+
             // 清除 Cookie 確認對話框（清整個內建瀏覽器的 Cookie，防誤觸）。
             if (showClearCookiesDialog) {
                 AlertDialog(
@@ -2769,12 +2908,9 @@ fun CaptureScreenContent(
                                                     overflow = TextOverflow.Ellipsis,
                                                 )
                                             }
-                                            IconButton(
-                                                onClick = {
-                                                    bookmarks = bookmarks.filterNot { it.url == bm.url }
-                                                    onRemoveBookmark(bm.url)
-                                                },
-                                            ) {
+                                            // 叉叉與整列點擊區之間留一段間距（免「想點載入卻按到移除」）。
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            IconButton(onClick = { bookmarkDeleteTarget = bm }) {
                                                 Icon(
                                                     imageVector = Icons.Outlined.Close,
                                                     contentDescription = stringResource(MR.strings.action_delete),
@@ -2797,7 +2933,14 @@ fun CaptureScreenContent(
                 modifier = Modifier.fillMaxSize(),
                 color = MaterialTheme.colorScheme.background,
             ) {
-                reviewContent()
+                reviewContent {
+                    // 「自動翻頁沒反應」提示列的動作：先回擷取模式（設定 overlay 有 !reviewMode gate），
+                    // 再帶著該站現有座標進點擊位置設定模式——兩個 state 同一次 click 一起更新、單次重組。
+                    tapXDraft = siteSetting.tapX ?: TAP_DEFAULT_X
+                    tapYDraft = siteSetting.tapY ?: TAP_DEFAULT_Y
+                    onReviewContinue()
+                    tapSetupMode = true
+                }
             }
         }
     }
