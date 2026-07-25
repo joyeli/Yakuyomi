@@ -46,18 +46,18 @@ class UiPreferences(
     // Yakuyomi：漫畫詳情頁依封面取色的動態主題（預設關閉，避免影響全 app 觀感）。
     val coverBasedTheme: Preference<Boolean> = preferenceStore.getBoolean("pref_cover_based_theme", false)
 
-    // Yakuyomi：「以 WebView 開啟網址」的輸入歷史（JSON 字串陣列，最近的在最前、去重、上限見 MoreScreenModel）。
-    // More 瀏覽入口用純 url `List<String>`；擷取瀏覽器改用下面 captureUrlHistory（帶標題），兩者刻意分開。
+    // Yakuyomi：**舊** More「以 WebView 開啟網址」入口的輸入歷史（純 url JSON 陣列 `["a","b"]`，最近的在最前）。
+    // 該入口已被獨立的「擷取漫畫」畫面取代並移除 → 現在**只剩讀取**：CaptureScreenModel 在新的
+    // captureUrlHistory 還空時讀這裡當初值做遷移（見下）。**別刪**，刪了既有使用者的歷史會消失。
     val lastWebViewUrls: Preference<String> = preferenceStore.getString("last_webview_urls", "[]")
 
     // Yakuyomi：擷取瀏覽器的網址歷史（**帶頁面標題**）。JSON 陣列 `[{"url":"...","title":"..."}]`，最新在最前。
-    // 與 More 共用的 lastWebViewUrls（純 url 陣列、無標題）分開——若改共用同一份，More 端的
-    // `decodeFromString<List<String>>` 會在物件陣列上解析失敗、歷史整個消失。首次讀取（本 pref 還空）時
+    // 與舊 More 入口的 lastWebViewUrls（純 url 陣列、無標題）刻意分開的格式。首次讀取（本 pref 還空）時
     // 讀 lastWebViewUrls 當初值（標題留空、相容舊資料），待下次造訪/刪除才以新格式落地（見 CaptureScreenModel）。
     val captureUrlHistory: Preference<String> = preferenceStore.getString("capture_url_history", "[]")
 
     // Yakuyomi：擷取瀏覽器的「我的最愛」（手動存常用站 + 命名別名）。JSON 陣列
-    // `[{"url":"...","alias":"..."}]`，最新加入的在最前；與自動記錄的網址歷史（lastWebViewUrls）分開。
+    // `[{"url":"...","alias":"..."}]`，最新加入的在最前；與自動記錄的網址歷史（captureUrlHistory）分開。
     val captureBookmarks: Preference<String> = preferenceStore.getString("capture_bookmarks", "[]")
 
     companion object {

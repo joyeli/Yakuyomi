@@ -18,7 +18,6 @@ import cafe.adriel.voyager.navigator.tab.LocalTabNavigator
 import cafe.adriel.voyager.navigator.tab.TabOptions
 import eu.kanade.core.preference.asState
 import eu.kanade.domain.base.BasePreferences
-import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.presentation.more.MoreScreen
 import eu.kanade.presentation.util.Tab
 import eu.kanade.tachiyomi.R
@@ -31,16 +30,12 @@ import eu.kanade.tachiyomi.ui.home.HomeScreen
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.setting.SettingsScreen
 import eu.kanade.tachiyomi.ui.stats.StatsScreen
-import eu.kanade.tachiyomi.ui.webview.WebViewScreen
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 import mihon.feature.support.SupportUsScreen
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.domain.translation.service.TranslationPreferences
@@ -92,16 +87,8 @@ data object MoreTab : Tab {
             onClickSettings = { navigator.push(SettingsScreen()) },
             onClickSupport = { navigator.push(SupportUsScreen()) },
             onClickAbout = { navigator.push(SettingsScreen(SettingsScreen.Destination.About)) },
-            // Yakuyomi：通用 WebView 入口——不綁 source（sourceId=null → 用 WebView 預設 UA）。
-            onOpenUrlInWebView = { url ->
-                navigator.push(WebViewScreen(url = url, initialTitle = null, sourceId = null))
-            },
             // Yakuyomi：擷取漫畫入口（截 WebView 頁 → 存 LocalSource）。
             onOpenCapture = { navigator.push(CaptureScreen()) },
-            // Yakuyomi：網址輸入歷史（帶出歷史清單 + 逐筆刪除）。
-            webViewUrlHistoryProvider = { screenModel.webViewUrlHistory() },
-            onAddWebViewUrl = { screenModel.addWebViewUrl(it) },
-            onRemoveWebViewUrl = { screenModel.removeWebViewUrl(it) },
         )
     }
 }
@@ -112,30 +99,10 @@ private class MoreScreenModel(
     preferences: BasePreferences = Injekt.get(),
     translationPreferences: TranslationPreferences = Injekt.get(),
     private val readerPreferences: ReaderPreferences = Injekt.get(),
-    private val uiPreferences: UiPreferences = Injekt.get(),
 ) : ScreenModel {
 
     var downloadedOnly by preferences.downloadedOnly.asState(screenModelScope)
     var incognitoMode by preferences.incognitoMode.asState(screenModelScope)
-
-    // Yakuyomi：「以 WebView 開啟網址」的輸入歷史——存進 UiPreferences 的 JSON 字串陣列（仿 browseSnapshot 模式）。
-    private val webViewUrlJson = Json { ignoreUnknownKeys = true }
-
-    /** 讀出歷史清單（最近的在最前）；解析失敗回空清單。 */
-    fun webViewUrlHistory(): List<String> = uiPreferences.lastWebViewUrls.get()
-        .let { raw -> runCatching { webViewUrlJson.decodeFromString<List<String>>(raw) }.getOrElse { emptyList() } }
-
-    /** 記錄一筆網址：移除既有同值 → 加到最前 → 截斷上限。存正規化後（含 https://）的完整 URL。 */
-    fun addWebViewUrl(url: String) {
-        val updated = (listOf(url) + webViewUrlHistory().filterNot { it == url }).take(MAX_WEBVIEW_URL_HISTORY)
-        uiPreferences.lastWebViewUrls.set(webViewUrlJson.encodeToString(updated))
-    }
-
-    /** 逐筆刪除歷史中的某筆網址。 */
-    fun removeWebViewUrl(url: String) {
-        val updated = webViewUrlHistory().filterNot { it == url }
-        uiPreferences.lastWebViewUrls.set(webViewUrlJson.encodeToString(updated))
-    }
 
     // Yakuyomi：墨水屏一鍵——切換時把一組 reader 設定一次套上/還原（灰階／白底／換頁閃白／關動畫）。
     var einkMode by preferences.einkMode.asState(screenModelScope)
@@ -196,9 +163,6 @@ private class MoreScreenModel(
         }
     }
 }
-
-// Yakuyomi：WebView 網址輸入歷史保留上限。
-private const val MAX_WEBVIEW_URL_HISTORY = 20
 
 sealed interface DownloadQueueState {
     data object Stopped : DownloadQueueState

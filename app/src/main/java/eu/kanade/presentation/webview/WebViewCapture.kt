@@ -13,7 +13,7 @@ import android.view.Window
 import android.webkit.WebView
 
 // Yakuyomi：WebView 截圖工具（B0 spike 從 WebViewScreenContent 抽出成模組內共用）。
-// 供「截這頁」預覽（WebViewScreenContent）與「擷取漫畫→存 local」（CaptureScreen）共用同一套截圖邏輯。
+// 目前唯一使用者＝「擷取漫畫→存 local」（CaptureScreen）；舊 WebView 畫面的「截這頁」過渡入口已移除。
 
 /**
  * 從 Compose 的 [Context] 往上找 [Activity]（PixelCopy 需要 Activity 的 window）。

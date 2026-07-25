@@ -1,6 +1,5 @@
 package eu.kanade.presentation.webview
 
-import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.graphics.Bitmap
 import android.os.Message
@@ -10,26 +9,19 @@ import android.webkit.JsResult
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -41,9 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.unit.dp
@@ -60,23 +50,12 @@ import eu.kanade.presentation.components.AppBarActions
 import eu.kanade.presentation.components.WarningBanner
 import eu.kanade.tachiyomi.BuildConfig
 import eu.kanade.tachiyomi.R
-import eu.kanade.tachiyomi.util.storage.getUriCompat
 import eu.kanade.tachiyomi.util.system.getHtml
 import eu.kanade.tachiyomi.util.system.setDefaultSettings
-import eu.kanade.tachiyomi.util.system.toShareIntent
-import eu.kanade.tachiyomi.util.system.toast
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import tachiyomi.core.common.i18n.stringResource as contextStringResource
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.i18n.stringResource
-import java.io.File
-import java.io.FileOutputStream
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 class WebViewWindow(webContent: WebContent, val navigator: WebViewNavigator) {
     var state by mutableStateOf(WebViewState(webContent))
@@ -115,14 +94,11 @@ fun WebViewScreenContent(
     val navigator = currentWindow.navigator
 
     val uriHandler = LocalUriHandler.current
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
     var currentUrl by remember { mutableStateOf(url) }
     var showCloudflareHelp by remember { mutableStateOf(false) }
     var isActive by remember { mutableStateOf(true) }
-    // Yakuyomi B0 spike：截圖預覽結果（bitmap + 已存檔）；非 null 時彈預覽對話框。
-    var captureResult by remember { mutableStateOf<CaptureResult?>(null) }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -240,26 +216,6 @@ fun WebViewScreenContent(
         return webView
     }
 
-    // Yakuyomi B0 spike：截當前 WebView → 存檔 → 彈預覽對話框。首選 PixelCopy（抓合成後像素、含硬體加速
-    // 層），失敗退回 webView.draw(Canvas)。截到全黑/空白＝該來源（canvas/DRM）截不到——這正是要驗的。
-    fun captureCurrentPage() {
-        val webView = currentWindow.webView
-        val window = context.findActivity()?.window
-        captureWebView(webView, window) { bitmap ->
-            if (bitmap == null) {
-                context.toast(context.contextStringResource(MR.strings.webview_capture_failed))
-                return@captureWebView
-            }
-            scope.launch {
-                val file = withContext(Dispatchers.IO) {
-                    runCatching { saveCapture(context, bitmap) }.getOrNull()
-                }
-                file?.let { context.toast(it.absolutePath) }
-                captureResult = CaptureResult(bitmap, file)
-            }
-        }
-    }
-
     val popState = remember<() -> Unit> {
         {
             if (windowStack.size == 1) {
@@ -307,11 +263,6 @@ fun WebViewScreenContent(
                                     AppBar.OverflowAction(
                                         title = stringResource(MR.strings.action_webview_refresh),
                                         onClick = { navigator.reload() },
-                                    ),
-                                    // Yakuyomi B0 spike：截這頁（驗 WebView 截得到圖還是空白）
-                                    AppBar.OverflowAction(
-                                        title = stringResource(MR.strings.action_capture_page),
-                                        onClick = { captureCurrentPage() },
                                     ),
                                     AppBar.OverflowAction(
                                         title = stringResource(MR.strings.action_share),
@@ -426,73 +377,4 @@ fun WebViewScreenContent(
             )
         }
     }
-
-    // Yakuyomi B0 spike：截圖預覽對話框——顯示截到的 bitmap（限高可捲）+ 分享 / 關閉。
-    captureResult?.let { result ->
-        val dismiss: () -> Unit = {
-            captureResult = null
-            if (!result.bitmap.isRecycled) result.bitmap.recycle()
-        }
-        AlertDialog(
-            onDismissRequest = dismiss,
-            title = { Text(stringResource(MR.strings.webview_capture_dialog_title)) },
-            text = {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 400.dp)
-                        .verticalScroll(rememberScrollState()),
-                ) {
-                    Image(
-                        bitmap = result.bitmap.asImageBitmap(),
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        result.file?.let { file ->
-                            try {
-                                context.startActivity(
-                                    file.getUriCompat(context).toShareIntent(context, type = "image/png"),
-                                )
-                            } catch (e: Exception) {
-                                context.toast(e.message)
-                            }
-                        }
-                    },
-                    enabled = result.file != null,
-                ) {
-                    Text(stringResource(MR.strings.action_share))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = dismiss) {
-                    Text(stringResource(MR.strings.action_close))
-                }
-            },
-        )
-    }
-}
-
-/**
- * Yakuyomi B0 spike：截圖結果快照（供預覽對話框）。
- */
-private class CaptureResult(val bitmap: Bitmap, val file: File?)
-
-// findActivity() / captureWebView() 已抽到模組內共用的 WebViewCapture.kt（同 package，internal）。
-
-/**
- * Yakuyomi B0 spike：把截圖存到 getExternalFilesDir("captures")（免權限、檔案管理看得到）下
- * capture_<yyyyMMdd_HHmmss>.png。外部儲存不可用時退到內部 filesDir/captures（兩者皆在 FileProvider 白名單）。
- */
-private fun saveCapture(context: Context, bitmap: Bitmap): File {
-    val dir = context.getExternalFilesDir("captures")
-        ?: File(context.filesDir, "captures").also { it.mkdirs() }
-    val name = "capture_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date()) + ".png"
-    val file = File(dir, name)
-    FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-    return file
 }
