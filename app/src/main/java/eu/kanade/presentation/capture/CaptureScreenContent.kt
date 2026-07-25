@@ -24,6 +24,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,7 +44,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.ZeroCornerSize
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -51,18 +52,22 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
+import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.CollectionsBookmark
 import androidx.compose.material.icons.outlined.ContentCut
 import androidx.compose.material.icons.outlined.Crop
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Public
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Remove
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.StarBorder
@@ -75,6 +80,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -89,6 +95,7 @@ import androidx.compose.material3.TooltipAnchorPosition
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults.rememberTooltipPositionProvider
 import androidx.compose.material3.rememberTooltipState
+import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -107,6 +114,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -116,6 +124,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -130,6 +139,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.kevinnzou.web.AccompanistWebViewClient
+import com.kevinnzou.web.LoadingState
 import com.kevinnzou.web.WebContent
 import com.kevinnzou.web.WebView
 import com.kevinnzou.web.WebViewNavigator
@@ -197,8 +207,10 @@ private const val TAP_DEFAULT_Y = 0.9f
 // 底部「本話頁數」輸入格的寬度：只吃 4 位數字，窄到不撐爆底部 bar。
 private val TARGET_PAGES_FIELD_WIDTH = 64.dp
 
-// 頁面設定 panel 最高高度（加了自動翻頁一整段後可能超過一屏 → 內部可捲）。
-private val PAGE_PANEL_MAX_HEIGHT = 420.dp
+// 頁面設定 panel 最高高度＝**螢幕高度的比例**（內部可捲）。
+// ★ 2026-07 改：原本硬寫 420dp，一般手機上就是「大半個螢幕」——調畫布寬度時滑桿在最上面、但下面整片 panel 把
+// 重排後的網頁蓋住，看不到自己在調什麼。壓到半屏以下（0.45）＝滑桿一定在上緣、底下露得出畫面。
+private const val PAGE_PANEL_MAX_HEIGHT_FRACTION = 0.45f
 
 // 「加入最愛」對話框的別名預設草稿：取網址 host（去掉 www.）當好記名字；取不到就退回整串網址。
 private fun defaultBookmarkAlias(url: String): String =
@@ -275,6 +287,90 @@ private fun CaptureToolbarIconButton(
     ) {
         IconButton(onClick = onClick, enabled = enabled, content = icon)
     }
+}
+
+/**
+ * 浮動元件的底色（工具列 / panel / overlay 提示列 / 動作列共用）。
+ *
+ * ★ 2026-07 統一：原本每個 Surface 各自寫 `surfaceContainerHigh.copy(0.92f)` + `shapes.large` + shadow 3dp，
+ * 與 fork 自家其它浮動 UI（[eu.kanade.presentation.library.components.FloatingSearchBar]、
+ * [eu.kanade.presentation.browse.components.BrowseSourceFloatingControls]＝`extraLarge` + shadow 6dp）
+ * 以及 reader 疊層（[eu.kanade.presentation.reader.appbars.ReaderAppBars]＝`surfaceColorAtElevation(3dp)` +
+ * **明暗兩段** alpha）都對不上。這裡取兩者的併集：reader 的配色（明暗各自調 alpha ⇒ 深色不會太透、
+ * 淺色不會太糊）＋ 浮動 UI 的形狀與陰影。**仍是半透明**——看得見底下的網頁是本工具的原意。
+ */
+@Composable
+private fun captureBarSurfaceColor(): Color = MaterialTheme.colorScheme
+    .surfaceColorAtElevation(3.dp)
+    .copy(alpha = if (isSystemInDarkTheme()) 0.90f else 0.95f)
+
+/**
+ * 擷取畫面上所有浮動 Surface 的統一外觀（配方見 [captureBarSurfaceColor]）。
+ *
+ * [contentColor] 一律明確指定 `onSurface`：Surface 的預設 contentColor 走 `contentColorFor(color)`，
+ * 帶 alpha 的顏色比對不到色票 → 退回 `LocalContentColor`（可能是純黑），icon/文字會失色。
+ * 傳了顯式 `color` 之後 `tonalElevation` 不再影響底色（色階已烘進 [captureBarSurfaceColor]），故不傳。
+ */
+@Composable
+private fun CaptureBarSurface(
+    modifier: Modifier = Modifier,
+    color: Color = captureBarSurfaceColor(),
+    contentColor: Color = MaterialTheme.colorScheme.onSurface,
+    shape: Shape = MaterialTheme.shapes.extraLarge,
+    content: @Composable () -> Unit,
+) {
+    Surface(
+        modifier = modifier,
+        color = color,
+        contentColor = contentColor,
+        shape = shape,
+        shadowElevation = 6.dp,
+        content = content,
+    )
+}
+
+/**
+ * 三個全螢幕拖曳模式（封面框選 / 去頭去尾裁切 / 點擊位置設定）共用的頂部說明列。
+ *
+ * ★ 2026-07 統一：三者原本頂部只有一行提示、且提示內容與樣式各自為政，進到畫面時不知道自己在哪個模式。
+ * 現在一律「**模式名稱**（labelLarge）+ 一行提示（bodySmall）」，底部動作列的順序也統一（見各呼叫端）。
+ */
+@Composable
+private fun CaptureModeHeader(
+    title: String,
+    hint: String,
+    modifier: Modifier = Modifier,
+) {
+    CaptureBarSurface(modifier = modifier) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                text = hint,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * 「頁面設定」panel 的段落小標（同一個 panel 裡有 8 組控件、原本只靠一條無標題 divider 分段）。
+ */
+@Composable
+private fun CaptureSectionLabel(
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = modifier,
+    )
 }
 
 /**
@@ -461,6 +557,8 @@ fun CaptureScreenContent(
     var siteSetting by remember { mutableStateOf(CaptureSiteSetting()) }
     // 「頁面設定」panel（畫布寬度滑桿 + 裁切設定入口）展開與否。
     var pagePanelExpanded by remember { mutableStateOf(false) }
+    // 該 panel 的「進階」段落是否展開（自動修邊 / 點擊延遲）：transient 本地狀態、不寫 pref。
+    var pagePanelAdvanced by remember { mutableStateOf(false) }
     // 畫布寬度%（滑桿當前值；50–100）。
     // ★ 2026-07 改法（舊 setInitialScale 作廢，見 [canvasFraction]）：這個值**直接決定 WebView view 的佈局寬度**
     // ⇒ 拖曳即時生效、不 reload。放開滑桿（或 −/＋）才 commit 進 pref 做逐站記憶。
@@ -934,13 +1032,14 @@ fun CaptureScreenContent(
         }
     }
 
-    // 浮動 bar 半透明底：讓文字可讀又不完全擋住 WebView。
-    // 用 surfaceContainerHigh（＝app 內其他 bar／對話框的抬升面色）而非 surface——深色主題下 surface 幾乎純黑、
-    // 浮在 WebView 上像一塊黑膠帶；surfaceContainerHigh 與全域介面同一套色階，風格一致又看得出是工具列。
-    val barColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f)
-    // 明確指定內容色：Surface 的預設 contentColor 走 contentColorFor(color)，帶 alpha 的顏色比對不到色票
-    // → 退回 LocalContentColor（可能是純黑），icon/文字會失色；直接給 onSurface 最穩。
+    // 浮動元件的底色 / 內容色。所有浮動 bar / panel / overlay 一律走 [CaptureBarSurface]（統一形狀 + 陰影 +
+    // 明暗兩段 alpha，配方見 [captureBarSurfaceColor]）；這兩個值只留給**不能直接用**那個 helper 的兩處：
+    // ① 連續擷取提示剛存完一頁時要換成主色（需要拿預設色當 else 分支）② 底部「本話頁數」的 BasicTextField
+    // 要拿內容色當文字色 / 游標色。
+    val barColor = captureBarSurfaceColor()
     val barContentColor = MaterialTheme.colorScheme.onSurface
+    // 「頁面設定」panel 的最高高度＝螢幕高度的一小半（見 [PAGE_PANEL_MAX_HEIGHT_FRACTION]）。
+    val pagePanelMaxHeight = (LocalConfiguration.current.screenHeightDp * PAGE_PANEL_MAX_HEIGHT_FRACTION).dp
 
     Box(
         modifier = Modifier
@@ -1093,207 +1192,222 @@ fun CaptureScreenContent(
                         .statusBarsPadding()
                         .padding(8.dp),
                 ) {
-                    Surface(
-                        color = barColor,
-                        contentColor = barContentColor,
-                        shape = MaterialTheme.shapes.large,
-                        shadowElevation = 3.dp,
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 4.dp, vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            // 1) 返回（單張模式＝取消回確認面板，其餘＝關掉整個擷取畫面）
-                            CaptureToolbarIconButton(
-                                tooltip = stringResource(MR.strings.action_close),
-                                onClick = { if (singleShotMode) onSingleShotCancel() else onNavigateUp() },
+                    CaptureBarSurface {
+                        Column {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.Close,
-                                    contentDescription = stringResource(MR.strings.action_close),
-                                )
-                            }
-                            // 2) 瀏覽（永遠可用；toggle 瀏覽 panel，開時關掉其他 panel 免過高）
-                            CaptureToolbarIconButton(
-                                tooltip = stringResource(MR.strings.capture_browse),
-                                onClick = {
-                                    browseExpanded = !browseExpanded
-                                    if (browseExpanded) {
-                                        mangaPanelExpanded = false
-                                        chapterPanelExpanded = false
-                                        pagePanelExpanded = false
-                                    }
-                                },
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.Public,
-                                    contentDescription = stringResource(MR.strings.capture_browse),
-                                    tint = if (browseExpanded) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        LocalContentColor.current
-                                    },
-                                )
-                            }
-                            if (!singleShotMode) {
-                                if (continuousRunning) {
-                                    // 連續中：紅色停止 + 進度「已截 N 頁」（隱藏新漫畫/新話數，翻頁自動截）。
-                                    CaptureToolbarIconButton(
-                                        tooltip = stringResource(MR.strings.capture_continuous_stop),
-                                        onClick = { toggleContinuous() },
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Filled.Stop,
-                                            contentDescription = stringResource(MR.strings.capture_continuous_stop),
-                                            tint = MaterialTheme.colorScheme.error,
-                                        )
-                                    }
-                                    Text(
-                                        // 有填本話頁數＝「已截 5/16 頁」，沒填＝維持原本的「已截 N 頁」。
-                                        text = if (capturedTarget != null) {
-                                            stringResource(
-                                                MR.strings.capture_continuous_count_target,
-                                                capturedCount,
-                                                capturedTarget,
-                                            )
-                                        } else {
-                                            stringResource(MR.strings.capture_continuous_count, capturedCount)
-                                        },
-                                        style = MaterialTheme.typography.bodyMedium,
+                                // 1) 返回（單張模式＝取消回確認面板，其餘＝關掉整個擷取畫面）
+                                CaptureToolbarIconButton(
+                                    tooltip = stringResource(MR.strings.action_close),
+                                    onClick = { if (singleShotMode) onSingleShotCancel() else onNavigateUp() },
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Close,
+                                        contentDescription = stringResource(MR.strings.action_close),
                                     )
-                                } else {
-                                    // 3) 新漫畫（S1：有網址才解鎖）：toggle 書名 panel
-                                    CaptureToolbarIconButton(
-                                        tooltip = stringResource(MR.strings.capture_new_manga),
-                                        onClick = {
-                                            mangaPanelExpanded = !mangaPanelExpanded
-                                            if (mangaPanelExpanded) {
-                                                browseExpanded = false
-                                                chapterPanelExpanded = false
-                                                pagePanelExpanded = false
-                                            }
-                                        },
-                                        enabled = canNewManga,
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Outlined.CollectionsBookmark,
-                                            contentDescription = stringResource(MR.strings.capture_new_manga),
-                                            // disabled 時 IconButton 已把 LocalContentColor 換成灰階弱化色。
-                                            tint = if (mangaPanelExpanded) {
-                                                MaterialTheme.colorScheme.primary
-                                            } else {
-                                                LocalContentColor.current
-                                            },
-                                        )
-                                    }
-                                    // 4) 新話數（S2：書名非空才解鎖）：toggle 話數 panel
-                                    CaptureToolbarIconButton(
-                                        tooltip = stringResource(MR.strings.capture_new_chapter),
-                                        onClick = {
-                                            chapterPanelExpanded = !chapterPanelExpanded
-                                            if (chapterPanelExpanded) {
-                                                browseExpanded = false
-                                                mangaPanelExpanded = false
-                                                pagePanelExpanded = false
-                                            }
-                                        },
-                                        enabled = canNewChapter,
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Outlined.Edit,
-                                            contentDescription = stringResource(MR.strings.capture_new_chapter),
-                                            tint = if (chapterPanelExpanded) {
-                                                MaterialTheme.colorScheme.primary
-                                            } else {
-                                                LocalContentColor.current
-                                            },
-                                        )
-                                    }
-                                    // 5) 開始（S3：書名 + 章名皆非空才解鎖）
-                                    CaptureToolbarIconButton(
-                                        tooltip = stringResource(MR.strings.capture_continuous_start),
-                                        onClick = { toggleContinuous() },
-                                        enabled = canStart,
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Outlined.PlayArrow,
-                                            contentDescription = stringResource(MR.strings.capture_continuous_start),
-                                        )
-                                    }
-                                    // 6) 頁面設定（逐站的畫布寬度% + 去頭去尾裁切）：要有網址（host 是設定的 key）。
-                                    CaptureToolbarIconButton(
-                                        tooltip = stringResource(MR.strings.capture_page_settings),
-                                        onClick = {
-                                            pagePanelExpanded = !pagePanelExpanded
-                                            if (pagePanelExpanded) {
-                                                browseExpanded = false
-                                                mangaPanelExpanded = false
-                                                chapterPanelExpanded = false
-                                            }
-                                        },
-                                        enabled = hasUrl,
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Outlined.Tune,
-                                            contentDescription = stringResource(MR.strings.capture_page_settings),
-                                            tint = if (pagePanelExpanded) {
-                                                MaterialTheme.colorScheme.primary
-                                            } else {
-                                                LocalContentColor.current
-                                            },
-                                        )
-                                    }
                                 }
-                            }
-                            // ★ 常駐顯示「會存到哪本 · 哪話」（2026-07 補）：書名/話數以前只活在 panel 草稿裡，
-                            // panel 一關就看不見 → 截錯話要到確認頁才發現，且那些頁已經寫進舊章夾了。
-                            // 佔用原本的 weight(1f) 空位、單行 ellipsize（不撐爆工具列）；連續中與「已截 N/M 頁」並存。
-                            // 點一下開「新話數」panel（書名通常一設定就固定、每次要換的是話數；要改書名走左邊的圖示）。
-                            val targetLabel = when {
-                                singleShotMode || bookName.isBlank() -> ""
-                                chapterName.isBlank() -> bookName
-                                else -> stringResource(MR.strings.capture_current_target, bookName, chapterName)
-                            }
-                            if (targetLabel.isEmpty()) {
-                                Spacer(modifier = Modifier.weight(1f))
-                            } else {
-                                Text(
-                                    text = targetLabel,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    textAlign = TextAlign.End,
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clip(MaterialTheme.shapes.small)
-                                        // 連續擷取中 panel 不會顯示（見下方各 panel 的 !continuousRunning gate）
-                                        // → 那時純顯示、不吃點擊。
-                                        .then(
-                                            if (continuousRunning) {
-                                                Modifier
+                                // 2) 瀏覽（永遠可用；toggle 瀏覽 panel，開時關掉其他 panel 免過高）
+                                CaptureToolbarIconButton(
+                                    tooltip = stringResource(MR.strings.capture_browse),
+                                    onClick = {
+                                        browseExpanded = !browseExpanded
+                                        if (browseExpanded) {
+                                            mangaPanelExpanded = false
+                                            chapterPanelExpanded = false
+                                            pagePanelExpanded = false
+                                        }
+                                    },
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Public,
+                                        contentDescription = stringResource(MR.strings.capture_browse),
+                                        tint = if (browseExpanded) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            LocalContentColor.current
+                                        },
+                                    )
+                                }
+                                if (!singleShotMode) {
+                                    if (continuousRunning) {
+                                        // 連續中：紅色停止 + 進度「已截 N 頁」（隱藏新漫畫/新話數，翻頁自動截）。
+                                        CaptureToolbarIconButton(
+                                            tooltip = stringResource(MR.strings.capture_continuous_stop),
+                                            onClick = { toggleContinuous() },
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Filled.Stop,
+                                                contentDescription = stringResource(MR.strings.capture_continuous_stop),
+                                                tint = MaterialTheme.colorScheme.error,
+                                            )
+                                        }
+                                        Text(
+                                            // 有填本話頁數＝「已截 5/16 頁」，沒填＝維持原本的「已截 N 頁」。
+                                            text = if (capturedTarget != null) {
+                                                stringResource(
+                                                    MR.strings.capture_continuous_count_target,
+                                                    capturedCount,
+                                                    capturedTarget,
+                                                )
                                             } else {
-                                                Modifier.clickable {
-                                                    chapterPanelExpanded = true
+                                                stringResource(MR.strings.capture_continuous_count, capturedCount)
+                                            },
+                                            style = MaterialTheme.typography.bodyMedium,
+                                        )
+                                    } else {
+                                        // 3) 新漫畫（S1：有網址才解鎖）：toggle 書名 panel
+                                        CaptureToolbarIconButton(
+                                            tooltip = stringResource(MR.strings.capture_new_manga),
+                                            onClick = {
+                                                mangaPanelExpanded = !mangaPanelExpanded
+                                                if (mangaPanelExpanded) {
+                                                    browseExpanded = false
+                                                    chapterPanelExpanded = false
+                                                    pagePanelExpanded = false
+                                                }
+                                            },
+                                            enabled = canNewManga,
+                                        ) {
+                                            Icon(
+                                                // 「新漫畫」＝這一本書（書名 / 封面 / 來源網址）。原本與「我的最愛」共用
+                                                // CollectionsBookmark，但那顆 icon 在 app 內**專指書櫃**（BrowseBadges /
+                                                // SettingsMainScreen）→ 改用未被佔用的 MenuBook：語意是「一本書」，
+                                                // 與隔壁「新話數」的 Edit 搭起來讀作「這本書 / 這一話」。
+                                                // （不用 LibraryAdd＝那會撞 mihon 既有的「加入書櫃」動作語意。）
+                                                imageVector = Icons.AutoMirrored.Outlined.MenuBook,
+                                                contentDescription = stringResource(MR.strings.capture_new_manga),
+                                                // disabled 時 IconButton 已把 LocalContentColor 換成灰階弱化色。
+                                                tint = if (mangaPanelExpanded) {
+                                                    MaterialTheme.colorScheme.primary
+                                                } else {
+                                                    LocalContentColor.current
+                                                },
+                                            )
+                                        }
+                                        // 4) 新話數（S2：書名非空才解鎖）：toggle 話數 panel
+                                        CaptureToolbarIconButton(
+                                            tooltip = stringResource(MR.strings.capture_new_chapter),
+                                            onClick = {
+                                                chapterPanelExpanded = !chapterPanelExpanded
+                                                if (chapterPanelExpanded) {
                                                     browseExpanded = false
                                                     mangaPanelExpanded = false
                                                     pagePanelExpanded = false
                                                 }
                                             },
-                                        )
-                                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                                )
+                                            enabled = canNewChapter,
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.Edit,
+                                                contentDescription = stringResource(MR.strings.capture_new_chapter),
+                                                tint = if (chapterPanelExpanded) {
+                                                    MaterialTheme.colorScheme.primary
+                                                } else {
+                                                    LocalContentColor.current
+                                                },
+                                            )
+                                        }
+                                        // 5) 開始（S3：書名 + 章名皆非空才解鎖）
+                                        CaptureToolbarIconButton(
+                                            tooltip = stringResource(MR.strings.capture_continuous_start),
+                                            onClick = { toggleContinuous() },
+                                            enabled = canStart,
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.PlayArrow,
+                                                contentDescription = stringResource(MR.strings.capture_continuous_start),
+                                            )
+                                        }
+                                        // 6) 頁面設定（逐站的畫布寬度% + 去頭去尾裁切）：要有網址（host 是設定的 key）。
+                                        CaptureToolbarIconButton(
+                                            tooltip = stringResource(MR.strings.capture_page_settings),
+                                            onClick = {
+                                                pagePanelExpanded = !pagePanelExpanded
+                                                if (pagePanelExpanded) {
+                                                    browseExpanded = false
+                                                    mangaPanelExpanded = false
+                                                    chapterPanelExpanded = false
+                                                }
+                                            },
+                                            enabled = hasUrl,
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.Tune,
+                                                contentDescription = stringResource(MR.strings.capture_page_settings),
+                                                tint = if (pagePanelExpanded) {
+                                                    MaterialTheme.colorScheme.primary
+                                                } else {
+                                                    LocalContentColor.current
+                                                },
+                                            )
+                                        }
+                                    }
+                                }
+                                // ★ 常駐顯示「會存到哪本 · 哪話」（2026-07 補）：書名/話數以前只活在 panel 草稿裡，
+                                // panel 一關就看不見 → 截錯話要到確認頁才發現，且那些頁已經寫進舊章夾了。
+                                // 佔用原本的 weight(1f) 空位、單行 ellipsize（不撐爆工具列）；連續中與「已截 N/M 頁」並存。
+                                // 點一下開「新話數」panel（書名通常一設定就固定、每次要換的是話數；要改書名走左邊的圖示）。
+                                val targetLabel = when {
+                                    singleShotMode || bookName.isBlank() -> ""
+                                    chapterName.isBlank() -> bookName
+                                    else -> stringResource(MR.strings.capture_current_target, bookName, chapterName)
+                                }
+                                if (targetLabel.isEmpty()) {
+                                    Spacer(modifier = Modifier.weight(1f))
+                                } else {
+                                    Text(
+                                        text = targetLabel,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        textAlign = TextAlign.End,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(MaterialTheme.shapes.small)
+                                            // 連續擷取中 panel 不會顯示（見下方各 panel 的 !continuousRunning gate）
+                                            // → 那時純顯示、不吃點擊。
+                                            .then(
+                                                if (continuousRunning) {
+                                                    Modifier
+                                                } else {
+                                                    Modifier.clickable {
+                                                        chapterPanelExpanded = true
+                                                        browseExpanded = false
+                                                        mangaPanelExpanded = false
+                                                        pagePanelExpanded = false
+                                                    }
+                                                },
+                                            )
+                                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                                    )
+                                }
+                                // 收起工具列（清爽看漫畫；截圖本就不含 overlay，收起純為視覺）。
+                                CaptureToolbarIconButton(
+                                    tooltip = stringResource(MR.strings.capture_toolbar_hide),
+                                    onClick = { toolbarExpanded = false },
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.UnfoldLess,
+                                        contentDescription = stringResource(MR.strings.capture_toolbar_hide),
+                                    )
+                                }
                             }
-                            // 收起工具列（清爽看漫畫；截圖本就不含 overlay，收起純為視覺）。
-                            CaptureToolbarIconButton(
-                                tooltip = stringResource(MR.strings.capture_toolbar_hide),
-                                onClick = { toolbarExpanded = false },
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.UnfoldLess,
-                                    contentDescription = stringResource(MR.strings.capture_toolbar_hide),
+                            // 網頁載入進度（★ 2026-07 補）：全螢幕 WebView + 浮動工具列的版面沒有系統瀏覽器的載入指示，
+                            // 慢站按了「前往」後畫面完全沒動靜、分不出是還在載還是點錯。寫法沿用 WebViewScreenContent，
+                            // 位置改成貼在工具列下緣（Surface 內最後一列）⇒ 隨工具列一起收起、也一起在截圖時消失。
+                            when (val loading = state.loadingState) {
+                                is LoadingState.Initializing -> LinearProgressIndicator(
+                                    modifier = Modifier.fillMaxWidth(),
                                 )
+                                is LoadingState.Loading -> LinearProgressIndicator(
+                                    progress = { loading.progress },
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                                else -> {}
                             }
                         }
                     }
@@ -1303,12 +1417,7 @@ fun CaptureScreenContent(
                     // 連續中 / 單張模式不顯示（那時沒有「下一步」可言）。
                     if (!singleShotMode && !continuousRunning && !canStart) {
                         Spacer(modifier = Modifier.height(6.dp))
-                        Surface(
-                            color = barColor,
-                            contentColor = barContentColor,
-                            shape = MaterialTheme.shapes.large,
-                            shadowElevation = 3.dp,
-                        ) {
+                        CaptureBarSurface {
                             Text(
                                 text = when {
                                     !hasUrl -> stringResource(MR.strings.capture_next_step_browse)
@@ -1324,12 +1433,7 @@ fun CaptureScreenContent(
                     // 瀏覽 panel：網址列（X 清除 + 前往）+ 上一頁/下一頁 + 歷史 + 清除 Cookie。
                     if (browseExpanded) {
                         Spacer(modifier = Modifier.height(6.dp))
-                        Surface(
-                            color = barColor,
-                            contentColor = barContentColor,
-                            shape = MaterialTheme.shapes.large,
-                            shadowElevation = 3.dp,
-                        ) {
+                        CaptureBarSurface {
                             Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
                                 // 我的最愛快選（置頂、最多 [BROWSE_BOOKMARK_PREVIEW] 筆，panel 不爆版）：每筆＝別名（主）
                                 // + 網址（次要小字，ellipsis）；點一筆＝載入並收 panel、右側叉叉＝移除。完整清單（含大量）
@@ -1379,7 +1483,7 @@ fun CaptureScreenContent(
                                             Spacer(modifier = Modifier.width(8.dp))
                                             IconButton(onClick = { bookmarkDeleteTarget = bm }) {
                                                 Icon(
-                                                    imageVector = Icons.Outlined.Close,
+                                                    imageVector = Icons.Outlined.Delete,
                                                     contentDescription = stringResource(MR.strings.action_delete),
                                                 )
                                             }
@@ -1445,6 +1549,14 @@ fun CaptureScreenContent(
                                             contentDescription = stringResource(MR.strings.action_webview_forward),
                                         )
                                     }
+                                    // 重新整理：漫畫站常見圖片載一半 / 前一頁殘留 → 沒有重載鍵時只能用網址列重打。
+                                    // 走 navigator.reload()（不是 loadUrl）⇒ state.content 不變、不觸發回灌，WebView 常駐不受影響。
+                                    IconButton(onClick = { navigator.reload() }) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Refresh,
+                                            contentDescription = stringResource(MR.strings.action_webview_refresh),
+                                        )
+                                    }
                                     // 我的最愛：開全屏清單（管理大量最愛；先重讀 pref 取最新）。
                                     IconButton(
                                         onClick = {
@@ -1453,7 +1565,9 @@ fun CaptureScreenContent(
                                         },
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Outlined.CollectionsBookmark,
+                                            // 我的最愛全屏入口：與清單裡每一列的 Star 統一（原本這裡是
+                                            // CollectionsBookmark＝書櫃專用 icon、跟列內的 Star 對不起來）。
+                                            imageVector = Icons.Outlined.Star,
                                             contentDescription = stringResource(MR.strings.capture_bookmarks),
                                         )
                                     }
@@ -1486,12 +1600,7 @@ fun CaptureScreenContent(
                     // 封面框選 / 記錄書籍網址 / 書櫃「繼續擷取」入口留階段 3。
                     if (mangaPanelExpanded && !singleShotMode && !continuousRunning) {
                         Spacer(modifier = Modifier.height(6.dp))
-                        Surface(
-                            color = barColor,
-                            contentColor = barContentColor,
-                            shape = MaterialTheme.shapes.large,
-                            shadowElevation = 3.dp,
-                        ) {
+                        CaptureBarSurface {
                             Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
                                 OutlinedTextField(
                                     value = bookDraft,
@@ -1609,12 +1718,7 @@ fun CaptureScreenContent(
                     // 重截/插入與連續進行中不顯示。
                     if (chapterPanelExpanded && !singleShotMode && !continuousRunning) {
                         Spacer(modifier = Modifier.height(6.dp))
-                        Surface(
-                            color = barColor,
-                            contentColor = barContentColor,
-                            shape = MaterialTheme.shapes.large,
-                            shadowElevation = 3.dp,
-                        ) {
+                        CaptureBarSurface {
                             Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
                                 // ① 已截話數總覽：掃 <local>/<書名>/ 下的話夾名稱（讓使用者知道這本截過哪些話）。
                                 Text(
@@ -1704,29 +1808,31 @@ fun CaptureScreenContent(
                     // 兩者都以當前網址的 host 為 key 記住，換到該站自動套用。
                     if (pagePanelExpanded && !singleShotMode && !continuousRunning) {
                         Spacer(modifier = Modifier.height(6.dp))
-                        Surface(
-                            color = barColor,
-                            contentColor = barContentColor,
-                            shape = MaterialTheme.shapes.large,
-                            shadowElevation = 3.dp,
-                        ) {
+                        CaptureBarSurface {
                             Column(
                                 modifier = Modifier
                                     .padding(horizontal = 8.dp, vertical = 8.dp)
-                                    // 加了自動翻頁一整段後可能超過一屏 → panel 內部可捲（不擠爆版面）。
-                                    .heightIn(max = PAGE_PANEL_MAX_HEIGHT)
+                                    // 半屏以下、內部可捲：調畫布寬度時底下還看得到網頁重排（見
+                                    // [PAGE_PANEL_MAX_HEIGHT_FRACTION]）。
+                                    .heightIn(max = pagePanelMaxHeight)
                                     .verticalScroll(rememberScrollState()),
                             ) {
                                 // 這組設定套用在哪一站（讓使用者知道是逐站記憶、不是全域）。
+                                // 樣式降成次要小字：labelLarge 已保留給下面的**段落小標**，兩者同級會看不出層次。
                                 Text(
                                     text = stringResource(
                                         MR.strings.capture_site_settings_for,
                                         siteHost.orEmpty(),
                                     ),
-                                    style = MaterialTheme.typography.labelLarge,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
+
+                                // ── 段落①：畫面 / 裁切 ────────────────────────────────────────────
+                                Spacer(modifier = Modifier.height(6.dp))
+                                CaptureSectionLabel(text = stringResource(MR.strings.capture_section_canvas))
 
                                 // ① 畫布寬度%：寬螢幕上 100%（滿版）會讓漫畫太高、一屏放不下 → 把**網頁畫布本身
                                 // 縮窄並置中**（左右對稱留白、透出畫面底色），網頁 responsive 重排後整頁變矮、
@@ -1829,43 +1935,16 @@ fun CaptureScreenContent(
                                     }
                                 }
 
-                                // ②-b 自動修邊（第二層裁切、逐頁動態、**預設開**）：固定裁切是照「正常頁」設的，
-                                // 遇到雙開頁（fit 寬度後高度只有一半）或彩頁/短頁時圖片下方會留一大片網站背景、
-                                // 反而把網站頁尾截進來 → 這個開關在固定裁切後把上下大片單色空白修掉。
-                                // 正常頁＝no-op（沒有大片空白就不動作），所以預設開著也安全。
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = stringResource(MR.strings.capture_auto_trim),
-                                            style = MaterialTheme.typography.labelLarge,
-                                        )
-                                        Text(
-                                            text = stringResource(MR.strings.capture_auto_trim_summary),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                    Switch(
-                                        checked = siteSetting.autoTrim,
-                                        onCheckedChange = { commitSiteSetting(siteSetting.copy(autoTrim = it)) },
-                                    )
-                                }
-
                                 // ③ 自動翻頁（逐站）：連續擷取存完一頁後自動點該站的「下一頁」→ 全自動擷取。
-                                // 開關 + 點擊位置 + 點擊延遲 + 本話頁數，全放這裡（都與「這一站怎麼截」同一組設定）。
+                                // ★ 2026-07：這一列本身就是**段落小標**（標題用段落色）＋總開關，底下才是這一段的細項；
+                                // 細項只留「點擊位置」（沒設就不會動作、非設不可），「點擊延遲」歸到最下面的「進階」。
                                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = stringResource(MR.strings.capture_autotap),
-                                            style = MaterialTheme.typography.labelLarge,
-                                        )
+                                        CaptureSectionLabel(text = stringResource(MR.strings.capture_autotap))
                                         Text(
                                             text = stringResource(MR.strings.capture_autotap_summary),
                                             style = MaterialTheme.typography.bodySmall,
@@ -1916,76 +1995,132 @@ fun CaptureScreenContent(
                                             )
                                         }
                                     }
+                                }
 
-                                    // 點擊延遲：存完一頁 → 等多久才點。太短會在頁面還沒載完就點、太長浪費時間。
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Text(
-                                            text = stringResource(MR.strings.capture_tap_delay),
-                                            style = MaterialTheme.typography.bodyMedium,
-                                        )
-                                        Spacer(modifier = Modifier.weight(1f))
-                                        Text(
-                                            text = "$tapDelayDraft ms",
-                                            style = MaterialTheme.typography.bodyMedium,
-                                        )
-                                    }
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        IconButton(
-                                            onClick = {
-                                                val next = (tapDelayDraft - CAPTURE_TAP_DELAY_STEP)
-                                                    .coerceIn(CAPTURE_TAP_DELAY_MIN, CAPTURE_TAP_DELAY_MAX)
-                                                tapDelayDraft = next
-                                                commitSiteSetting(siteSetting.copy(tapDelayMs = next))
-                                            },
-                                            enabled = tapDelayDraft > CAPTURE_TAP_DELAY_MIN,
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Outlined.Remove,
-                                                contentDescription = stringResource(
-                                                    MR.strings.capture_tap_delay_shorter,
-                                                ),
-                                            )
-                                        }
-                                        Slider(
-                                            value = tapDelayDraft.toFloat(),
-                                            onValueChange = { tapDelayDraft = it.roundToInt() },
-                                            onValueChangeFinished = {
-                                                commitSiteSetting(siteSetting.copy(tapDelayMs = tapDelayDraft))
-                                            },
-                                            valueRange = CAPTURE_TAP_DELAY_MIN.toFloat()..
-                                                CAPTURE_TAP_DELAY_MAX.toFloat(),
-                                            steps = (CAPTURE_TAP_DELAY_MAX - CAPTURE_TAP_DELAY_MIN) /
-                                                CAPTURE_TAP_DELAY_STEP - 1,
-                                            modifier = Modifier.weight(1f),
-                                        )
-                                        IconButton(
-                                            onClick = {
-                                                val next = (tapDelayDraft + CAPTURE_TAP_DELAY_STEP)
-                                                    .coerceIn(CAPTURE_TAP_DELAY_MIN, CAPTURE_TAP_DELAY_MAX)
-                                                tapDelayDraft = next
-                                                commitSiteSetting(siteSetting.copy(tapDelayMs = next))
-                                            },
-                                            enabled = tapDelayDraft < CAPTURE_TAP_DELAY_MAX,
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Outlined.Add,
-                                                contentDescription = stringResource(
-                                                    MR.strings.capture_tap_delay_longer,
-                                                ),
-                                            )
-                                        }
-                                    }
-                                    Text(
-                                        text = stringResource(MR.strings.capture_tap_delay_summary),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                // ── 進階（預設收合）─────────────────────────────────────────────────
+                                // 這個 panel 原本 8 組控件一路攤平、只靠一條無標題 divider 分段。把「一般使用者不必動」的兩項
+                                // （自動修邊＝預設開且正常頁 no-op、點擊延遲＝有預設值）收進來，作法比照設定頁的「顯示進階」；
+                                // 差別是這裡只用 panel 內的本地狀態（transient、不寫 pref）。
+                                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(MaterialTheme.shapes.small)
+                                        .clickable { pagePanelAdvanced = !pagePanelAdvanced }
+                                        .padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    CaptureSectionLabel(
+                                        text = stringResource(MR.strings.pref_category_advanced),
+                                        modifier = Modifier.weight(1f),
                                     )
+                                    Icon(
+                                        imageVector = if (pagePanelAdvanced) {
+                                            Icons.Outlined.ExpandLess
+                                        } else {
+                                            Icons.Outlined.ExpandMore
+                                        },
+                                        contentDescription = stringResource(MR.strings.pref_category_advanced),
+                                    )
+                                }
+
+                                if (pagePanelAdvanced) {
+                                    // ②-b 自動修邊（第二層裁切、逐頁動態、**預設開**）：固定裁切是照「正常頁」設的，
+                                    // 遇到雙開頁（fit 寬度後高度只有一半）或彩頁/短頁時圖片下方會留一大片網站背景、
+                                    // 反而把網站頁尾截進來 → 這個開關在固定裁切後把上下大片單色空白修掉。
+                                    // 正常頁＝no-op（沒有大片空白就不動作），所以預設開著也安全。
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = stringResource(MR.strings.capture_auto_trim),
+                                                style = MaterialTheme.typography.labelLarge,
+                                            )
+                                            Text(
+                                                text = stringResource(MR.strings.capture_auto_trim_summary),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                        Switch(
+                                            checked = siteSetting.autoTrim,
+                                            onCheckedChange = { commitSiteSetting(siteSetting.copy(autoTrim = it)) },
+                                        )
+                                    }
+
+                                    if (siteSetting.autoTap) {
+                                        // 點擊延遲：存完一頁 → 等多久才點。太短會在頁面還沒載完就點、太長浪費時間。
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Text(
+                                                text = stringResource(MR.strings.capture_tap_delay),
+                                                style = MaterialTheme.typography.bodyMedium,
+                                            )
+                                            Spacer(modifier = Modifier.weight(1f))
+                                            Text(
+                                                text = "$tapDelayDraft ms",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                            )
+                                        }
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            IconButton(
+                                                onClick = {
+                                                    val next = (tapDelayDraft - CAPTURE_TAP_DELAY_STEP)
+                                                        .coerceIn(CAPTURE_TAP_DELAY_MIN, CAPTURE_TAP_DELAY_MAX)
+                                                    tapDelayDraft = next
+                                                    commitSiteSetting(siteSetting.copy(tapDelayMs = next))
+                                                },
+                                                enabled = tapDelayDraft > CAPTURE_TAP_DELAY_MIN,
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Outlined.Remove,
+                                                    contentDescription = stringResource(
+                                                        MR.strings.capture_tap_delay_shorter,
+                                                    ),
+                                                )
+                                            }
+                                            Slider(
+                                                value = tapDelayDraft.toFloat(),
+                                                onValueChange = { tapDelayDraft = it.roundToInt() },
+                                                onValueChangeFinished = {
+                                                    commitSiteSetting(siteSetting.copy(tapDelayMs = tapDelayDraft))
+                                                },
+                                                valueRange = CAPTURE_TAP_DELAY_MIN.toFloat()..
+                                                    CAPTURE_TAP_DELAY_MAX.toFloat(),
+                                                steps = (CAPTURE_TAP_DELAY_MAX - CAPTURE_TAP_DELAY_MIN) /
+                                                    CAPTURE_TAP_DELAY_STEP - 1,
+                                                modifier = Modifier.weight(1f),
+                                            )
+                                            IconButton(
+                                                onClick = {
+                                                    val next = (tapDelayDraft + CAPTURE_TAP_DELAY_STEP)
+                                                        .coerceIn(CAPTURE_TAP_DELAY_MIN, CAPTURE_TAP_DELAY_MAX)
+                                                    tapDelayDraft = next
+                                                    commitSiteSetting(siteSetting.copy(tapDelayMs = next))
+                                                },
+                                                enabled = tapDelayDraft < CAPTURE_TAP_DELAY_MAX,
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Outlined.Add,
+                                                    contentDescription = stringResource(
+                                                        MR.strings.capture_tap_delay_longer,
+                                                    ),
+                                                )
+                                            }
+                                        }
+                                        Text(
+                                            text = stringResource(MR.strings.capture_tap_delay_summary),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
                                 }
                                 // ★「本話頁數」已從這個 panel 移到**底部細長 bar**（見下方 targetPagesBar）：
                                 // 這個 panel 很高、正好蓋住網站頁面頂端的頁數顯示（如「2/16P」），使用者得關掉
@@ -2004,12 +2139,7 @@ fun CaptureScreenContent(
                             .navigationBarsPadding()
                             .padding(8.dp),
                     ) {
-                        Surface(
-                            color = barColor,
-                            contentColor = barContentColor,
-                            shape = MaterialTheme.shapes.large,
-                            shadowElevation = 3.dp,
-                        ) {
+                        CaptureBarSurface {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -2048,15 +2178,11 @@ fun CaptureScreenContent(
                 // 非單張（重截/插入）模式；並跟著「開始」一起解鎖（canStart）——頁數是按「開始」前才要填的東西，
                 // 還在瀏覽/設定書名的階段不必先擺出來。工具列收起時一併收起（＝乾淨看漫畫）。
                 if (!singleShotMode && !continuousRunning && canStart) {
-                    Surface(
+                    CaptureBarSurface(
                         modifier = Modifier
                             .align(Alignment.BottomStart)
                             .navigationBarsPadding()
                             .padding(8.dp),
-                        color = barColor,
-                        contentColor = barContentColor,
-                        shape = MaterialTheme.shapes.large,
-                        shadowElevation = 3.dp,
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
@@ -2114,16 +2240,17 @@ fun CaptureScreenContent(
                 // 取「貼右緣的小把手」而非圓鈕：48dp 圓鈕壓在漫畫右上角很搶眼，把手只有 32dp 寬、右側切齊螢幕邊
                 // （右側直角、左側圓角），視覺上像從邊緣拉出來的抽屜提把，不像可誤觸的主要動作；高度仍留 40dp
                 // 讓拇指好按。收起的目的就是「乾淨看漫畫」，這是最低調又找得到的作法。
-                Surface(
+                CaptureBarSurface(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .statusBarsPadding()
                         .padding(top = 8.dp)
                         .size(width = 32.dp, height = 40.dp),
-                    color = barColor,
-                    contentColor = barContentColor,
-                    shape = RoundedCornerShape(topStart = 12.dp, bottomStart = 12.dp),
-                    shadowElevation = 3.dp,
+                    // 右側切齊螢幕邊＝右邊兩角直角、左邊沿用統一圓角（衍生寫法對照 MangaBottomActionMenu）。
+                    shape = MaterialTheme.shapes.extraLarge.copy(
+                        topEnd = ZeroCornerSize,
+                        bottomEnd = ZeroCornerSize,
+                    ),
                 ) {
                     Box(
                         modifier = Modifier
@@ -2147,7 +2274,7 @@ fun CaptureScreenContent(
             // 此期間 model 暫停偵測（見 startContinuous 的 CAPTURE_PAUSE_MS）——閃爍剛好發生在使用者看提示時。
             if (continuousRunning && !singleShotMode) {
                 val justCaptured = justCapturedPage
-                Surface(
+                CaptureBarSurface(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .navigationBarsPadding()
@@ -2162,8 +2289,6 @@ fun CaptureScreenContent(
                     } else {
                         barContentColor
                     },
-                    shape = MaterialTheme.shapes.large,
-                    shadowElevation = 3.dp,
                 ) {
                     // 自動翻頁開著時提示改成「自動翻頁中」（不必叫使用者翻頁）；有填本話頁數就顯示 X/N。
                     val autoTurning = siteSetting.autoTapReady
@@ -2363,40 +2488,40 @@ fun CaptureScreenContent(
                     }
                 }
 
-                // 頂部提示：拖曳框選封面範圍。
-                Surface(
+                // 頂部：模式名稱 + 一行提示（三個全螢幕拖曳模式共用骨架，見 [CaptureModeHeader]）。
+                CaptureModeHeader(
+                    title = stringResource(MR.strings.capture_select_cover),
+                    hint = stringResource(MR.strings.capture_cover_crop_hint),
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .statusBarsPadding()
                         .padding(8.dp),
-                    color = barColor,
-                    contentColor = barContentColor,
-                    shape = MaterialTheme.shapes.large,
-                    shadowElevation = 3.dp,
-                ) {
-                    Text(
-                        text = stringResource(MR.strings.capture_cover_crop_hint),
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                    )
-                }
+                )
 
-                // 底部動作：截取封面（有框才可按）/ 取消。
-                Surface(
+                // 底部動作：固定順序 **[取消] [次要] [主要]**（三個模式一致；原本封面把主要動作放最左，
+                // 與另外兩個剛好相反 ⇒ 最容易誤按而丟掉剛拖好的框）。
+                CaptureBarSurface(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .navigationBarsPadding()
                         .padding(8.dp),
-                    color = barColor,
-                    contentColor = barContentColor,
-                    shape = MaterialTheme.shapes.large,
-                    shadowElevation = 3.dp,
                 ) {
-                    Row(
+                    FlowRow(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
+                        TextButton(
+                            onClick = {
+                                coverCropMode = false
+                                cropStart = null
+                                cropEnd = null
+                            },
+                        ) {
+                            Text(text = stringResource(MR.strings.action_cancel))
+                        }
+                        // 主要動作**維持語意**叫「截取封面」而非統一成「儲存」：它會當場再截一張乾淨畫面再裁，
+                        // 叫「儲存」反而讓人以為只是把剛拖的框記起來。位置與層級（最右、實心 Button）已與另兩個模式一致。
                         Button(
                             onClick = { captureCover() },
                             enabled = cropStart != null && cropEnd != null,
@@ -2406,15 +2531,6 @@ fun CaptureScreenContent(
                                 text = stringResource(MR.strings.capture_cover_capture),
                                 modifier = Modifier.padding(start = 6.dp),
                             )
-                        }
-                        TextButton(
-                            onClick = {
-                                coverCropMode = false
-                                cropStart = null
-                                cropEnd = null
-                            },
-                        ) {
-                            Text(text = stringResource(MR.strings.action_cancel))
                         }
                     }
                 }
@@ -2510,56 +2626,38 @@ fun CaptureScreenContent(
                     }
                 }
 
-                // 頂部提示（含目前比例）。工具列類元件走全螢幕寬（不跟著畫布縮），自帶系統列 padding。
-                Surface(
+                // 頂部：模式名稱 + 一行提示（含目前比例）。工具列類元件走全螢幕寬（不跟著畫布縮），自帶系統列 padding。
+                CaptureModeHeader(
+                    title = stringResource(MR.strings.capture_crop_mode),
+                    hint = stringResource(
+                        MR.strings.capture_crop_hint,
+                        (cropTopDraft * 100).roundToInt(),
+                        (cropBottomDraft * 100).roundToInt(),
+                    ),
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .statusBarsPadding()
                         .padding(8.dp),
-                    color = barColor,
-                    contentColor = barContentColor,
-                    shape = MaterialTheme.shapes.large,
-                    shadowElevation = 3.dp,
-                ) {
-                    Text(
-                        text = stringResource(
-                            MR.strings.capture_crop_hint,
-                            (cropTopDraft * 100).roundToInt(),
-                            (cropBottomDraft * 100).roundToInt(),
-                        ),
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                    )
-                }
+                )
 
-                // 底部動作：自動偵測 / 儲存 / 不裁切 / 取消。
-                Surface(
+                // 底部動作：固定順序 **[取消] [次要：自動偵測 · 不裁切] [主要：儲存]**（原本「自動偵測」佔最左、
+                // 儲存夾在中間，與另外兩個模式對不起來）。
+                CaptureBarSurface(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .navigationBarsPadding()
                         .padding(8.dp),
-                    color = barColor,
-                    contentColor = barContentColor,
-                    shape = MaterialTheme.shapes.large,
-                    shadowElevation = 3.dp,
                 ) {
                     FlowRow(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
+                        TextButton(onClick = { cropSetupMode = false }) {
+                            Text(text = stringResource(MR.strings.action_cancel))
+                        }
                         OutlinedButton(onClick = { autoDetectCrop() }, enabled = !cropAutoBusy) {
                             Text(text = stringResource(MR.strings.capture_crop_auto))
-                        }
-                        Button(
-                            onClick = {
-                                commitSiteSetting(
-                                    siteSetting.copy(cropTop = cropTopDraft, cropBottom = cropBottomDraft),
-                                )
-                                cropSetupMode = false
-                            },
-                        ) {
-                            Text(text = stringResource(MR.strings.action_save))
                         }
                         TextButton(
                             onClick = {
@@ -2571,8 +2669,15 @@ fun CaptureScreenContent(
                         ) {
                             Text(text = stringResource(MR.strings.capture_crop_clear))
                         }
-                        TextButton(onClick = { cropSetupMode = false }) {
-                            Text(text = stringResource(MR.strings.action_cancel))
+                        Button(
+                            onClick = {
+                                commitSiteSetting(
+                                    siteSetting.copy(cropTop = cropTopDraft, cropBottom = cropBottomDraft),
+                                )
+                                cropSetupMode = false
+                            },
+                        ) {
+                            Text(text = stringResource(MR.strings.action_save))
                         }
                     }
                 }
@@ -2668,51 +2773,34 @@ fun CaptureScreenContent(
                     }
                 }
 
-                // 頂部提示（含目前比例）。工具列類元件走全螢幕寬（不跟著畫布縮），自帶系統列 padding。
-                Surface(
+                // 頂部：模式名稱 + 一行提示（含目前比例）。工具列類元件走全螢幕寬（不跟著畫布縮），自帶系統列 padding。
+                CaptureModeHeader(
+                    title = stringResource(MR.strings.capture_tap_point_setup),
+                    hint = stringResource(
+                        MR.strings.capture_tap_point_hint,
+                        (tapXDraft * 100).roundToInt(),
+                        (tapYDraft * 100).roundToInt(),
+                    ),
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .statusBarsPadding()
                         .padding(8.dp),
-                    color = barColor,
-                    contentColor = barContentColor,
-                    shape = MaterialTheme.shapes.large,
-                    shadowElevation = 3.dp,
-                ) {
-                    Text(
-                        text = stringResource(
-                            MR.strings.capture_tap_point_hint,
-                            (tapXDraft * 100).roundToInt(),
-                            (tapYDraft * 100).roundToInt(),
-                        ),
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                    )
-                }
+                )
 
-                // 底部動作：儲存 / 清除位置 / 取消。
-                Surface(
+                // 底部動作：固定順序 **[取消] [次要：清除位置] [主要：儲存]**（與另外兩個拖曳模式一致）。
+                CaptureBarSurface(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .navigationBarsPadding()
                         .padding(8.dp),
-                    color = barColor,
-                    contentColor = barContentColor,
-                    shape = MaterialTheme.shapes.large,
-                    shadowElevation = 3.dp,
                 ) {
                     FlowRow(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        Button(
-                            onClick = {
-                                commitSiteSetting(siteSetting.copy(tapX = tapXDraft, tapY = tapYDraft))
-                                tapSetupMode = false
-                            },
-                        ) {
-                            Text(text = stringResource(MR.strings.action_save))
+                        TextButton(onClick = { tapSetupMode = false }) {
+                            Text(text = stringResource(MR.strings.action_cancel))
                         }
                         TextButton(
                             onClick = {
@@ -2722,8 +2810,13 @@ fun CaptureScreenContent(
                         ) {
                             Text(text = stringResource(MR.strings.capture_tap_point_clear))
                         }
-                        TextButton(onClick = { tapSetupMode = false }) {
-                            Text(text = stringResource(MR.strings.action_cancel))
+                        Button(
+                            onClick = {
+                                commitSiteSetting(siteSetting.copy(tapX = tapXDraft, tapY = tapYDraft))
+                                tapSetupMode = false
+                            },
+                        ) {
+                            Text(text = stringResource(MR.strings.action_save))
                         }
                     }
                 }
@@ -2850,7 +2943,7 @@ fun CaptureScreenContent(
                                                 },
                                             ) {
                                                 Icon(
-                                                    imageVector = Icons.Outlined.Close,
+                                                    imageVector = Icons.Outlined.Delete,
                                                     contentDescription = stringResource(MR.strings.action_delete),
                                                 )
                                             }
@@ -2912,7 +3005,7 @@ fun CaptureScreenContent(
                                             Spacer(modifier = Modifier.width(8.dp))
                                             IconButton(onClick = { bookmarkDeleteTarget = bm }) {
                                                 Icon(
-                                                    imageVector = Icons.Outlined.Close,
+                                                    imageVector = Icons.Outlined.Delete,
                                                     contentDescription = stringResource(MR.strings.action_delete),
                                                 )
                                             }

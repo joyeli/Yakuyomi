@@ -36,6 +36,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -49,7 +50,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
@@ -62,6 +62,7 @@ import eu.kanade.tachiyomi.ui.capture.CaptureReviewState
 import eu.kanade.tachiyomi.ui.capture.CaptureSaveError
 import eu.kanade.tachiyomi.ui.capture.CaptureStopReason
 import tachiyomi.i18n.MR
+import tachiyomi.presentation.core.components.Badge
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.components.material.padding
 import tachiyomi.presentation.core.i18n.stringResource
@@ -417,33 +418,33 @@ private fun ReviewGridItem(
             )
         }
 
-        // 左上角順序標號 001/002…（半透明底、白字）。
-        Text(
+        // 左上角順序標號 001/002…。★ 2026-07 改：原本是硬寫的 `Color.Black.copy(0.55f)` 底 + `Color.White` 字，
+        // 淺色主題下像一塊黑膠帶、完全不隨主題。改用 app 自家的 [Badge]（同 LibraryBadges 的封面徽章）：
+        // 配色走 secondary/onSecondary ⇒ 明暗主題自動對；這裡是一般全螢幕（Scaffold + AppBar），沒有「必須硬寫黑白」的理由。
+        Badge(
             text = "%03d".format(number),
-            color = Color.White,
-            style = MaterialTheme.typography.labelSmall,
+            shape = MaterialTheme.shapes.small,
             modifier = Modifier
                 .align(Alignment.TopStart)
-                .padding(4.dp)
-                .clip(MaterialTheme.shapes.small)
-                .background(Color.Black.copy(alpha = 0.55f))
-                .padding(horizontal = 6.dp, vertical = 2.dp),
+                .padding(4.dp),
         )
 
-        // 右上角勾選框（管批次刪除）：與右下重截 icon 完全對稱（同款黑底方塊 + 28dp），三角落大小一致。
+        // 右上角勾選框（管批次刪除）：與右下重截 icon 完全對稱（同款底 + 28dp），三角落大小一致。
+        // ★ 底色改 `surface` 半透明 + 前景走 [LocalContentColor]（作法對照 ReaderLiveTranslateIndicator 的疊層）：
+        // 疊在縮圖上仍夠對比，但明暗主題各自正確，不再是黑底白字。
         IconButton(
             onClick = onToggle,
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .padding(2.dp)
                 .clip(MaterialTheme.shapes.small)
-                .background(Color.Black.copy(alpha = 0.55f))
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.75f))
                 .size(28.dp),
         ) {
             Icon(
                 imageVector = if (selected) Icons.Filled.CheckBox else Icons.Outlined.CheckBoxOutlineBlank,
                 contentDescription = null,
-                tint = Color.White,
+                tint = LocalContentColor.current,
                 modifier = Modifier.size(18.dp),
             )
         }
@@ -455,13 +456,13 @@ private fun ReviewGridItem(
                 .align(Alignment.BottomEnd)
                 .padding(2.dp)
                 .clip(MaterialTheme.shapes.small)
-                .background(Color.Black.copy(alpha = 0.55f))
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.75f))
                 .size(28.dp),
         ) {
             Icon(
                 imageVector = Icons.Outlined.Refresh,
                 contentDescription = stringResource(MR.strings.capture_recapture_action, number),
-                tint = Color.White,
+                tint = LocalContentColor.current,
                 modifier = Modifier.size(18.dp),
             )
         }

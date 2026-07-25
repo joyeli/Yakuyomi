@@ -361,10 +361,12 @@
     <!-- Yakuyomi：擷取的逐站設定（畫布寬度% + 去頭去尾裁切） -->
     <string name="capture_page_settings">頁面設定</string>
     <string name="capture_site_settings_for">%1$s 的設定</string>
+    <string name="capture_section_canvas">畫面 / 裁切</string>
     <string name="capture_canvas_width">畫布寬度</string>
     <string name="capture_canvas_narrower">縮小</string>
     <string name="capture_canvas_wider">放大</string>
     <string name="capture_crop_setup">裁切</string>
+    <string name="capture_crop_mode">去頭去尾裁切</string>
     <string name="capture_crop_none">未設定裁切</string>
     <string name="capture_crop_current">裁切：上 %1$d%% · 下 %2$d%%</string>
     <string name="capture_crop_hint">拖曳兩條線去掉頭尾（上 %1$d%% · 下 %2$d%%）</string>
