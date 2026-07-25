@@ -52,9 +52,10 @@ Yakuyomi 是 [mihon](https://github.com/mihonapp/mihon) 的 fork，邊下載 / �
 
 <div align="center">
 <img src="./.github/assets/yakuyomi-capture-auto.gif" alt="全自動擷取：內建瀏覽器自己翻頁，每張穩定下來的畫面自動存檔，頁數一頁一頁往上跳" height="440" hspace="6"/>
-<img src="./.github/assets/yakuyomi-capture-review.gif" alt="擷取確認：3 欄縮圖網格，儲存成一話前可刪頁、重截、插頁" height="440" hspace="6"/>
+<img src="./.github/assets/yakuyomi-capture-review.gif" alt="擷取確認：3 欄縮圖網格，儲存後就成為書庫裡可以直接翻閱的一話" height="440" hspace="6"/>
+<img src="./.github/assets/yakuyomi-capture-setup.gif" alt="逐站設定：畫布寬度滑桿、可拖曳的上下裁切線，以及把準心拖到該站「下一頁」按鈕的位置" height="440" hspace="6"/>
 <br>
-<sub><b>全自動擷取</b>——瀏覽器自己翻頁、每張穩定下來的畫面自動存檔——以及成為一話前的<b>確認網格</b>：刪頁、重截、插頁。</sub>
+<sub><b>全自動擷取</b>——瀏覽器自己翻頁、每張穩定下來的畫面自動存檔；成為一話前的<b>確認網格</b>可以刪頁、重截、插頁；以及<b>逐站設定</b>：畫布寬度、裁切線、點哪裡翻頁。</sub>
 </div>
 
 **閱讀器**

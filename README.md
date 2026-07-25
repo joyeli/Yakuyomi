@@ -52,9 +52,10 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 
 <div align="center">
 <img src="./.github/assets/yakuyomi-capture-auto.gif" alt="Automatic capture: the built-in browser turns the page by itself, each settled page is saved, and the counter climbs page by page" height="440" hspace="6"/>
-<img src="./.github/assets/yakuyomi-capture-review.gif" alt="Capture review: a three-column grid of captured page thumbnails, with delete, re-capture and insert before saving the chapter" height="440" hspace="6"/>
+<img src="./.github/assets/yakuyomi-capture-review.gif" alt="Capture review: a three-column grid of captured page thumbnails, then saving turns them into a chapter that opens in the library" height="440" hspace="6"/>
+<img src="./.github/assets/yakuyomi-capture-setup.gif" alt="Per-site setup: canvas width slider, draggable trim lines for the header and footer, and dragging the crosshair onto the page's next-page button" height="440" hspace="6"/>
 <br>
-<sub><b>Hands-free capture</b> — the browser turns the page, every settled frame is saved — and a <b>review grid</b> to delete, re-capture or insert pages before they become a chapter.</sub>
+<sub><b>Hands-free capture</b> — the browser turns the page, every settled frame is saved — a <b>review grid</b> to fix things up before they become a chapter, and <b>per-site setup</b>: canvas width, trim lines, and where to tap to turn the page.</sub>
 </div>
 
 **Reader**
