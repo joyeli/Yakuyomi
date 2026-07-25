@@ -194,6 +194,15 @@ class TranslationPreferences(
     /** LLM 取樣溫度（0.0–1.0，預設 0.3）；對應引擎 TranslatorConfig.temperature。存字串、buildEngineConfig parse+clamp（對齊其餘數值參數）。 */
     val temperature = preferenceStore.getString("translation_temperature", "0.3")
 
+    /**
+     * 思考模式（reasoning，預設 **關**）；對應引擎 TranslatorConfig.thinking。
+     *
+     * 各家新世代模型多半預設就會思考，但「逐行照翻」這種結構化任務從中得到的好處很小，卻明顯更慢、token 數倍（更貴）
+     * ⇒ 預設關＝復刻舊 deepseek-chat 的非思考行為。欄位形狀 per-provider（thinking / reasoning_effort /
+     * enable_thinking / reasoning），由引擎 `LlmProviders.requestParams` 映射；並非每家都能完全關閉。
+     */
+    val thinking = preferenceStore.getBoolean("translation_thinking", false)
+
     companion object {
         // ⚠️ 與引擎 TranslatorConfig.toLangName / fromLangName 預設「逐字一致」（引擎＝真理來源）。
         //   鏡像而非共用：本類在 :domain，:domain 不依賴引擎（只 :app 依賴）→ 不能 import 引擎常數。

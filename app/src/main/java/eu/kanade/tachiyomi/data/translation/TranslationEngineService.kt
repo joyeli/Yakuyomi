@@ -248,6 +248,7 @@ class TranslationEngineService(private val context: Context) {
             p.model.get(),
             p.apiBase.get(),
             p.temperature.get(),
+            p.thinking.get().toString(), // 思考模式（per-provider 參數映射）→ 換了要重建才會套用
             p.targetLangName.get(), // 也決定要不要清掉引擎內建 few-shot
             p.sourceLangName.get(),
             // —— 偵測（DetectorConfig）——

@@ -1139,6 +1139,8 @@
     <string name="pref_translation_tate_chu_yoko_summary">直排時把連續短 ASCII 串（2–4 字的數字/字母，或「!?」）在一格內水平並排，年齡「20」或「!?」不再上下堆疊歪頭讀。只影響直排內的 ASCII、CJK 不變。</string>
     <string name="pref_translation_temperature">LLM 溫度</string>
     <string name="pref_translation_temperature_desc">LLM 取樣溫度；0.0–1.0。低（往 0）＝更一致、更貼字直譯；高（往 1）＝更靈活但可能偏離原意。多數人不用動</string>
+    <string name="pref_translation_thinking">思考模式</string>
+    <string name="pref_translation_thinking_summary">讓模型先思考再回答。預設關閉：多數新模型預設會思考，但逐行翻譯漫畫從中得到的好處很小，卻會明顯變慢、token 用量數倍（更貴）。譯文品質明顯不足時再開。並非每家都能完全關閉（OpenAI o 系列只能降到最低，Gemini 3 系與 Groq GPT-OSS 只能調低）。</string>
     <string name="pref_translation_group_diagnostics">診斷（進階）</string>
     <string name="pref_translation_diagnostic_log">診斷紀錄</string>
     <string name="pref_translation_diagnostic_log_summary">把翻譯引擎各階段記錄到私有檔案，用來抓 logcat 與內建 crash log 都抓不到的原生或記憶體不足（OOM）閃退。會影響效能，只在需要診斷時開啟。</string>

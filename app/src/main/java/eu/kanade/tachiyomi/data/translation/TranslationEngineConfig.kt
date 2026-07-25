@@ -237,6 +237,8 @@ object TranslationEngineConfig {
             toLangName = target,
             fromLangName = prefs.sourceLangName.get(),
             temperature = temperature,
+            // 思考模式（預設關）：欄位形狀 per-provider，由引擎 LlmProviders.requestParams 映射。
+            thinking = prefs.thinking.get(),
         )
         if (target != TranslationPreferences.DEFAULT_TARGET_LANG) {
             translatorCfg = translatorCfg.copy(sampleSource = "", sampleTarget = "")

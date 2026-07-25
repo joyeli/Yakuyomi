@@ -555,6 +555,13 @@ object SettingsTranslationScreen : SearchableSettings {
                         stringResource(MR.strings.pref_translation_temperature_desc) + curSuffix,
                         advBadge,
                     ),
+                    // 思考模式（預設關）：逐行翻譯從思考得到的好處小、卻明顯變慢又貴。改了會讓引擎重建（簽章有納入）。
+                    Preference.PreferenceItem.SwitchPreference(
+                        preference = prefs.thinking,
+                        title = stringResource(MR.strings.pref_translation_thinking),
+                        subtitle = stringResource(MR.strings.pref_translation_thinking_summary),
+                        titleBadge = advBadge,
+                    ).takeIf { showAdvanced },
                 ).toImmutableList(),
             ),
             // —— 語言 ——
