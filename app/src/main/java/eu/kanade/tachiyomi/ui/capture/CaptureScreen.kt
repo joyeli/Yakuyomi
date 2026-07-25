@@ -4,6 +4,7 @@ import android.app.Application
 import android.graphics.Bitmap
 import android.graphics.Rect
 import android.net.Uri
+import android.os.SystemClock
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -97,14 +98,54 @@ const val CAPTURE_SCALE_STEP = 5
 // 裁切後最少要留幾 px 高（防呆：設定壞掉時寧可整張存、不要存出一條線）。
 private const val MIN_CROP_KEEP_PX = 32
 
+// ── 自動翻頁（連續擷取時模擬點擊網頁的「下一頁」）的可調常數 ──────────────────
+// 存完一頁 → 等多久才派送點擊（ms）。太短會在頁面還沒載完就點、太長浪費時間；逐站可調（見 [CaptureSiteSetting]）。
+const val CAPTURE_TAP_DELAY_MIN = 200
+const val CAPTURE_TAP_DELAY_MAX = 3000
+const val CAPTURE_TAP_DELAY_STEP = 100
+const val CAPTURE_TAP_DELAY_DEFAULT = 800
+
+// 派送點擊後再等多久還沒偵測到新頁，就判定「這次點擊沒作用」＝ tapDelay + 這個寬限（ms）。
+// 只有畫面**仍與上次截的那頁一模一樣**才算無效（載入中/尚未穩定的新頁會延長等待、不重點 → 免跳頁）。
+private const val CAPTURE_TAP_GRACE_MS = 3000L
+
+// 連續幾次點擊都沒讓畫面換頁就自動停止（到最後一頁 / 位置點錯 / 頁數填錯時的保險，避免無限空轉）。
+private const val CAPTURE_MAX_IDLE_TAPS = 2
+
+/**
+ * 自動翻頁的點擊派送器：連續擷取存完一頁（或補點）時由 model 呼叫，回 true＝已派送。
+ * 實作在畫面層（[eu.kanade.presentation.capture.CaptureScreenContent]）——需要 WebView 的**本地座標**
+ * 與主執行緒，且**只用 `dispatchTouchEvent`、不注入 JS、不碰 DOM**（本工具的護欄）。
+ */
+typealias PageTapper = suspend () -> Boolean
+
+/**
+ * 開始連續擷取的呼叫（畫面層 → model）：比較幀 / 乾淨幀 / 網址讀取器 /
+ * 本話頁數（選填，null＝不設上限）/ 點擊延遲（ms）/ 自動翻頁點擊器（null＝不自動翻頁）。
+ */
+typealias StartContinuous = (
+    compareGrabber: FrameGrabber,
+    cleanGrabber: FrameGrabber,
+    urlProvider: () -> String?,
+    targetPages: Int?,
+    tapDelayMs: Int,
+    autoTap: PageTapper?,
+) -> Unit
+
 /**
  * 連續截圖狀態：是否進行中 + 本 session 已截頁數（給 UI 顯示「已截 N 頁」）+
  * [justCapturedPage]＝剛存下的頁碼（非 null 時 UI 顯示「已擷取第 N 頁 · 請翻下一頁」提示，[CAPTURE_PAUSE_MS] 後回 null）。
+ *
+ * [targetPages]＝本話頁數（使用者選填，null＝沒設）：有值時 UI 顯示「已截 5/16 頁」、截滿即自動停止。
+ * [autoStopped]＝迴圈**自己**停下來了（截滿頁數 / 連續點擊沒反應），畫面層據此比照按停止進確認頁；
+ * 消費後要呼叫 [CaptureScreenModel.consumeAutoStop] 歸零（一次性事件）。
  */
 data class ContinuousCaptureState(
     val running: Boolean = false,
     val count: Int = 0,
     val justCapturedPage: Int? = null,
+    val targetPages: Int? = null,
+    val autoStopped: Boolean = false,
 )
 
 /**
@@ -194,6 +235,15 @@ class CaptureScreen(
             }
         }
 
+        // 連續擷取的**自動**停止（截滿本話頁數 / 連續點擊沒反應）＝比照按停止：進確認模式帶 sessionPages。
+        // 一次性事件：切完模式即 consume 歸零，免 recomposition 重複觸發。
+        LaunchedEffect(continuous.autoStopped) {
+            if (continuous.autoStopped) {
+                enterReview()
+                screenModel.consumeAutoStop()
+            }
+        }
+
         val target = reCaptureTarget
         val insert = insertTarget
 
@@ -222,6 +272,8 @@ class CaptureScreen(
             },
             continuousRunning = continuous.running,
             capturedCount = continuous.count,
+            // 本話頁數（使用者選填）：有值時進度顯示「已截 5/16 頁」。
+            capturedTarget = continuous.targetPages,
             justCapturedPage = continuous.justCapturedPage,
             onStartContinuous = screenModel::startContinuous,
             onStopContinuous = screenModel::stopContinuous,
@@ -313,19 +365,36 @@ data class InsertTarget(
  *   `<meta name="viewport">` 在 `useWideViewPort` 下勝出）＝已移除，詳見 CaptureScreenContent 的 `canvasFraction`。
  * - [cropTop] / [cropBottom]＝**存檔前**從畫面上/下各裁掉多少，單位是**佔畫面高度的比例 0.0–1.0**
  *   （存比例不存像素 → 換解析度 / 旋轉 / 摺疊展開都適用）。0＝不裁。
+ * - [autoTap] / [tapX] / [tapY] / [tapDelayMs]＝**自動翻頁**：連續擷取存完一頁後，隔 [tapDelayMs] 由畫面層
+ *   對 WebView 派送一次模擬點擊（[PageTapper]），點在該站「下一頁」按鈕上 → 全自動連續擷取。
+ *   座標同樣**存比例 0.0–1.0**（佔 WebView 寬/高），null＝還沒設定過位置（此時開關即使開著也不會點）。
+ *   ★ 只用 `dispatchTouchEvent`（等同使用者自己點那裡），不注入 JS、不讀 DOM。
  */
 data class CaptureSiteSetting(
     val scale: Int = CAPTURE_SCALE_MAX,
     val cropTop: Float = 0f,
     val cropBottom: Float = 0f,
+    val autoTap: Boolean = false,
+    val tapX: Float? = null,
+    val tapY: Float? = null,
+    val tapDelayMs: Int = CAPTURE_TAP_DELAY_DEFAULT,
 ) {
-    /** 全預設（沒縮放、沒裁切）＝不必寫進 pref。 */
+    /** 全預設（沒縮放、沒裁切、沒自動翻頁）＝不必寫進 pref。 */
     val isDefault: Boolean
-        get() = scale >= CAPTURE_SCALE_MAX && cropTop <= 0f && cropBottom <= 0f
+        get() = scale >= CAPTURE_SCALE_MAX && cropTop <= 0f && cropBottom <= 0f &&
+            !autoTap && tapX == null && tapY == null && tapDelayMs == CAPTURE_TAP_DELAY_DEFAULT
 
     /** 有裁切設定（存檔時要動刀）。 */
     val hasCrop: Boolean
         get() = cropTop > 0f || cropBottom > 0f
+
+    /** 設定過點擊位置（兩軸皆有值）＝自動翻頁才點得下去。 */
+    val hasTapPoint: Boolean
+        get() = tapX != null && tapY != null
+
+    /** 這一站現在真的會自動翻頁（開關開著 ＋ 位置已設）。 */
+    val autoTapReady: Boolean
+        get() = autoTap && hasTapPoint
 }
 
 /** 網址 → 逐站設定的 key：小寫 host、去掉 `www.`；空白 / about:blank / 解析不到 host ⇒ null。 */
@@ -500,16 +569,23 @@ class CaptureScreenModel(
         if (setting.isDefault) map.remove(host) else map[host] = setting
         val obj = JSONObject()
         map.forEach { (h, s) ->
-            obj.put(
-                h,
-                JSONObject()
-                    .put("scale", s.scale)
-                    .put("cropTop", s.cropTop.toDouble())
-                    .put("cropBottom", s.cropBottom.toDouble()),
-            )
+            val o = JSONObject()
+                .put("scale", s.scale)
+                .put("cropTop", s.cropTop.toDouble())
+                .put("cropBottom", s.cropBottom.toDouble())
+                .put("autoTap", s.autoTap)
+                .put("tapDelayMs", s.tapDelayMs)
+            // 位置沒設定過就整個 key 不寫（讀回來＝null＝未設定，與「設在 0,0」區分得開）。
+            s.tapX?.let { o.put("tapX", it.toDouble()) }
+            s.tapY?.let { o.put("tapY", it.toDouble()) }
+            obj.put(h, o)
         }
         uiPreferences.captureSiteSettings.set(obj.toString())
     }
+
+    /** 讀出比例座標欄位：沒有該 key / 值不在 0–1 ⇒ null（＝未設定）。 */
+    private fun JSONObject.optFraction(key: String): Float? =
+        if (has(key)) optDouble(key, -1.0).toFloat().takeIf { it in 0f..1f } else null
 
     private fun readSiteSettings(): Map<String, CaptureSiteSetting> = runCatching {
         val obj = JSONObject(uiPreferences.captureSiteSettings.get())
@@ -522,6 +598,11 @@ class CaptureScreenModel(
                         scale = o.optInt("scale", CAPTURE_SCALE_MAX).coerceIn(CAPTURE_SCALE_MIN, CAPTURE_SCALE_MAX),
                         cropTop = o.optDouble("cropTop", 0.0).toFloat().coerceIn(0f, 1f),
                         cropBottom = o.optDouble("cropBottom", 0.0).toFloat().coerceIn(0f, 1f),
+                        autoTap = o.optBoolean("autoTap", false),
+                        tapX = o.optFraction("tapX"),
+                        tapY = o.optFraction("tapY"),
+                        tapDelayMs = o.optInt("tapDelayMs", CAPTURE_TAP_DELAY_DEFAULT)
+                            .coerceIn(CAPTURE_TAP_DELAY_MIN, CAPTURE_TAP_DELAY_MAX),
                     ),
                 )
             }
@@ -681,21 +762,47 @@ class CaptureScreenModel(
      *
      * 抓幀在主執行緒（PixelCopy 需 window）、比對在 [Dispatchers.Default]、存檔在 IO（[saveCapture] 內建）。
      * [urlProvider] 在主執行緒讀當前 WebView 網址（供每張截圖記進整章 meta）；取不到＝null（不記）。
+     *
+     * ★ 自動翻頁（[autoTap] 非 null 時）：存完一頁、顯示完提示後 `delay(tapDelayMs)` → 派送一次模擬點擊
+     * （點在該站「下一頁」鈕）→ 回到上面的 frame-diff，新頁穩定就自動截下一張，全程免手動。
+     * **三重停止條件**（避免無限空轉）：
+     * ① 截滿 [targetPages]（使用者填的本話頁數，null＝不設上限）；
+     * ② 連續 [CAPTURE_MAX_IDLE_TAPS] 次點擊後畫面仍**與上次截的那頁一模一樣**（到最後一頁 / 位置點錯）；
+     * ③ 使用者按停止（[stopContinuous]，行為不變）。
+     * ①② 會把 [ContinuousCaptureState.autoStopped] 設 true，畫面層據此比照按停止進確認頁。
      */
     fun startContinuous(
         compareGrabber: FrameGrabber,
         cleanGrabber: FrameGrabber,
         urlProvider: () -> String?,
+        targetPages: Int? = null,
+        tapDelayMs: Int = CAPTURE_TAP_DELAY_DEFAULT,
+        autoTap: PageTapper? = null,
     ) {
         if (bookName.isBlank() || chapterName.isBlank()) return
         if (continuousJob?.isActive == true) return
+        val target = targetPages?.takeIf { it > 0 }
+        val tapDelay = tapDelayMs.coerceIn(CAPTURE_TAP_DELAY_MIN, CAPTURE_TAP_DELAY_MAX).toLong()
         continuousJob = screenModelScope.launch {
             var prev: IntArray? = null // 前一幀縮圖（判穩定）
             var lastCaptured: IntArray? = null // 上次已截那頁的縮圖（判換頁 + 去重）
             // 上次「抓了乾淨幀卻是空白/黑頁」而丟棄的畫面：同一張黑頁不再反覆抓乾淨幀（免無謂閃爍）。
             var lastRejected: IntArray? = null
+            // 自動翻頁：派送點擊後「還在等新頁」的截止時刻（null＝沒在等）＋連續無效點擊次數。
+            var tapDeadline: Long? = null
+            var idleTaps = 0
+            // 迴圈自己停下來（截滿頁數 / 點了沒反應）→ finally 把它落進 state 給畫面層進確認頁。
+            var autoStopped = false
             _sessionPages.clear()
-            _continuous.update { it.copy(running = true, count = 0, justCapturedPage = null) }
+            _continuous.update {
+                it.copy(
+                    running = true,
+                    count = 0,
+                    justCapturedPage = null,
+                    targetPages = target,
+                    autoStopped = false,
+                )
+            }
             try {
                 while (isActive) {
                     // ① 比較幀：不隱藏 overlay（零閃爍）。
@@ -710,6 +817,28 @@ class CaptureScreenModel(
                     val stable = prev?.let { mad(thumb, it) < STABLE_THRESHOLD } ?: false
                     val changed = lastCaptured?.let { mad(thumb, it) > CHANGE_THRESHOLD } ?: true
                     val notRejected = lastRejected?.let { mad(thumb, it) > CHANGE_THRESHOLD } ?: true
+
+                    // ★ 停止條件②：派送點擊後過了寬限還沒截到新頁。
+                    // 判準看 [changed]（與上次**已截**那頁比）：畫面確實還一模一樣才算「這次點擊沒作用」；
+                    // 若其實已經變了（新頁還在載 / 還沒穩定）就只延長等待、**絕不重點**（重點會直接跳掉一頁）。
+                    val deadline = tapDeadline
+                    if (autoTap != null && deadline != null && SystemClock.elapsedRealtime() > deadline) {
+                        if (changed) {
+                            tapDeadline = SystemClock.elapsedRealtime() + CAPTURE_TAP_GRACE_MS
+                        } else {
+                            idleTaps++
+                            if (idleTaps >= CAPTURE_MAX_IDLE_TAPS) {
+                                autoStopped = true
+                                break
+                            }
+                            // 還沒到上限＝再點一次（第一次可能剛好沒點中 / 頁面沒反應）。
+                            tapDeadline = dispatchAutoTap(autoTap, tapDelay)
+                            prev = null // 重點後重建穩定基準
+                            delay(CAPTURE_INTERVAL_MS)
+                            continue
+                        }
+                    }
+
                     if (!stable || !changed || !notRejected) {
                         prev = thumb
                         delay(CAPTURE_INTERVAL_MS)
@@ -741,28 +870,57 @@ class CaptureScreenModel(
                         _sessionPages.add(result.page)
                         lastCaptured = thumb // ★ 存比較幀縮圖（與比較基準一致）
                         lastRejected = null
-                        _continuous.update { it.copy(count = it.count + 1, justCapturedPage = result.page) }
+                        val captured = _continuous.value.count + 1
+                        _continuous.update { it.copy(count = captured, justCapturedPage = result.page) }
                         // ⑤ 暫停偵測 + 顯示「已擷取第 N 頁 · 請翻下一頁」；期間畫面可能被翻動 →
                         // prev 歸零，回去後重新建立穩定基準。
                         prev = null
+                        // 這一頁是真的翻過來的 ⇒ 自動翻頁的「無效點擊」計數歸零。
+                        tapDeadline = null
+                        idleTaps = 0
                         delay(CAPTURE_PAUSE_MS)
                         _continuous.update { it.copy(justCapturedPage = null) }
+                        // ★ 停止條件①：截滿使用者填的本話頁數 → 自動停（畫面層進確認頁）。
+                        if (target != null && captured >= target) {
+                            autoStopped = true
+                            break
+                        }
+                        // ★ 自動翻頁：延遲後派送點擊，之後交回上面的 frame-diff 偵測新頁。
+                        if (autoTap != null) {
+                            delay(tapDelay)
+                            tapDeadline = dispatchAutoTap(autoTap, tapDelay)
+                        }
                         continue
                     }
                     prev = thumb
                     delay(CAPTURE_INTERVAL_MS)
                 }
             } finally {
-                _continuous.update { it.copy(running = false, justCapturedPage = null) }
+                _continuous.update { it.copy(running = false, justCapturedPage = null, autoStopped = autoStopped) }
             }
         }
+    }
+
+    /**
+     * 派送一次自動翻頁點擊，回傳「等新頁」的截止時刻（[SystemClock.elapsedRealtime] 基準）。
+     * 派送失敗（WebView 還沒量到寬高）就不加 [tapDelay]，讓寬限更快到期 → 早一輪累進無效計數 → 早點自動停。
+     */
+    private suspend fun dispatchAutoTap(autoTap: PageTapper, tapDelay: Long): Long {
+        val tapped = autoTap()
+        return SystemClock.elapsedRealtime() + (if (tapped) tapDelay else 0L) + CAPTURE_TAP_GRACE_MS
     }
 
     /** 停止連續截圖（使用者按停止 / 畫面離開 / 生命週期 ON_STOP 都走這；idempotent）。 */
     fun stopContinuous() {
         continuousJob?.cancel()
         continuousJob = null
-        _continuous.update { it.copy(running = false, justCapturedPage = null) }
+        _continuous.update { it.copy(running = false, justCapturedPage = null, autoStopped = false) }
+    }
+
+    /** 畫面層消費完 [ContinuousCaptureState.autoStopped]（已切進確認頁）後歸零，免重複觸發。 */
+    fun consumeAutoStop() {
+        continuousJob = null
+        _continuous.update { it.copy(autoStopped = false) }
     }
 
     override fun onDispose() {

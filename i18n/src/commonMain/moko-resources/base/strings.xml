@@ -326,6 +326,25 @@
     <string name="capture_crop_auto">Auto-detect</string>
     <string name="capture_crop_auto_none">Could not find the edges, drag the lines yourself</string>
     <string name="capture_crop_clear">Don\'t crop</string>
+    <!-- Yakuyomi: capture auto page turn (simulated tap on the site's next-page button) -->
+    <string name="capture_autotap">Auto page turn</string>
+    <string name="capture_autotap_summary">Taps this site\'s next-page button after each capture</string>
+    <string name="capture_autotap_no_point">Set the tap position first, or turn off auto page turn</string>
+    <string name="capture_tap_point_setup">Set tap position</string>
+    <string name="capture_tap_point_none">Tap position not set</string>
+    <string name="capture_tap_point_current">Tap position: %1$d%% across · %2$d%% down</string>
+    <string name="capture_tap_point_hint">Drag the marker onto this site\'s next-page button (%1$d%% across · %2$d%% down)</string>
+    <string name="capture_tap_point_clear">Clear position</string>
+    <string name="capture_tap_delay">Tap delay</string>
+    <string name="capture_tap_delay_summary">Too short taps before the page finishes loading; too long wastes time</string>
+    <string name="capture_tap_delay_shorter">Shorter</string>
+    <string name="capture_tap_delay_longer">Longer</string>
+    <string name="capture_target_pages">Pages in this chapter (optional)</string>
+    <string name="capture_target_pages_summary">Stops automatically once this many pages are captured; leave empty to stop when tapping stops changing the page</string>
+    <string name="capture_continuous_count_target">Captured %1$d/%2$d</string>
+    <string name="capture_continuous_hint_target">Captured %1$d/%2$d · turn to the next page to continue</string>
+    <string name="capture_continuous_hint_auto">Turning pages automatically · captured %1$d</string>
+    <string name="capture_continuous_hint_auto_target">Turning pages automatically · captured %1$d/%2$d</string>
     <string name="action_start_downloading_now">Start downloading now</string>
     <string name="action_not_now">Not now</string>
     <string name="action_add_anyway">Add anyway</string>

@@ -371,6 +371,25 @@
     <string name="capture_crop_auto">自動偵測</string>
     <string name="capture_crop_auto_none">找不到明顯分界，請自己拖線</string>
     <string name="capture_crop_clear">不裁切</string>
+    <!-- Yakuyomi：擷取的自動翻頁（模擬點擊該站的「下一頁」按鈕） -->
+    <string name="capture_autotap">自動翻頁</string>
+    <string name="capture_autotap_summary">每截完一頁自動點本站的「下一頁」</string>
+    <string name="capture_autotap_no_point">請先設定點擊位置（或關閉自動翻頁）</string>
+    <string name="capture_tap_point_setup">設定點擊位置</string>
+    <string name="capture_tap_point_none">尚未設定點擊位置</string>
+    <string name="capture_tap_point_current">點擊位置：橫 %1$d%% · 縱 %2$d%%</string>
+    <string name="capture_tap_point_hint">把標記拖到本站「下一頁」按鈕上（橫 %1$d%% · 縱 %2$d%%）</string>
+    <string name="capture_tap_point_clear">清除位置</string>
+    <string name="capture_tap_delay">點擊延遲</string>
+    <string name="capture_tap_delay_summary">太短會在頁面還沒載完就點、太長浪費時間</string>
+    <string name="capture_tap_delay_shorter">縮短</string>
+    <string name="capture_tap_delay_longer">延長</string>
+    <string name="capture_target_pages">本話頁數（選填）</string>
+    <string name="capture_target_pages_summary">截滿就自動停止；留空＝點了畫面沒變時自動停止</string>
+    <string name="capture_continuous_count_target">已截 %1$d/%2$d 頁</string>
+    <string name="capture_continuous_hint_target">已截 %1$d/%2$d 頁 · 翻到下一頁繼續</string>
+    <string name="capture_continuous_hint_auto">自動翻頁中 · 已截 %1$d 頁</string>
+    <string name="capture_continuous_hint_auto_target">自動翻頁中 · 已截 %1$d/%2$d 頁</string>
     <string name="pref_category_library">書櫃</string>
     <string name="ext_obsolete">過舊</string>
     <string name="obsolete_extension_message">這個擴充套件已無法使用，其可能無法正確運作或導致本程式發生問題，建議解除安裝</string>

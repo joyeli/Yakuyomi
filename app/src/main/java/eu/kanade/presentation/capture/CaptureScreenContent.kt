@@ -3,6 +3,8 @@ package eu.kanade.presentation.capture
 import android.graphics.Bitmap
 import android.graphics.Rect
 import android.net.Uri
+import android.os.SystemClock
+import android.view.MotionEvent
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
@@ -55,11 +57,13 @@ import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Remove
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material.icons.outlined.TouchApp
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.UnfoldLess
 import androidx.compose.material.icons.outlined.UnfoldMore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
@@ -68,6 +72,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -115,21 +120,29 @@ import eu.kanade.presentation.webview.findActivity
 import eu.kanade.tachiyomi.ui.capture.CAPTURE_SCALE_MAX
 import eu.kanade.tachiyomi.ui.capture.CAPTURE_SCALE_MIN
 import eu.kanade.tachiyomi.ui.capture.CAPTURE_SCALE_STEP
+import eu.kanade.tachiyomi.ui.capture.CAPTURE_TAP_DELAY_DEFAULT
+import eu.kanade.tachiyomi.ui.capture.CAPTURE_TAP_DELAY_MAX
+import eu.kanade.tachiyomi.ui.capture.CAPTURE_TAP_DELAY_MIN
+import eu.kanade.tachiyomi.ui.capture.CAPTURE_TAP_DELAY_STEP
 import eu.kanade.tachiyomi.ui.capture.CaptureBookmark
 import eu.kanade.tachiyomi.ui.capture.CaptureMode
 import eu.kanade.tachiyomi.ui.capture.CaptureSaveResult
 import eu.kanade.tachiyomi.ui.capture.CaptureSiteSetting
 import eu.kanade.tachiyomi.ui.capture.CaptureUrlEntry
 import eu.kanade.tachiyomi.ui.capture.FrameGrabber
+import eu.kanade.tachiyomi.ui.capture.PageTapper
+import eu.kanade.tachiyomi.ui.capture.StartContinuous
 import eu.kanade.tachiyomi.ui.capture.captureHostOf
 import eu.kanade.tachiyomi.ui.capture.detectCropBounds
 import eu.kanade.tachiyomi.ui.capture.suggestCaptureChapterNames
 import eu.kanade.tachiyomi.util.system.setDefaultSettings
 import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
+import tachiyomi.core.common.util.lang.withUIContext
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.core.common.i18n.stringResource as contextStringResource
@@ -145,6 +158,21 @@ private const val BROWSE_BOOKMARK_PREVIEW = 3
 
 // 去頭去尾裁切：兩條線之間至少要留多少比例的畫面（防止把保留區拖到 0）。
 private const val CROP_MIN_KEEP_FRACTION = 0.15f
+
+// 自動翻頁模擬點擊的 ACTION_DOWN → ACTION_UP 間隔（ms）：太短某些網站的手勢判定會當成無效觸控，
+// 太長會被判成長按（跳出選單）。50–80ms 是「輕點」的自然區間。
+private const val TAP_DOWN_UP_GAP_MS = 60L
+
+// 點擊位置標記的半徑（dp）：設定模式＝大圓（好拖）、擷取模式常駐＝小圓（只是提示點在哪、不擋畫面）。
+private val TAP_MARKER_SETUP_RADIUS = 22.dp
+private val TAP_MARKER_IDLE_RADIUS = 10.dp
+
+// 位置沒設定過時，設定模式的預設落點（畫面正中偏下＝多數站「下一頁」鈕的位置）。
+private const val TAP_DEFAULT_X = 0.5f
+private const val TAP_DEFAULT_Y = 0.9f
+
+// 頁面設定 panel 最高高度（加了自動翻頁一整段後可能超過一屏 → 內部可捲）。
+private val PAGE_PANEL_MAX_HEIGHT = 420.dp
 
 // 「加入最愛」對話框的別名預設草稿：取網址 host（去掉 www.）當好記名字；取不到就退回整串網址。
 private fun defaultBookmarkAlias(url: String): String =
@@ -212,12 +240,14 @@ fun CaptureScreenContent(
     existingChaptersProvider: suspend (String) -> List<String> = { emptyList() },
     continuousRunning: Boolean,
     capturedCount: Int,
+    // 本話頁數（使用者選填、per-session）：非 null＝進度顯示「已截 5/16 頁」，截滿 model 自動停止。
+    capturedTarget: Int? = null,
     // 目前模式：擷取 / 確認（面板蓋在 WebView 上）/ 單張重截或插入。
     mode: CaptureMode = CaptureMode.CAPTURING,
     // 剛存下的頁碼（非 null＝顯示「已擷取第 N 頁 · 請翻下一頁」提示，期間 model 暫停偵測）。
     justCapturedPage: Int? = null,
-    // (比較幀抓取器, 乾淨幀抓取器, 網址讀取器)。
-    onStartContinuous: (FrameGrabber, FrameGrabber, () -> String?) -> Unit,
+    // (比較幀抓取器, 乾淨幀抓取器, 網址讀取器, 本話頁數, 點擊延遲, 自動翻頁點擊器)。
+    onStartContinuous: StartContinuous,
     onStopContinuous: () -> Unit,
     // 按停止後進確認模式（不 push Screen）。
     onEnterReview: () -> Unit = {},
@@ -352,6 +382,17 @@ fun CaptureScreenContent(
      * 影響、不注入 JS。
      */
     val canvasFraction = scaleDraft.coerceIn(CAPTURE_SCALE_MIN, CAPTURE_SCALE_MAX) / 100f
+    // ── 自動翻頁：點擊位置設定 + 本話頁數 ──────────────────────────────────────
+    // 位置設定模式（畫面上出現一個可拖曳的圓形標記，拖到該站「下一頁」鈕的位置）；期間整個工具列藏起。
+    var tapSetupMode by remember { mutableStateOf(false) }
+    // 位置草稿＝**比例座標** 0f–1f（佔 WebView 寬 / 高）；按「儲存」才寫回逐站 pref。
+    var tapXDraft by remember { mutableFloatStateOf(TAP_DEFAULT_X) }
+    var tapYDraft by remember { mutableFloatStateOf(TAP_DEFAULT_Y) }
+    // 點擊延遲滑桿的當前值（ms）；放開滑桿 / 按 −＋ 才 commit 進 pref（同畫布寬度的作法）。
+    var tapDelayDraft by remember { mutableIntStateOf(CAPTURE_TAP_DELAY_DEFAULT) }
+    // 本話頁數（選填）：**per-session 不記憶**（每話頁數不同 → 不寫 pref，換話即清空）；空＝不設上限。
+    var targetPagesDraft by remember { mutableStateOf("") }
+
     // ── 去頭去尾裁切設定模式（件 3-A）：兩條可拖曳的水平線 ────────────────────
     var cropSetupMode by remember { mutableStateOf(false) }
     // 草稿＝上/下各裁掉的畫面高度比例（0f–1f）；按「儲存」才寫回 pref。
@@ -588,6 +629,41 @@ fun CaptureScreenContent(
         }
     }
 
+    /**
+     * 自動翻頁：對 WebView 派送一次模擬點擊，位置＝[fx]/[fy]（**比例座標** 0–1，相對 WebView 自己的寬高）。
+     *
+     * ★ 護欄：只用 [android.webkit.WebView.dispatchTouchEvent] 送 ACTION_DOWN + ACTION_UP——等同「使用者自己
+     * 點了那裡」，**不注入 JS、不讀 DOM**（本工具一律截像素、不 scrape）。
+     * - 座標是 **WebView 本地座標**（不是螢幕座標）：直接把比例乘上 `wv.width/height`。畫布縮窄時 WebView view
+     *   本身就變窄了，比例對的仍是同一塊畫布（與標記 overlay 的座標系一致）。
+     * - MotionEvent 必須在**主執行緒**派送（[withUIContext]），兩顆事件共用同一個 downTime、間隔
+     *   [TAP_DOWN_UP_GAP_MS]（太短算無效觸控、太長變長按），用完一律 `recycle()`。
+     * 回 false＝WebView 還沒量到寬高（沒派送），model 端據此更快累進「無效點擊」計數。
+     */
+    suspend fun dispatchTapAt(fx: Float, fy: Float): Boolean = withUIContext {
+        val wv = webView ?: return@withUIContext false
+        val w = wv.width
+        val h = wv.height
+        if (w <= 0 || h <= 0) return@withUIContext false
+        val x = fx.coerceIn(0f, 1f) * w
+        val y = fy.coerceIn(0f, 1f) * h
+        val downTime = SystemClock.uptimeMillis()
+        val down = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, x, y, 0)
+        try {
+            wv.dispatchTouchEvent(down)
+        } finally {
+            down.recycle()
+        }
+        delay(TAP_DOWN_UP_GAP_MS)
+        val up = MotionEvent.obtain(downTime, SystemClock.uptimeMillis(), MotionEvent.ACTION_UP, x, y, 0)
+        try {
+            wv.dispatchTouchEvent(up)
+        } finally {
+            up.recycle()
+        }
+        true
+    }
+
     // 連續截圖 toggle：進行中→停止（停止後切確認模式檢視/剔除/儲存這次的截圖，WebView 原地留著）；
     // 否則檢查書名/章名後把兩個「抓幀器」交給 ScreenModel 驅動迴圈。
     // 只有使用者「按停止」才進確認模式；生命週期 ON_STOP / onDispose 直接呼叫 onStopContinuous、不切模式。
@@ -620,7 +696,29 @@ fun CaptureScreenContent(
                 }
             }
         }
-        onStartContinuous(compareGrabber, cleanGrabber) { currentUrl() }
+        // ③ 自動翻頁點擊器：開關開著且該站設過位置才給（否則 null＝維持原本的「手動翻頁」行為，零回歸）。
+        // 這個 lambda 每次被呼叫時才讀 siteSetting（Compose 的 state 委派 → 讀到的永遠是當下的值）。
+        val autoTapper: PageTapper? = if (siteSetting.autoTapReady) {
+            {
+                val fx = siteSetting.tapX
+                val fy = siteSetting.tapY
+                if (fx != null && fy != null) dispatchTapAt(fx, fy) else false
+            }
+        } else {
+            // 開了自動翻頁卻沒設位置＝點不下去，明講一聲再照手動模式跑（不擋開始）。
+            if (siteSetting.autoTap) {
+                context.toast(context.contextStringResource(MR.strings.capture_autotap_no_point))
+            }
+            null
+        }
+        onStartContinuous(
+            compareGrabber,
+            cleanGrabber,
+            { currentUrl() },
+            targetPagesDraft.trim().toIntOrNull()?.takeIf { it > 0 },
+            siteSetting.tapDelayMs,
+            autoTapper,
+        )
     }
 
     // 進單張模式（重截 / 插入）：該頁有記網址才開回去；沒有就**保持 WebView 現狀**（讓使用者自己捲到位）。
@@ -648,7 +746,18 @@ fun CaptureScreenContent(
         if (!hasUrl) {
             pagePanelExpanded = false
             cropSetupMode = false
+            tapSetupMode = false
         }
+    }
+
+    // 該站存的點擊延遲變了（換站重讀 / 其他地方寫入）＝同步滑桿值。
+    LaunchedEffect(siteSetting.tapDelayMs) {
+        tapDelayDraft = siteSetting.tapDelayMs.coerceIn(CAPTURE_TAP_DELAY_MIN, CAPTURE_TAP_DELAY_MAX)
+    }
+
+    // 換一話＝本話頁數重填（**不記憶**：每話頁數不同，沿用上一話的值只會提早停在錯的地方）。
+    LaunchedEffect(chapterName) {
+        targetPagesDraft = ""
     }
 
     // 換站＝重讀該站的設定（畫布寬度 + 裁切）。沒有 host（about:blank）＝回預設。
@@ -698,14 +807,16 @@ fun CaptureScreenContent(
     // 系統返回：確認模式＝回擷取模式（等同「繼續擷取」，不刪任何頁）；單張模式＝取消回確認模式；
     // 擷取模式下 WebView 還能上一頁＝WebView 上一頁（而非直接關畫面）。
     BackHandler(
-        enabled = listSheet != null || coverCropMode || cropSetupMode || reviewMode || singleShotMode ||
-            navigator.canGoBack,
+        enabled = listSheet != null || coverCropMode || cropSetupMode || tapSetupMode || reviewMode ||
+            singleShotMode || navigator.canGoBack,
     ) {
         when {
             // 全屏清單開著＝先關清單（回瀏覽 panel），不關畫面 / 不上一頁。
             listSheet != null -> listSheet = null
             // 裁切設定中按返回＝取消（不存草稿），不關畫面。
             cropSetupMode -> cropSetupMode = false
+            // 點擊位置設定中按返回＝取消（不存草稿），不關畫面。
+            tapSetupMode -> tapSetupMode = false
             // 封面框選中按返回＝取消框選（回工具列），不關畫面。
             coverCropMode -> {
                 coverCropMode = false
@@ -825,11 +936,50 @@ fun CaptureScreenContent(
             }
         }
 
+        // ── 自動翻頁點擊位置的常駐小標記（件 1 後半）────────────────────────────────
+        // 該站開了自動翻頁且設過位置 → 一直在那個點畫一個**小的半透明圓**，讓使用者一眼確認「等下會點這裡」。
+        // 性質與上面的裁切遮罩一模一樣（也是刻意抄它的作法）：
+        // ① **不吃觸控**：整層只有 Box + Canvas、零 clickable / 零 pointerInput ⇒ 觸控直接落到 WebView。
+        // ② **截圖不入鏡**：同一個 `!hideOverlayForCapture` gate（模擬點擊是打在 WebView 上、與這層無關）。
+        // ③ **對齊畫布**：與 WebView 同樣的系統列 padding + 同樣的置中 [canvasFraction] 寬 ⇒ 這裡畫的
+        //    (x%, y%) 與 [dispatchTapAt] 乘上 `wv.width/height` 得到的落點是同一個位置。
+        // 設定模式（tapSetupMode）自己有大標記，不疊兩層。
+        if (siteSetting.autoTapReady && mode == CaptureMode.CAPTURING &&
+            !hideOverlayForCapture && !coverCropMode && !cropSetupMode && !tapSetupMode
+        ) {
+            val markerColor = MaterialTheme.colorScheme.primary
+            val markerX = siteSetting.tapX ?: TAP_DEFAULT_X
+            val markerY = siteSetting.tapY ?: TAP_DEFAULT_Y
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .navigationBarsPadding(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Canvas(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .fillMaxWidth(canvasFraction),
+                ) {
+                    val center = Offset(markerX * size.width, markerY * size.height)
+                    val radius = TAP_MARKER_IDLE_RADIUS.toPx()
+                    drawCircle(color = markerColor.copy(alpha = 0.22f), radius = radius, center = center)
+                    drawCircle(
+                        color = markerColor.copy(alpha = 0.6f),
+                        radius = radius,
+                        center = center,
+                        style = Stroke(width = 1.5.dp.toPx()),
+                    )
+                }
+            }
+        }
+
         // ★ 截圖進行中：不 render 任何浮動 overlay（頂部 bar / 底部 bar / 收起小鈕 / panel / 對話框）。
         // 確認模式時整片被面板蓋住，浮動工具列一併不畫（免壓在面板下方漏出來）。
-        // 封面框選模式（coverCropMode）/ 裁切設定模式（cropSetupMode）也整個藏起工具列 → 使用者看得到畫面
-        // 拖框 / 拖線（見下方兩個 overlay）。
-        if (!hideOverlayForCapture && !reviewMode && !coverCropMode && !cropSetupMode) {
+        // 封面框選模式（coverCropMode）/ 裁切設定模式（cropSetupMode）/ 點擊位置設定模式（tapSetupMode）
+        // 也整個藏起工具列 → 使用者看得到畫面拖框 / 拖線 / 拖標記（見下方三個 overlay）。
+        if (!hideOverlayForCapture && !reviewMode && !coverCropMode && !cropSetupMode && !tapSetupMode) {
             if (toolbarExpanded) {
                 // 頂部浮動工具列（5 鍵）+ 可展開的瀏覽 / 新話數 panel。
                 Column(
@@ -890,7 +1040,16 @@ fun CaptureScreenContent(
                                         )
                                     }
                                     Text(
-                                        text = stringResource(MR.strings.capture_continuous_count, capturedCount),
+                                        // 有填本話頁數＝「已截 5/16 頁」，沒填＝維持原本的「已截 N 頁」。
+                                        text = if (capturedTarget != null) {
+                                            stringResource(
+                                                MR.strings.capture_continuous_count_target,
+                                                capturedCount,
+                                                capturedTarget,
+                                            )
+                                        } else {
+                                            stringResource(MR.strings.capture_continuous_count, capturedCount)
+                                        },
                                         style = MaterialTheme.typography.bodyMedium,
                                     )
                                 } else {
@@ -1373,7 +1532,13 @@ fun CaptureScreenContent(
                             shape = MaterialTheme.shapes.large,
                             shadowElevation = 3.dp,
                         ) {
-                            Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
+                            Column(
+                                modifier = Modifier
+                                    .padding(horizontal = 8.dp, vertical = 8.dp)
+                                    // 加了自動翻頁一整段後可能超過一屏 → panel 內部可捲（不擠爆版面）。
+                                    .heightIn(max = PAGE_PANEL_MAX_HEIGHT)
+                                    .verticalScroll(rememberScrollState()),
+                            ) {
                                 // 這組設定套用在哪一站（讓使用者知道是逐站記憶、不是全域）。
                                 Text(
                                     text = stringResource(
@@ -1485,6 +1650,160 @@ fun CaptureScreenContent(
                                         )
                                     }
                                 }
+
+                                // ③ 自動翻頁（逐站）：連續擷取存完一頁後自動點該站的「下一頁」→ 全自動擷取。
+                                // 開關 + 點擊位置 + 點擊延遲 + 本話頁數，全放這裡（都與「這一站怎麼截」同一組設定）。
+                                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = stringResource(MR.strings.capture_autotap),
+                                            style = MaterialTheme.typography.labelLarge,
+                                        )
+                                        Text(
+                                            text = stringResource(MR.strings.capture_autotap_summary),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    Switch(
+                                        checked = siteSetting.autoTap,
+                                        onCheckedChange = { commitSiteSetting(siteSetting.copy(autoTap = it)) },
+                                    )
+                                }
+
+                                if (siteSetting.autoTap) {
+                                    // 點擊位置（比例座標、逐站記憶）：顯示目前值 + 進入拖標記的設定模式。
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(
+                                            text = if (siteSetting.hasTapPoint) {
+                                                stringResource(
+                                                    MR.strings.capture_tap_point_current,
+                                                    ((siteSetting.tapX ?: 0f) * 100).roundToInt(),
+                                                    ((siteSetting.tapY ?: 0f) * 100).roundToInt(),
+                                                )
+                                            } else {
+                                                stringResource(MR.strings.capture_tap_point_none)
+                                            },
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        TextButton(
+                                            onClick = {
+                                                tapXDraft = siteSetting.tapX ?: TAP_DEFAULT_X
+                                                tapYDraft = siteSetting.tapY ?: TAP_DEFAULT_Y
+                                                tapSetupMode = true
+                                            },
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.TouchApp,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(18.dp),
+                                            )
+                                            Text(
+                                                text = stringResource(MR.strings.capture_tap_point_setup),
+                                                modifier = Modifier.padding(start = 4.dp),
+                                            )
+                                        }
+                                    }
+
+                                    // 點擊延遲：存完一頁 → 等多久才點。太短會在頁面還沒載完就點、太長浪費時間。
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(
+                                            text = stringResource(MR.strings.capture_tap_delay),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                        )
+                                        Spacer(modifier = Modifier.weight(1f))
+                                        Text(
+                                            text = "$tapDelayDraft ms",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                        )
+                                    }
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        IconButton(
+                                            onClick = {
+                                                val next = (tapDelayDraft - CAPTURE_TAP_DELAY_STEP)
+                                                    .coerceIn(CAPTURE_TAP_DELAY_MIN, CAPTURE_TAP_DELAY_MAX)
+                                                tapDelayDraft = next
+                                                commitSiteSetting(siteSetting.copy(tapDelayMs = next))
+                                            },
+                                            enabled = tapDelayDraft > CAPTURE_TAP_DELAY_MIN,
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.Remove,
+                                                contentDescription = stringResource(
+                                                    MR.strings.capture_tap_delay_shorter,
+                                                ),
+                                            )
+                                        }
+                                        Slider(
+                                            value = tapDelayDraft.toFloat(),
+                                            onValueChange = { tapDelayDraft = it.roundToInt() },
+                                            onValueChangeFinished = {
+                                                commitSiteSetting(siteSetting.copy(tapDelayMs = tapDelayDraft))
+                                            },
+                                            valueRange = CAPTURE_TAP_DELAY_MIN.toFloat()..
+                                                CAPTURE_TAP_DELAY_MAX.toFloat(),
+                                            steps = (CAPTURE_TAP_DELAY_MAX - CAPTURE_TAP_DELAY_MIN) /
+                                                CAPTURE_TAP_DELAY_STEP - 1,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        IconButton(
+                                            onClick = {
+                                                val next = (tapDelayDraft + CAPTURE_TAP_DELAY_STEP)
+                                                    .coerceIn(CAPTURE_TAP_DELAY_MIN, CAPTURE_TAP_DELAY_MAX)
+                                                tapDelayDraft = next
+                                                commitSiteSetting(siteSetting.copy(tapDelayMs = next))
+                                            },
+                                            enabled = tapDelayDraft < CAPTURE_TAP_DELAY_MAX,
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.Add,
+                                                contentDescription = stringResource(
+                                                    MR.strings.capture_tap_delay_longer,
+                                                ),
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        text = stringResource(MR.strings.capture_tap_delay_summary),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+
+                                // ④ 本話頁數（選填、**per-session 不記憶**）：截滿即自動停止進確認頁。
+                                // 刻意**不**綁自動翻頁——手動翻頁時「這話 16 頁、截滿自動停」一樣好用
+                                // （model 的停止條件①與自動翻頁無關）。留空＝不設上限，行為完全同以前。
+                                Spacer(modifier = Modifier.height(8.dp))
+                                OutlinedTextField(
+                                    value = targetPagesDraft,
+                                    onValueChange = { input ->
+                                        targetPagesDraft = input.filter { it.isDigit() }.take(4)
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    label = { Text(stringResource(MR.strings.capture_target_pages)) },
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                )
+                                Text(
+                                    text = stringResource(MR.strings.capture_target_pages_summary),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
                             }
                         }
                     }
@@ -1589,11 +1908,25 @@ fun CaptureScreenContent(
                     shape = MaterialTheme.shapes.large,
                     shadowElevation = 3.dp,
                 ) {
+                    // 自動翻頁開著時提示改成「自動翻頁中」（不必叫使用者翻頁）；有填本話頁數就顯示 X/N。
+                    val autoTurning = siteSetting.autoTapReady
                     Text(
-                        text = if (justCaptured != null) {
-                            stringResource(MR.strings.capture_continuous_saved_hint, justCaptured)
-                        } else {
-                            stringResource(MR.strings.capture_continuous_hint, capturedCount)
+                        text = when {
+                            justCaptured != null ->
+                                stringResource(MR.strings.capture_continuous_saved_hint, justCaptured)
+                            autoTurning && capturedTarget != null -> stringResource(
+                                MR.strings.capture_continuous_hint_auto_target,
+                                capturedCount,
+                                capturedTarget,
+                            )
+                            autoTurning ->
+                                stringResource(MR.strings.capture_continuous_hint_auto, capturedCount)
+                            capturedTarget != null -> stringResource(
+                                MR.strings.capture_continuous_hint_target,
+                                capturedCount,
+                                capturedTarget,
+                            )
+                            else -> stringResource(MR.strings.capture_continuous_hint, capturedCount)
                         },
                         style = if (justCaptured != null) {
                             MaterialTheme.typography.titleMedium
@@ -1953,6 +2286,137 @@ fun CaptureScreenContent(
                             Text(text = stringResource(MR.strings.capture_crop_clear))
                         }
                         TextButton(onClick = { cropSetupMode = false }) {
+                            Text(text = stringResource(MR.strings.action_cancel))
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── 自動翻頁的點擊位置設定 overlay（件 1）──────────────────────────────────
+        // 疊在**仍然活著**的 WebView 上（不重建、不 loadUrl）。可拖曳的圓形標記＋十字準心：拖到該站
+        // 「下一頁」按鈕的位置 → 儲存。★ 與裁切設定 overlay 同一套座標系規則：這層與 WebView 完全同一塊
+        // （系統列 padding + 置中的 [canvasFraction] 寬），所以「標記位置 ÷ 本層寬高」＝「點擊位置 ÷ WebView 寬高」
+        // ⇒ 存下來的比例座標乘回 `wv.width/height` 就是同一個點（見 [dispatchTapAt]）。
+        // 不畫 dim（使用者要看清楚網頁上的「下一頁」鈕才對得準）；截圖時整層藏起（護欄：截圖零 overlay）。
+        if (tapSetupMode && !hideOverlayForCapture && !reviewMode) {
+            val markerColor = MaterialTheme.colorScheme.primary
+            Box(modifier = Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .statusBarsPadding()
+                        .navigationBarsPadding(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .fillMaxWidth(canvasFraction)
+                            .pointerInput(Unit) {
+                                awaitEachGesture {
+                                    val down = awaitFirstDown()
+                                    down.consume() // 吃掉觸控 → 設定期間 WebView 不捲/不點
+                                    val w = size.width.toFloat()
+                                    val h = size.height.toFloat()
+                                    if (w <= 0f || h <= 0f) return@awaitEachGesture
+                                    // 點哪就把標記移到哪（不必先精準按在標記上），之後可拖曳微調。
+                                    fun moveTo(p: Offset) {
+                                        tapXDraft = (p.x / w).coerceIn(0f, 1f)
+                                        tapYDraft = (p.y / h).coerceIn(0f, 1f)
+                                    }
+                                    moveTo(down.position)
+                                    drag(down.id) { change ->
+                                        change.consume()
+                                        moveTo(change.position)
+                                    }
+                                }
+                            },
+                    ) {
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            val center = Offset(tapXDraft * size.width, tapYDraft * size.height)
+                            val radius = TAP_MARKER_SETUP_RADIUS.toPx()
+                            drawCircle(color = markerColor.copy(alpha = 0.28f), radius = radius, center = center)
+                            drawCircle(
+                                color = markerColor,
+                                radius = radius,
+                                center = center,
+                                style = Stroke(width = 2.dp.toPx()),
+                            )
+                            // 十字準心：讓使用者對得準按鈕中心（圓的中心不好目測）。
+                            val arm = radius * 1.6f
+                            val hair = 1.5.dp.toPx()
+                            drawLine(
+                                color = markerColor,
+                                start = Offset(center.x - arm, center.y),
+                                end = Offset(center.x + arm, center.y),
+                                strokeWidth = hair,
+                            )
+                            drawLine(
+                                color = markerColor,
+                                start = Offset(center.x, center.y - arm),
+                                end = Offset(center.x, center.y + arm),
+                                strokeWidth = hair,
+                            )
+                        }
+                    }
+                }
+
+                // 頂部提示（含目前比例）。工具列類元件走全螢幕寬（不跟著畫布縮），自帶系統列 padding。
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .statusBarsPadding()
+                        .padding(8.dp),
+                    color = barColor,
+                    contentColor = barContentColor,
+                    shape = MaterialTheme.shapes.large,
+                    shadowElevation = 3.dp,
+                ) {
+                    Text(
+                        text = stringResource(
+                            MR.strings.capture_tap_point_hint,
+                            (tapXDraft * 100).roundToInt(),
+                            (tapYDraft * 100).roundToInt(),
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                }
+
+                // 底部動作：儲存 / 清除位置 / 取消。
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .navigationBarsPadding()
+                        .padding(8.dp),
+                    color = barColor,
+                    contentColor = barContentColor,
+                    shape = MaterialTheme.shapes.large,
+                    shadowElevation = 3.dp,
+                ) {
+                    FlowRow(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Button(
+                            onClick = {
+                                commitSiteSetting(siteSetting.copy(tapX = tapXDraft, tapY = tapYDraft))
+                                tapSetupMode = false
+                            },
+                        ) {
+                            Text(text = stringResource(MR.strings.action_save))
+                        }
+                        TextButton(
+                            onClick = {
+                                commitSiteSetting(siteSetting.copy(tapX = null, tapY = null))
+                                tapSetupMode = false
+                            },
+                        ) {
+                            Text(text = stringResource(MR.strings.capture_tap_point_clear))
+                        }
+                        TextButton(onClick = { tapSetupMode = false }) {
                             Text(text = stringResource(MR.strings.action_cancel))
                         }
                     }
