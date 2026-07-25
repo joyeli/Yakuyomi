@@ -351,6 +351,7 @@
     <string name="capture_continuous_hint_auto_target">Turning pages automatically · captured %1$d/%2$d</string>
     <!-- Yakuyomi: capture feedback + guard rails (toolbar target, next-step hint, stop reasons, save errors) -->
     <string name="capture_current_target">%1$s · %2$s</string>
+    <string name="capture_saving_to">Saving to %1$s</string>
     <string name="capture_next_step_browse">Next: browse to the manga page</string>
     <string name="capture_next_step_book">Next: set the manga title</string>
     <string name="capture_next_step_chapter">Next: set the chapter</string>

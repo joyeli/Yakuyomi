@@ -31,16 +31,21 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -1347,44 +1352,8 @@ fun CaptureScreenContent(
                                         }
                                     }
                                 }
-                                // ★ 常駐顯示「會存到哪本 · 哪話」（2026-07 補）：書名/話數以前只活在 panel 草稿裡，
-                                // panel 一關就看不見 → 截錯話要到確認頁才發現，且那些頁已經寫進舊章夾了。
-                                // 佔用原本的 weight(1f) 空位、單行 ellipsize（不撐爆工具列）；連續中與「已截 N/M 頁」並存。
-                                // 點一下開「新話數」panel（書名通常一設定就固定、每次要換的是話數；要改書名走左邊的圖示）。
-                                val targetLabel = when {
-                                    singleShotMode || bookName.isBlank() -> ""
-                                    chapterName.isBlank() -> bookName
-                                    else -> stringResource(MR.strings.capture_current_target, bookName, chapterName)
-                                }
-                                if (targetLabel.isEmpty()) {
-                                    Spacer(modifier = Modifier.weight(1f))
-                                } else {
-                                    Text(
-                                        text = targetLabel,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        textAlign = TextAlign.End,
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .clip(MaterialTheme.shapes.small)
-                                            // 連續擷取中 panel 不會顯示（見下方各 panel 的 !continuousRunning gate）
-                                            // → 那時純顯示、不吃點擊。
-                                            .then(
-                                                if (continuousRunning) {
-                                                    Modifier
-                                                } else {
-                                                    Modifier.clickable {
-                                                        chapterPanelExpanded = true
-                                                        browseExpanded = false
-                                                        mangaPanelExpanded = false
-                                                        pagePanelExpanded = false
-                                                    }
-                                                },
-                                            )
-                                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                                    )
-                                }
+                                // 圖示列尾端固定留白：把「收起」推到最右（「會存到哪本 · 哪話」已搬到下方自己一行）。
+                                Spacer(modifier = Modifier.weight(1f))
                                 // 收起工具列（清爽看漫畫；截圖本就不含 overlay，收起純為視覺）。
                                 CaptureToolbarIconButton(
                                     tooltip = stringResource(MR.strings.capture_toolbar_hide),
@@ -1395,6 +1364,44 @@ fun CaptureScreenContent(
                                         contentDescription = stringResource(MR.strings.capture_toolbar_hide),
                                     )
                                 }
+                            }
+                            // ★ 常駐顯示「會存到哪本 · 哪話」（2026-07 補）：書名/話數以前只活在 panel 草稿裡，
+                            // panel 一關就看不見 → 截錯話要到確認頁才發現，且那些頁已經寫進舊章夾了。
+                            // ★ 2026-07 修（真機回饋）：原本擠在**圖示列尾端**的 weight(1f) 空位，但那一列有 7–8 顆
+                            // 48dp 圖示鈕（關閉/瀏覽/新漫畫/新話數/開始/頁面設定/收起，連續中還有停止），手機寬度扣完
+                            // 只剩幾十 dp → 整串被壓成單一個「…」，看起來像顆不明按鈕。
+                            // 解法＝搬到工具列內**自己一行、整列寬**（仍在同一個 Surface 內 ⇒ 隨工具列收起、截圖時一併
+                            // 消失，不新增浮動元件）：寬度足夠 ⇒ 永遠看得出是文字（絕不退化成只剩省略號）；
+                            // 前綴「存到：」講白它是存檔目標而不是按鈕。點一下仍開「新話數」panel（書名通常一設定就固定、
+                            // 每次要換的是話數；要改書名走上面的圖示）。連續中 panel 不顯示 → 那時純顯示、不吃點擊。
+                            val targetLabel = when {
+                                singleShotMode || bookName.isBlank() -> ""
+                                chapterName.isBlank() -> bookName
+                                else -> stringResource(MR.strings.capture_current_target, bookName, chapterName)
+                            }
+                            if (targetLabel.isNotEmpty()) {
+                                Text(
+                                    text = stringResource(MR.strings.capture_saving_to, targetLabel),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .then(
+                                            if (continuousRunning) {
+                                                Modifier
+                                            } else {
+                                                Modifier.clickable {
+                                                    chapterPanelExpanded = true
+                                                    browseExpanded = false
+                                                    mangaPanelExpanded = false
+                                                    pagePanelExpanded = false
+                                                }
+                                            },
+                                        )
+                                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                                )
                             }
                             // 網頁載入進度（★ 2026-07 補）：全螢幕 WebView + 浮動工具列的版面沒有系統瀏覽器的載入指示，
                             // 慢站按了「前往」後畫面完全沒動靜、分不出是還在載還是點錯。寫法沿用 WebViewScreenContent，
@@ -2181,7 +2188,14 @@ fun CaptureScreenContent(
                     CaptureBarSurface(
                         modifier = Modifier
                             .align(Alignment.BottomStart)
-                            .navigationBarsPadding()
+                            // ★ 鍵盤要讓位（2026-07 修，真機回饋）：MainActivity 是 edge-to-edge
+                            // （decorFitsSystemWindows=false）⇒ 視窗**不會**因鍵盤縮小，這條貼在左下角的 bar
+                            // 原本就這樣被鍵盤整個蓋住、看不到自己打了什麼。
+                            // 用 ime ∪ navigationBars（**取兩者較大值**，非相加）＝本專案既有寫法
+                            // （對照 BrowseSourceScreen / LibraryTab 的浮動搜尋列）：鍵盤開＝抬到鍵盤上緣
+                            // （ime 本來就含導覽列那段）、鍵盤收起＝ime 為 0 只剩導覽列內距
+                            // ⇒ **不會多出空白**，也不必擔心兩個 padding 疊加。
+                            .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
                             .padding(8.dp),
                     ) {
                         Row(

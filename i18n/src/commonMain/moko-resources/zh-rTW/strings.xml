@@ -396,6 +396,7 @@
     <string name="capture_continuous_hint_auto_target">自動翻頁中 · 已截 %1$d/%2$d 頁</string>
     <!-- Yakuyomi：擷取的回饋與防呆（工具列目標、下一步提示、停止原因、存檔失敗原因） -->
     <string name="capture_current_target">%1$s · %2$s</string>
+    <string name="capture_saving_to">存到：%1$s</string>
     <string name="capture_next_step_browse">下一步：先瀏覽到漫畫頁面</string>
     <string name="capture_next_step_book">下一步：設定書名</string>
     <string name="capture_next_step_chapter">下一步：設定話數</string>
