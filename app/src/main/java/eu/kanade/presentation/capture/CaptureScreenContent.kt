@@ -136,13 +136,12 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import coil3.compose.AsyncImage
-import coil3.request.ImageRequest
-import coil3.request.crossfade
-import kotlin.math.roundToInt
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import coil3.request.crossfade
 import com.kevinnzou.web.AccompanistWebViewClient
 import com.kevinnzou.web.LoadingState
 import com.kevinnzou.web.WebContent
@@ -175,10 +174,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlin.math.abs
 import tachiyomi.core.common.util.lang.withUIContext
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import tachiyomi.core.common.i18n.stringResource as contextStringResource
 
 // 封面框選最小邊長（px）：太小的框（多半是誤點的單擊）不截，提示重框。
@@ -211,6 +211,11 @@ private const val TAP_DEFAULT_Y = 0.9f
 
 // 底部「本話頁數」輸入格的寬度：只吃 4 位數字，窄到不撐爆底部 bar。
 private val TARGET_PAGES_FIELD_WIDTH = 64.dp
+
+// 自動翻頁「點擊延遲」滑桿的值域與格數（編譯期定值，抽出來免得在深巢狀的 Slider 呼叫裡重算又撞行長上限）。
+private val TAP_DELAY_RANGE = CAPTURE_TAP_DELAY_MIN.toFloat()..CAPTURE_TAP_DELAY_MAX.toFloat()
+private const val TAP_DELAY_STEPS =
+    (CAPTURE_TAP_DELAY_MAX - CAPTURE_TAP_DELAY_MIN) / CAPTURE_TAP_DELAY_STEP - 1
 
 // 頁面設定 panel 最高高度＝**螢幕高度的比例**（內部可捲）。
 // ★ 2026-07 改：原本硬寫 420dp，一般手機上就是「大半個螢幕」——調畫布寬度時滑桿在最上面、但下面整片 panel 把
@@ -780,7 +785,8 @@ fun CaptureScreenContent(
                 val loc = IntArray(2)
                 wv.getLocationInWindow(loc)
                 fun toBitmapX(v: Float) = (v + cropOverlayOrigin.x).roundToInt().minus(loc[0]).coerceIn(0, bitmap.width)
-                fun toBitmapY(v: Float) = (v + cropOverlayOrigin.y).roundToInt().minus(loc[1]).coerceIn(0, bitmap.height)
+                fun toBitmapY(v: Float) =
+                    (v + cropOverlayOrigin.y).roundToInt().minus(loc[1]).coerceIn(0, bitmap.height)
                 val rect = Rect(toBitmapX(selLeft), toBitmapY(selTop), toBitmapX(selRight), toBitmapY(selBottom))
                 scope.launch {
                     val uri = onSaveCover(bitmap, rect, book)
@@ -1324,7 +1330,9 @@ fun CaptureScreenContent(
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Outlined.PlayArrow,
-                                                contentDescription = stringResource(MR.strings.capture_continuous_start),
+                                                contentDescription = stringResource(
+                                                    MR.strings.capture_continuous_start,
+                                                ),
                                             )
                                         }
                                         // 6) 頁面設定（逐站的畫布寬度% + 去頭去尾裁切）：要有網址（host 是設定的 key）。
@@ -2099,10 +2107,8 @@ fun CaptureScreenContent(
                                                 onValueChangeFinished = {
                                                     commitSiteSetting(siteSetting.copy(tapDelayMs = tapDelayDraft))
                                                 },
-                                                valueRange = CAPTURE_TAP_DELAY_MIN.toFloat()..
-                                                    CAPTURE_TAP_DELAY_MAX.toFloat(),
-                                                steps = (CAPTURE_TAP_DELAY_MAX - CAPTURE_TAP_DELAY_MIN) /
-                                                    CAPTURE_TAP_DELAY_STEP - 1,
+                                                valueRange = TAP_DELAY_RANGE,
+                                                steps = TAP_DELAY_STEPS,
                                                 modifier = Modifier.weight(1f),
                                             )
                                             IconButton(

@@ -390,7 +390,7 @@ private fun ReviewGridItem(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .aspectRatio(MangaPageRatio)
+            .aspectRatio(MANGA_PAGE_RATIO)
             .clip(MaterialTheme.shapes.small)
             .combinedClickable(
                 onClick = onToggle,
@@ -491,4 +491,4 @@ private fun ReviewGridItem(
 }
 
 // 漫畫頁多為直向，縮圖用近書本比例（寬:高 ≈ 0.7）好一覽快掃。
-private const val MangaPageRatio = 0.7f
+private const val MANGA_PAGE_RATIO = 0.7f
