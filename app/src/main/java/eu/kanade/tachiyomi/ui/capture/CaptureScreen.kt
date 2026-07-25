@@ -305,9 +305,12 @@ data class InsertTarget(
 /**
  * 逐站（host）的擷取設定：**畫布寬度%** ＋ **去頭去尾裁切比例**（階段 4）。
  *
- * - [scale]＝網頁畫布寬度百分比（[CAPTURE_SCALE_MIN]–[CAPTURE_SCALE_MAX]）。100＝維持網站原本的 fit-寬度；
- *   小於 100＝把整頁縮小（寬螢幕上讓一整頁漫畫塞得進一屏，不必上下捲）。套用方式＝原生
- *   [android.webkit.WebView.setInitialScale]，**不注入 JS、不碰 DOM**（見 CaptureScreenContent）。
+ * - [scale]＝網頁畫布寬度百分比（[CAPTURE_SCALE_MIN]–[CAPTURE_SCALE_MAX]）。100＝WebView 滿版；
+ *   小於 100＝**WebView view 自己變窄並置中**（左右留白），網頁 responsive 依較窄寬度重排 → 圖等比縮小 →
+ *   整頁變矮，寬螢幕上一整頁漫畫塞得進一屏、不必上下捲。
+ *   ★ 套用方式＝**純 Compose 佈局寬度**（`Modifier.fillMaxWidth(fraction)`），立即生效、不 reload、
+ *   **不注入 JS、不碰 DOM**。舊版用 [android.webkit.WebView.setInitialScale] 真機實測無效（頁面自己的
+ *   `<meta name="viewport">` 在 `useWideViewPort` 下勝出）＝已移除，詳見 CaptureScreenContent 的 `canvasFraction`。
  * - [cropTop] / [cropBottom]＝**存檔前**從畫面上/下各裁掉多少，單位是**佔畫面高度的比例 0.0–1.0**
  *   （存比例不存像素 → 換解析度 / 旋轉 / 摺疊展開都適用）。0＝不裁。
  */

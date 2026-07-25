@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -163,6 +164,8 @@ private class CaptureWebViewHolder {
  *
  * 版面：WebView **鋪滿全螢幕**（底層），但 status bar / navigation bar 讓出（[statusBarsPadding] /
  * [navigationBarsPadding]），系統列不與畫面重疊；WebView 未載真網址時背景透出底層系統色（不露全白 html 畫布）。
+ * 逐站的「畫布寬度%」＜100 時 WebView **本身變窄並水平置中**（左右對稱留白透出畫面底色，見 `canvasFraction`）；
+ * 浮動工具列 / 面板 / 兩個 overlay 的提示列仍以全螢幕寬為準（操作 UI 不跟著縮）。
  * 工具列改成**浮動 overlay**（半透明底、疊在 WebView 上、不擠壓）。
  *
  * 主工具列（頂部一條浮動 bar）＝**5 鍵**：返回 / 瀏覽 / 新漫畫 / 新話數 / 開始‧停止。
@@ -326,17 +329,29 @@ fun CaptureScreenContent(
     var siteSetting by remember { mutableStateOf(CaptureSiteSetting()) }
     // 「頁面設定」panel（畫布寬度滑桿 + 裁切設定入口）展開與否。
     var pagePanelExpanded by remember { mutableStateOf(false) }
-    // 畫布寬度草稿（滑桿拖曳中的值；放開才寫回 pref + 套用）。
+    // 畫布寬度%（滑桿當前值；50–100）。
+    // ★ 2026-07 改法（舊 setInitialScale 作廢，見 [canvasFraction]）：這個值**直接決定 WebView view 的佈局寬度**
+    // ⇒ 拖曳即時生效、不 reload。放開滑桿（或 −/＋）才 commit 進 pref 做逐站記憶。
+    // 換站時由下方 LaunchedEffect(siteSetting.scale) 同步成該站存的值。
     var scaleDraft by remember { mutableIntStateOf(CAPTURE_SCALE_MAX) }
-    // 目前**實際套用到 WebView** 的畫布寬度%（100＝沒套自訂）＋它屬於哪一站（換站要先還原再重量）。
-    var appliedScalePercent by remember { mutableIntStateOf(CAPTURE_SCALE_MAX) }
-    var appliedScaleHost by remember { mutableStateOf<String?>(null) }
-    // 這一站「沒套自訂縮放時」量到的自然縮放（WebViewClient.onScaleChanged 回報值；0＝還沒量到）。
-    // ★ 為何要量：原生 setInitialScale(percent) 的 percent 與 WebView 的 scale 同單位（scale == percent/100）、
-    // 且**不考慮螢幕密度**，也不知道網站的 viewport 寬 —— 直接餵 80 會變成「1 CSS px = 0.8 實體 px」（超小）。
-    // 所以先量該站在預設（fit 寬度）下的 scale，再乘上使用者要的百分比才是「畫布寬度 80%」。
-    var naturalScale by remember { mutableFloatStateOf(0f) }
-    var naturalHost by remember { mutableStateOf<String?>(null) }
+
+    /**
+     * WebView 佔畫面寬度的比例（0.5f–1.0f）＝畫布寬度%。
+     *
+     * ★ 為何不再用 [android.webkit.WebView.setInitialScale]（2026-07 改）：那條路真機實測完全沒效果——
+     * ① `setDefaultSettings()` 開了 `useWideViewPort` + `loadWithOverviewMode`，此時 WebView **以頁面自己的
+     *    `<meta name="viewport">` 為準**（手機版漫畫站幾乎都有，常見 `width=device-width, initial-scale=1`，
+     *    甚至 `user-scalable=no` / `minimum-scale=1`）→ 頁面定義的縮放約束把 initialScale 蓋掉 / 夾回 fit 寬度；
+     * ② 就算縮放真的套上去，**佈局寬度（CSS px）不變** ⇒ 網頁不會 responsive 重排，只是整頁被視覺縮小 + 右側留白，
+     *    不是我們要的「重排到較窄寬度、整頁高度變小」；
+     * ③ 本實作還要靠 `onScaleChanged` 量「自然縮放」才換算得出絕對值，而該回呼在「載入後縮放沒變」時根本不會觸發
+     *    （naturalScale 停在 0）→ 套用條件永遠不成立 ⇒ 滑桿一動也不動。
+     *
+     * 新作法＝**純 Compose 佈局**：把 WebView view 本身變窄（置中，左右留白透出畫面底色）。網頁 responsive 依較窄
+     * 寬度重排 → 圖等比縮小 → 整頁高度變小、一屏塞得下。立即生效、不 reload（不掉捲動位置）、不受 viewport meta
+     * 影響、不注入 JS。
+     */
+    val canvasFraction = scaleDraft.coerceIn(CAPTURE_SCALE_MIN, CAPTURE_SCALE_MAX) / 100f
     // ── 去頭去尾裁切設定模式（件 3-A）：兩條可拖曳的水平線 ────────────────────
     var cropSetupMode by remember { mutableStateOf(false) }
     // 草稿＝上/下各裁掉的畫面高度比例（0f–1f）；按「儲存」才寫回 pref。
@@ -345,42 +360,11 @@ fun CaptureScreenContent(
     // 自動偵測進行中（截圖 + 分析期間鎖住按鈕）。
     var cropAutoBusy by remember { mutableStateOf(false) }
 
-    /**
-     * 把「畫布寬度%」推進 WebView 的原生 [WebView.setInitialScale]（**純 WebView API、不注入 JS、不碰 DOM**）。
-     * 100%（或還沒量到自然縮放）＝ setInitialScale(0)＝交還給 useWideViewPort + loadWithOverviewMode 的預設行為。
-     */
-    fun pushInitialScale(wv: WebView, percent: Int) {
-        if (percent >= CAPTURE_SCALE_MAX || naturalScale <= 0f) {
-            wv.setInitialScale(0)
-        } else {
-            wv.setInitialScale((naturalScale * percent).roundToInt().coerceIn(1, 1000))
-        }
-    }
-
-    /**
-     * 導覽到 [url] 之前/當下把畫布寬度對齊該站：
-     * - 同一站 → 重推目前套用值（setInitialScale **只在頁面載入時生效**，且已知後續 loadUrl 的頁面不一定沿用
-     *   ⇒ 每個載入起點都重推最保險）。
-     * - 換站 → 回預設 0（新站先以自然縮放呈現，才量得到它自己的 naturalScale）。
-     */
-    fun syncInitialScaleFor(wv: WebView, url: String?) {
-        val host = captureHostOf(url)
-        if (host != null && host == appliedScaleHost) {
-            pushInitialScale(wv, appliedScalePercent)
-        } else if (appliedScalePercent != CAPTURE_SCALE_MAX) {
-            wv.setInitialScale(0)
-            appliedScalePercent = CAPTURE_SCALE_MAX
-            appliedScaleHost = null
-        }
-    }
-
     // 網址列上的當前網址（隨 WebView 導覽同步）；造訪時記錄進歷史 pref。
     val webClient = remember {
         object : AccompanistWebViewClient() {
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
                 super.onPageStarted(view, url, favicon)
-                // 每個載入起點都把畫布寬度對齊該站（setInitialScale 只在載入時生效，見 syncInitialScaleFor）。
-                syncInitialScaleFor(view, url)
                 url?.let {
                     address = it
                     loadedUrl = it
@@ -413,23 +397,10 @@ fun CaptureScreenContent(
                 val target = request?.url?.toString() ?: return false
                 if (target.startsWith("intent://")) return true
                 if ((target.startsWith("http") || target.startsWith("https")) && target != view?.url) {
-                    // ★ 在 loadUrl **之前**推畫布寬度：這是 setInitialScale 唯一保證生效的時機（載入起點）。
-                    view?.let { syncInitialScaleFor(it, target) }
                     view?.loadUrl(target)
                     return true
                 }
                 return false
-            }
-
-            /**
-             * 追蹤 WebView 目前的實際縮放（原生回呼、非 JS）。只有「沒套自訂縮放」時量到的才是這一站的
-             * **自然縮放**（fit 寬度）；套過之後量到的是我們自己設下去的值，記了會讓下次換算複利放大。
-             */
-            override fun onScaleChanged(view: WebView, oldScale: Float, newScale: Float) {
-                super.onScaleChanged(view, oldScale, newScale)
-                if (newScale <= 0f || appliedScalePercent != CAPTURE_SCALE_MAX) return
-                naturalScale = newScale
-                naturalHost = captureHostOf(view.url) ?: captureHostOf(loadedUrl)
             }
         }
     }
@@ -685,43 +656,10 @@ fun CaptureScreenContent(
         siteSetting = if (siteHost == null) CaptureSiteSetting() else siteSettingProvider(loadedUrl)
     }
 
-    // 開「頁面設定」panel（或該站設定變了）＝同步滑桿草稿。
-    LaunchedEffect(pagePanelExpanded, siteSetting.scale) {
-        if (pagePanelExpanded) scaleDraft = siteSetting.scale
-    }
-
-    // 套用該站的畫布寬度。setInitialScale **只在頁面載入時生效** ⇒ 值變了就 reload() 讓它落地
-    // （reload 是同一頁重載：cookie / 登入保留，且**不碰 state.content** ⇒ 不破「WebView 常駐」護欄）。
-    // 換算需要該站的自然縮放；還沒量到（naturalScale==0）就先讓它以預設載入，onScaleChanged 量到後本效果
-    // 會被 naturalScale 的變動重新觸發、那時才套。
-    LaunchedEffect(siteHost, siteSetting.scale, naturalScale, naturalHost, webView) {
-        val wv = webView ?: return@LaunchedEffect
-        if (siteHost == null) return@LaunchedEffect
-        val want = siteSetting.scale.coerceIn(CAPTURE_SCALE_MIN, CAPTURE_SCALE_MAX)
-        when {
-            // ① 目前套的是**別站**的縮放 → 先回預設並重載（這站才會以自然縮放呈現、也才量得到它的 naturalScale）。
-            appliedScalePercent != CAPTURE_SCALE_MAX && appliedScaleHost != siteHost -> {
-                appliedScalePercent = CAPTURE_SCALE_MAX
-                appliedScaleHost = null
-                wv.setInitialScale(0)
-                wv.reload()
-            }
-            // ② 這站要 100%（不縮）但目前套著自訂 → 還原。
-            want >= CAPTURE_SCALE_MAX && appliedScalePercent != CAPTURE_SCALE_MAX -> {
-                appliedScalePercent = CAPTURE_SCALE_MAX
-                appliedScaleHost = null
-                wv.setInitialScale(0)
-                wv.reload()
-            }
-            // ③ 這站要自訂寬度，且已量到自然縮放 → 換算成絕對 initialScale 後重載套用。
-            want < CAPTURE_SCALE_MAX && appliedScalePercent != want &&
-                naturalScale > 0f && naturalHost == siteHost -> {
-                appliedScalePercent = want
-                appliedScaleHost = siteHost
-                pushInitialScale(wv, want)
-                wv.reload()
-            }
-        }
+    // 該站存的畫布寬度變了（換站重讀 / 其他地方寫入）＝同步滑桿值 ⇒ WebView 寬度隨即重新量測套用。
+    // ★ 不再有「套用」副作用（舊 setInitialScale + reload 那套已移除）：寬度純由 [canvasFraction] 在佈局階段生效。
+    LaunchedEffect(siteSetting.scale) {
+        scaleDraft = siteSetting.scale.coerceIn(CAPTURE_SCALE_MIN, CAPTURE_SCALE_MAX)
     }
 
     // 開「新漫畫」panel ＝草稿同步當前書名。
@@ -811,10 +749,19 @@ fun CaptureScreenContent(
                         }
                     }
                 },
+            // 畫布縮窄時 **水平置中**（左右留白對稱，透出外層 Box 的 colorScheme.background）。
+            contentAlignment = Alignment.Center,
         ) {
             WebView(
                 state = state,
-                modifier = Modifier.fillMaxSize(),
+                // ★ 畫布寬度（2026-07 改法，見 [canvasFraction] 的 KDoc）：直接縮 **WebView view 的佈局寬度**，
+                // 不碰任何縮放 API。網頁 responsive 依較窄寬度重排 → 圖等比縮小 → 整頁高度變小、一屏塞得下。
+                // ⚠️ 護欄：只換 Modifier，composable 位置 / key / 其餘參數全不變 ⇒ interop 節點**不重建**
+                // （庫內 `BoxWithConstraints(modifier)` 只是重新量測、subcomposition 沿用同一個 AndroidView；
+                // 即使真被重建，`factory` 也會拿 [webViewHolder] 那顆回填 ⇒ 不會白頁）。
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(canvasFraction),
                 navigator = navigator,
                 onCreated = { wv ->
                     wv.setDefaultSettings()
@@ -834,6 +781,48 @@ fun CaptureScreenContent(
                 // 不會拿舊網址覆蓋 WebView 現在停的那一頁（同 WebViewScreenContent 的既有寫法）。
                 onDispose = { state.content = WebContent.NavigatorOnly },
             )
+        }
+
+        // ── 裁切範圍常駐預覽（灰階遮罩）────────────────────────────────────────────
+        // 該站設了去頭去尾就**一直**把會被裁掉的頭尾塗半透明灰，擷取時隨時看得到裁切範圍，不必開設定確認。
+        // 三條硬性質：
+        // ① **不吃觸控**：整層只有 Box + Canvas、**零 clickable / 零 pointerInput** ⇒ 在 Compose 的 hit test 裡
+        //    根本不是候選節點，觸控直接落到下面的 WebView（照常捲頁 / 點連結 / 之後的自動翻頁點擊）。
+        // ② **截圖不入鏡**：跟其他 overlay 同一個 `!hideOverlayForCapture` gate ⇒ 抓乾淨幀那兩個 frame 內不 render。
+        //    真正的裁切是存檔時在 bitmap 上做（CaptureScreenModel.cropForSave），與這層無關、不會裁兩次。
+        // ③ **對齊畫布**：與 WebView 同樣的系統列 padding + 同樣的置中 [canvasFraction] 寬 ⇒ 只塗畫布那塊、
+        //    不塗左右留白，比例也與存檔時用的「佔畫面高度比例」一致。
+        // 只在正常擷取模式畫：REVIEW / SINGLE_SHOT 不畫；封面框選、裁切設定模式各有自己的遮罩，不疊兩層。
+        if (siteSetting.hasCrop && mode == CaptureMode.CAPTURING &&
+            !hideOverlayForCapture && !coverCropMode && !cropSetupMode
+        ) {
+            val cropMaskColor = Color.Black.copy(alpha = 0.45f)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .navigationBarsPadding(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Canvas(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .fillMaxWidth(canvasFraction),
+                ) {
+                    val topH = size.height * siteSetting.cropTop.coerceIn(0f, 1f)
+                    val bottomY = size.height * (1f - siteSetting.cropBottom.coerceIn(0f, 1f))
+                    if (topH > 0f) {
+                        drawRect(color = cropMaskColor, topLeft = Offset(0f, 0f), size = Size(size.width, topH))
+                    }
+                    if (bottomY < size.height) {
+                        drawRect(
+                            color = cropMaskColor,
+                            topLeft = Offset(0f, bottomY),
+                            size = Size(size.width, size.height - bottomY),
+                        )
+                    }
+                }
+            }
         }
 
         // ★ 截圖進行中：不 render 任何浮動 overlay（頂部 bar / 底部 bar / 收起小鈕 / panel / 對話框）。
@@ -1396,8 +1385,10 @@ fun CaptureScreenContent(
                                     overflow = TextOverflow.Ellipsis,
                                 )
 
-                                // ① 畫布寬度%：寬螢幕上 100%（fit 寬度）會讓漫畫太高、一屏放不下 → 縮小畫布，
-                                // 讓整頁塞得進一屏。放開滑桿（或按 −/＋）才寫回 pref 並套用（會重載當前頁）。
+                                // ① 畫布寬度%：寬螢幕上 100%（滿版）會讓漫畫太高、一屏放不下 → 把**網頁畫布本身
+                                // 縮窄並置中**（左右對稱留白、透出畫面底色），網頁 responsive 重排後整頁變矮、
+                                // 一屏塞得下。★ 拖曳即時生效、**不重載**（不掉捲動位置）；放開滑桿（或按 −/＋）
+                                // 才寫回 pref 做逐站記憶。
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -1687,50 +1678,69 @@ fun CaptureScreenContent(
         }
 
         // ── 封面框選 overlay（件 1）─────────────────────────────────────────────
-        // 疊在**仍然活著**的 WebView 上（fillMaxSize 貼齊外層 Box，座標系＝window 近似；用 onGloballyPositioned
-        // 量出實際 window 原點做嚴謹換算）。拖框選封面範圍，dim 四周 + 主色框標示；底部「截取封面 / 取消」。
+        // 疊在**仍然活著**的 WebView 上。★ 2026-07：可拖曳/遮罩那層**對齊 WebView 的實際 bounds**
+        // （同樣的系統列 padding + 同樣的置中 [canvasFraction] 寬）——畫布縮窄時左右留白不屬於截圖 bitmap，
+        // 使用者本就不該框到那裡；對齊後拖出來的座標天生落在 bitmap 內（下方 clamp 只當保險）。
+        // 提示 / 動作列仍走全螢幕（操作 UI 不跟著縮）。
         // 截圖前一併藏起（!hideOverlayForCapture gate）→ 框選框本身不會入鏡（護欄：截圖零 overlay）。
         if (coverCropMode && !hideOverlayForCapture && !reviewMode) {
             val cropStrokeColor = MaterialTheme.colorScheme.primary
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .onGloballyPositioned { cropOverlayOrigin = it.positionInWindow() }
-                    .pointerInput(Unit) {
-                        awaitEachGesture {
-                            val down = awaitFirstDown()
-                            down.consume() // 吃掉觸控 → 框選期間 WebView 不捲/不點
-                            cropStart = down.position
-                            cropEnd = down.position
-                            drag(down.id) { change ->
-                                change.consume()
-                                cropEnd = change.position
+            Box(modifier = Modifier.fillMaxSize()) {
+                // 與 WebView 同一塊區域（系統列 padding 一致）→ 內層再取畫布寬度、置中。
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .statusBarsPadding()
+                        .navigationBarsPadding(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .fillMaxWidth(canvasFraction)
+                            // 這層的 window 原點＝WebView 的 window 原點（captureCover 用它換算 bitmap 座標）。
+                            .onGloballyPositioned { cropOverlayOrigin = it.positionInWindow() }
+                            .pointerInput(Unit) {
+                                awaitEachGesture {
+                                    val down = awaitFirstDown()
+                                    down.consume() // 吃掉觸控 → 框選期間 WebView 不捲/不點
+                                    cropStart = down.position
+                                    cropEnd = down.position
+                                    drag(down.id) { change ->
+                                        change.consume()
+                                        cropEnd = change.position
+                                    }
+                                }
+                            },
+                    ) {
+                        // dim 四周 + 選取框：不用 BlendMode（避免清到底下），改畫「選取框以外的四塊」半透明遮罩。
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            val dim = Color.Black.copy(alpha = 0.5f)
+                            val s = cropStart
+                            val e = cropEnd
+                            if (s == null || e == null) {
+                                drawRect(color = dim)
+                            } else {
+                                val l = minOf(s.x, e.x)
+                                val t = minOf(s.y, e.y)
+                                val r = maxOf(s.x, e.x)
+                                val b = maxOf(s.y, e.y)
+                                drawRect(color = dim, topLeft = Offset(0f, 0f), size = Size(size.width, t))
+                                drawRect(
+                                    color = dim,
+                                    topLeft = Offset(0f, b),
+                                    size = Size(size.width, size.height - b),
+                                )
+                                drawRect(color = dim, topLeft = Offset(0f, t), size = Size(l, b - t))
+                                drawRect(color = dim, topLeft = Offset(r, t), size = Size(size.width - r, b - t))
+                                drawRect(
+                                    color = cropStrokeColor,
+                                    topLeft = Offset(l, t),
+                                    size = Size(r - l, b - t),
+                                    style = Stroke(width = 2.dp.toPx()),
+                                )
                             }
                         }
-                    },
-            ) {
-                // dim 四周 + 選取框：不用 BlendMode（避免清到底下），改畫「選取框以外的四塊」半透明遮罩。
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    val dim = Color.Black.copy(alpha = 0.5f)
-                    val s = cropStart
-                    val e = cropEnd
-                    if (s == null || e == null) {
-                        drawRect(color = dim)
-                    } else {
-                        val l = minOf(s.x, e.x)
-                        val t = minOf(s.y, e.y)
-                        val r = maxOf(s.x, e.x)
-                        val b = maxOf(s.y, e.y)
-                        drawRect(color = dim, topLeft = Offset(0f, 0f), size = Size(size.width, t))
-                        drawRect(color = dim, topLeft = Offset(0f, b), size = Size(size.width, size.height - b))
-                        drawRect(color = dim, topLeft = Offset(0f, t), size = Size(l, b - t))
-                        drawRect(color = dim, topLeft = Offset(r, t), size = Size(size.width - r, b - t))
-                        drawRect(
-                            color = cropStrokeColor,
-                            topLeft = Offset(l, t),
-                            size = Size(r - l, b - t),
-                            style = Stroke(width = 2.dp.toPx()),
-                        )
                     }
                 }
 
@@ -1793,88 +1803,99 @@ fun CaptureScreenContent(
         }
 
         // ── 去頭去尾裁切設定 overlay（件 3-A：手動兩線）────────────────────────────
-        // 疊在**仍然活著**的 WebView 上，且套用與 WebView 同樣的系統列 padding ⇒ 這層的座標系＝截圖 bitmap 的
-        // 座標系（captureWebView 抓的就是 WebView 那塊）→ 線的位置直接除以本層高度就是要存的比例。
+        // 疊在**仍然活著**的 WebView 上。★ 2026-07：拖線/遮罩那層與 WebView 完全同一塊（系統列 padding + 置中的
+        // [canvasFraction] 寬）⇒ 遮罩只蓋在**畫布**上，一眼看得出「裁的是畫布這塊」；高度不受畫布寬度影響，
+        // 線的位置除以本層高度＝要存的比例（與截圖 bitmap 的高度座標系一致，captureWebView 抓的就是 WebView 那塊）。
         // 兩條線之間＝保留區，上下＝半透明遮罩（＝存檔時會被裁掉的部分）。截圖時本層一併藏起（護欄：截圖零 overlay），
         // **實際裁切是存檔時在 bitmap 上做**（見 CaptureScreenModel.cropForSave），與 overlay 無關。
         if (cropSetupMode && !hideOverlayForCapture && !reviewMode) {
             val cropLineColor = MaterialTheme.colorScheme.primary
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .statusBarsPadding()
-                    .navigationBarsPadding()
-                    .pointerInput(Unit) {
-                        awaitEachGesture {
-                            val down = awaitFirstDown()
-                            down.consume() // 吃掉觸控 → 拖線期間 WebView 不捲/不點
-                            val h = size.height.toFloat()
-                            if (h <= 0f) return@awaitEachGesture
-                            // 按下點離哪條線近就拖哪條（頂線／底線）。
-                            val topY = cropTopDraft * h
-                            val bottomY = (1f - cropBottomDraft) * h
-                            val dragTop = abs(down.position.y - topY) <= abs(down.position.y - bottomY)
-                            fun moveTo(y: Float) {
-                                val f = (y / h).coerceIn(0f, 1f)
-                                if (dragTop) {
-                                    cropTopDraft = f.coerceAtMost(
-                                        (1f - cropBottomDraft - CROP_MIN_KEEP_FRACTION).coerceAtLeast(0f),
-                                    )
-                                } else {
-                                    cropBottomDraft = (1f - f).coerceAtMost(
-                                        (1f - cropTopDraft - CROP_MIN_KEEP_FRACTION).coerceAtLeast(0f),
-                                    )
+            Box(modifier = Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .statusBarsPadding()
+                        .navigationBarsPadding(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .fillMaxWidth(canvasFraction)
+                            .pointerInput(Unit) {
+                                awaitEachGesture {
+                                    val down = awaitFirstDown()
+                                    down.consume() // 吃掉觸控 → 拖線期間 WebView 不捲/不點
+                                    val h = size.height.toFloat()
+                                    if (h <= 0f) return@awaitEachGesture
+                                    // 按下點離哪條線近就拖哪條（頂線／底線）。
+                                    val topY = cropTopDraft * h
+                                    val bottomY = (1f - cropBottomDraft) * h
+                                    val dragTop = abs(down.position.y - topY) <= abs(down.position.y - bottomY)
+                                    fun moveTo(y: Float) {
+                                        val f = (y / h).coerceIn(0f, 1f)
+                                        if (dragTop) {
+                                            cropTopDraft = f.coerceAtMost(
+                                                (1f - cropBottomDraft - CROP_MIN_KEEP_FRACTION).coerceAtLeast(0f),
+                                            )
+                                        } else {
+                                            cropBottomDraft = (1f - f).coerceAtMost(
+                                                (1f - cropTopDraft - CROP_MIN_KEEP_FRACTION).coerceAtLeast(0f),
+                                            )
+                                        }
+                                    }
+                                    moveTo(down.position.y)
+                                    drag(down.id) { change ->
+                                        change.consume()
+                                        moveTo(change.position.y)
+                                    }
                                 }
-                            }
-                            moveTo(down.position.y)
-                            drag(down.id) { change ->
-                                change.consume()
-                                moveTo(change.position.y)
-                            }
+                            },
+                    ) {
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            val dim = Color.Black.copy(alpha = 0.55f)
+                            val topY = cropTopDraft * size.height
+                            val bottomY = (1f - cropBottomDraft) * size.height
+                            // 會被裁掉的頭尾＝遮罩；中間保留區維持透明（看得到真實網頁）。
+                            drawRect(color = dim, topLeft = Offset(0f, 0f), size = Size(size.width, topY))
+                            drawRect(
+                                color = dim,
+                                topLeft = Offset(0f, bottomY),
+                                size = Size(size.width, size.height - bottomY),
+                            )
+                            val stroke = 2.dp.toPx()
+                            drawRect(
+                                color = cropLineColor,
+                                topLeft = Offset(0f, topY - stroke / 2),
+                                size = Size(size.width, stroke),
+                            )
+                            drawRect(
+                                color = cropLineColor,
+                                topLeft = Offset(0f, bottomY - stroke / 2),
+                                size = Size(size.width, stroke),
+                            )
+                            // 把手：兩條線中央各畫一段粗條，讓人知道可以拖。
+                            val handleW = 56.dp.toPx()
+                            val handleH = 6.dp.toPx()
+                            drawRect(
+                                color = cropLineColor,
+                                topLeft = Offset((size.width - handleW) / 2, topY - handleH / 2),
+                                size = Size(handleW, handleH),
+                            )
+                            drawRect(
+                                color = cropLineColor,
+                                topLeft = Offset((size.width - handleW) / 2, bottomY - handleH / 2),
+                                size = Size(handleW, handleH),
+                            )
                         }
-                    },
-            ) {
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    val dim = Color.Black.copy(alpha = 0.55f)
-                    val topY = cropTopDraft * size.height
-                    val bottomY = (1f - cropBottomDraft) * size.height
-                    // 會被裁掉的頭尾＝遮罩；中間保留區維持透明（看得到真實網頁）。
-                    drawRect(color = dim, topLeft = Offset(0f, 0f), size = Size(size.width, topY))
-                    drawRect(
-                        color = dim,
-                        topLeft = Offset(0f, bottomY),
-                        size = Size(size.width, size.height - bottomY),
-                    )
-                    val stroke = 2.dp.toPx()
-                    drawRect(
-                        color = cropLineColor,
-                        topLeft = Offset(0f, topY - stroke / 2),
-                        size = Size(size.width, stroke),
-                    )
-                    drawRect(
-                        color = cropLineColor,
-                        topLeft = Offset(0f, bottomY - stroke / 2),
-                        size = Size(size.width, stroke),
-                    )
-                    // 把手：兩條線中央各畫一段粗條，讓人知道可以拖。
-                    val handleW = 56.dp.toPx()
-                    val handleH = 6.dp.toPx()
-                    drawRect(
-                        color = cropLineColor,
-                        topLeft = Offset((size.width - handleW) / 2, topY - handleH / 2),
-                        size = Size(handleW, handleH),
-                    )
-                    drawRect(
-                        color = cropLineColor,
-                        topLeft = Offset((size.width - handleW) / 2, bottomY - handleH / 2),
-                        size = Size(handleW, handleH),
-                    )
+                    }
                 }
 
-                // 頂部提示（含目前比例）。
+                // 頂部提示（含目前比例）。工具列類元件走全螢幕寬（不跟著畫布縮），自帶系統列 padding。
                 Surface(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
+                        .statusBarsPadding()
                         .padding(8.dp),
                     color = barColor,
                     contentColor = barContentColor,
@@ -1896,6 +1917,7 @@ fun CaptureScreenContent(
                 Surface(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
+                        .navigationBarsPadding()
                         .padding(8.dp),
                     color = barColor,
                     contentColor = barContentColor,
