@@ -231,27 +231,51 @@ class TranslationEngineService(private val context: Context) {
     /**
      * 影響引擎建構的設定 + 去字法的簽章。值變了＝要重建引擎（設定/去字法即時生效）。
      * 去字法（[methodRaw]）納入 → 章與章間換去字法會重建；其餘語言/緒數/OCR/排版等改了也重建。
+     *
+     * **維護鐵則：本清單必須涵蓋 [TranslationEngineConfig.buildEngineConfig] 讀到的每一個 pref**
+     * （＋ [apiKey]，它不在 buildEngineConfig 裡、是另外傳給 `Yakuyomi.create`）。
+     * 漏一個＝改了那個設定卻沿用 warm 引擎、舊值繼續生效（曾漏 provider/model/apiBase/temperature →
+     * 使用者在設定換 model 後請求仍打舊 model、持續 HTTP 400；改 API key 反而生效，只因 key 有在簽章裡）。
+     * 日後在 buildEngineConfig 加讀任何 pref，**同時**在此加一行；順序刻意對齊 buildEngineConfig 的分區。
      */
     private fun configSignature(methodRaw: String): String {
         val p = translationPreferences
         return listOf(
             methodRaw, // 去字法納入簽章：換去字法 → 重建引擎
-            apiKey(),
-            p.targetLangName.get(),
+            // —— LLM（TranslatorConfig）：換 provider/model/apiBase/temperature 都要重建才會套用 ——
+            apiKey(), // 不經 buildEngineConfig，另外直接餵 Yakuyomi.create
+            p.provider.get(),
+            p.model.get(),
+            p.apiBase.get(),
+            p.temperature.get(),
+            p.targetLangName.get(), // 也決定要不要清掉引擎內建 few-shot
             p.sourceLangName.get(),
-            p.orientation.get(),
-            p.ocrConcurrency.get(),
-            p.colorMode.get(),
-            p.fontBorder.get().toString(),
+            // —— 偵測（DetectorConfig）——
             p.segThreshold.get(),
+            p.detectUnsharp.get().toString(),
+            p.dbnetSize.get().toString(),
+            // —— OCR（OcrConfig）——
             p.minProb.get(),
+            p.ignoreSfx.get().toString(),
+            p.stripPad.get().toString(),
+            p.useBicubic.get(),
+            p.ocrUnsharp.get().toString(),
+            p.ocrConcurrency.get(),
+            // —— 去字（InpainterConfig）——
             p.bboxPad.get(),
+            p.tileSize.get().toString(),
+            p.maskDilate.get().toString(),
+            // —— 排版（RenderConfig）——
+            p.orientation.get(),
+            p.fontBorder.get().toString(),
+            p.colorMode.get(),
             p.artStrokeRatio.get(),
             p.fontSizeMax.get(),
             p.fontSizeMin.get(),
             p.colTrim.get(),
             p.rowTrim.get(),
             p.fontScale.get(),
+            p.tateChuYoko.get().toString(),
         ).joinToString("\u0000") // 以 NUL 分隔避免相鄰欄位串接後碰撞（語言名/key 可能含空白）
     }
 
