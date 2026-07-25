@@ -369,6 +369,10 @@ data class InsertTarget(
  *   對 WebView 派送一次模擬點擊（[PageTapper]），點在該站「下一頁」按鈕上 → 全自動連續擷取。
  *   座標同樣**存比例 0.0–1.0**（佔 WebView 寬/高），null＝還沒設定過位置（此時開關即使開著也不會點）。
  *   ★ 只用 `dispatchTouchEvent`（等同使用者自己點那裡），不注入 JS、不讀 DOM。
+ * - [autoTrim]＝**自動修邊**（第二層裁切，**預設開**）：在上面的固定裁切之後、存檔之前，逐頁動態把上下
+ *   「大片單色空白」修掉（見 [autoTrimBounds]）。固定裁切是照**正常頁**設的，遇到雙開頁（fit 寬度後高度只有
+ *   一半）或彩頁/短頁時，圖片下方會留一大片網站背景、反而把網站頁尾（上一章/下一頁按鈕列）截進來；
+ *   自動修邊讓這種頁自動貼齊內容。對正常頁＝no-op（沒有大片空白就不動作，見三道保守護欄）。
  */
 data class CaptureSiteSetting(
     val scale: Int = CAPTURE_SCALE_MAX,
@@ -378,11 +382,13 @@ data class CaptureSiteSetting(
     val tapX: Float? = null,
     val tapY: Float? = null,
     val tapDelayMs: Int = CAPTURE_TAP_DELAY_DEFAULT,
+    val autoTrim: Boolean = true,
 ) {
-    /** 全預設（沒縮放、沒裁切、沒自動翻頁）＝不必寫進 pref。 */
+    /** 全預設（沒縮放、沒裁切、沒自動翻頁、自動修邊仍開著）＝不必寫進 pref。 */
     val isDefault: Boolean
         get() = scale >= CAPTURE_SCALE_MAX && cropTop <= 0f && cropBottom <= 0f &&
-            !autoTap && tapX == null && tapY == null && tapDelayMs == CAPTURE_TAP_DELAY_DEFAULT
+            !autoTap && tapX == null && tapY == null && tapDelayMs == CAPTURE_TAP_DELAY_DEFAULT &&
+            autoTrim
 
     /** 有裁切設定（存檔時要動刀）。 */
     val hasCrop: Boolean
@@ -575,6 +581,7 @@ class CaptureScreenModel(
                 .put("cropBottom", s.cropBottom.toDouble())
                 .put("autoTap", s.autoTap)
                 .put("tapDelayMs", s.tapDelayMs)
+                .put("autoTrim", s.autoTrim)
             // 位置沒設定過就整個 key 不寫（讀回來＝null＝未設定，與「設在 0,0」區分得開）。
             s.tapX?.let { o.put("tapX", it.toDouble()) }
             s.tapY?.let { o.put("tapY", it.toDouble()) }
@@ -603,20 +610,25 @@ class CaptureScreenModel(
                         tapY = o.optFraction("tapY"),
                         tapDelayMs = o.optInt("tapDelayMs", CAPTURE_TAP_DELAY_DEFAULT)
                             .coerceIn(CAPTURE_TAP_DELAY_MIN, CAPTURE_TAP_DELAY_MAX),
+                        // 舊資料（沒有這個 key）＝跟著新預設開啟自動修邊。
+                        autoTrim = o.optBoolean("autoTrim", true),
                     ),
                 )
             }
         }
     }.getOrElse { emptyMap() }
 
+    /** 存檔時要用的逐站設定：[url] 取不到 host 時退回 [activeHost]（那頁沒記到網址仍套得到該站設定）。 */
+    private fun settingForSave(url: String?): CaptureSiteSetting =
+        siteSettingFor(url ?: activeHost?.let { "https://$it" })
+
     /**
-     * 存檔前套用該站的**去頭去尾**裁切（只切上下、寬度不動）：[url] 取不到 host 時退回 [activeHost]。
+     * 存檔前套用該站的**去頭去尾**裁切（第一層＝位置固定的網站 UI；只切上下、寬度不動）。
      * 沒設定 / 設定切完剩不到 [MIN_CROP_KEEP_PX] ⇒ 原樣回傳**同一顆 bitmap**（呼叫端據此判斷要不要 recycle）。
      * ★ 封面框選（[saveCover]）刻意不套用——那是使用者自己框的範圍。
      */
-    private fun cropForSave(bitmap: Bitmap, url: String?): Bitmap {
+    private fun cropForSave(bitmap: Bitmap, setting: CaptureSiteSetting): Bitmap {
         if (bitmap.isRecycled) return bitmap
-        val setting = siteSettingFor(url ?: activeHost?.let { "https://$it" })
         if (!setting.hasCrop) return bitmap
         val h = bitmap.height
         val top = (h * setting.cropTop).roundToInt().coerceIn(0, h)
@@ -627,13 +639,34 @@ class CaptureScreenModel(
         return runCatching { Bitmap.createBitmap(bitmap, 0, top, bitmap.width, bottom - top) }.getOrDefault(bitmap)
     }
 
-    /** 依逐站裁切設定寫檔：裁出來的新 bitmap 用完即回收，原圖（呼叫端還要用）不動。 */
+    /**
+     * 存檔前的**第二層裁切＝自動修邊**（逐頁動態）：在固定裁切後的安全區內，把上下大片單色空白（＝網站頁面
+     * 背景）修掉，讓雙開頁 / 彩頁 / 短頁自動貼齊內容、不把網站頁尾截進來。邊界演算法見 [autoTrimBounds]
+     * （含三道保守護欄）；沒有大片空白＝回傳**同一顆 bitmap**（正常頁 no-op、呼叫端用 !== 判斷才 recycle）。
+     */
+    private fun autoTrimForSave(bitmap: Bitmap): Bitmap {
+        if (bitmap.isRecycled) return bitmap
+        val (top, bottom) = autoTrimBounds(bitmap)
+        if (top <= 0 && bottom <= 0) return bitmap
+        val height = bitmap.height - top - bottom
+        if (height < MIN_CROP_KEEP_PX) return bitmap
+        return runCatching { Bitmap.createBitmap(bitmap, 0, top, bitmap.width, height) }.getOrDefault(bitmap)
+    }
+
+    /**
+     * 依逐站設定寫檔：**先固定裁切、再自動修邊**（[autoTrim] 關就跳過第二層）。
+     * 中間產生的 bitmap 用完即回收，原圖（呼叫端還要用）不動；每一層都可能回傳上一層的同一顆物件
+     * （`Bitmap.createBitmap` 覆蓋整張時回傳原物件）⇒ 一律用 `!==` 判斷才 recycle。
+     */
     private fun writePage(file: UniFile, bitmap: Bitmap, url: String?) {
-        val out = cropForSave(bitmap, url)
+        val setting = settingForSave(url)
+        val cropped = cropForSave(bitmap, setting)
+        val out = if (setting.autoTrim) autoTrimForSave(cropped) else cropped
         try {
             openTruncating(file).use { out.compress(Bitmap.CompressFormat.PNG, 100, it) }
         } finally {
-            if (out !== bitmap && !out.isRecycled) out.recycle()
+            if (out !== cropped && !out.isRecycled) out.recycle()
+            if (cropped !== bitmap && !cropped.isRecycled) cropped.recycle()
         }
     }
 
@@ -1244,6 +1277,97 @@ fun detectCropBounds(bitmap: Bitmap): Pair<Float, Float> {
         }
     }
     return top.coerceIn(0f, CROP_DETECT_MAX_FRACTION) to bottom.coerceIn(0f, CROP_DETECT_MAX_FRACTION)
+}
+
+// ── 自動修邊（第二層裁切：逐頁動態修掉上下大片空白）────────────────────────────
+// 純函式（不碰 I/O、不碰 Compose），與 [detectCropBounds] 同一套掃描手法（中央直條、取樣列、亮度值域），
+// 但用途相反：detectCropBounds 是**設定時**猜位置固定的網站 UI 分界（一次、寫進逐站 pref），
+// autoTrimBounds 是**每頁存檔時**修掉當頁多出來的網站背景空白（雙開頁 fit 寬度後只有半頁高、彩頁/短頁）。
+//
+// 為什麼需要它：固定裁切線是照「正常頁」設的；雙開頁的圖只有一半高 ⇒ 下方一大片是網站背景，
+// 固定的底線落在網站頁尾（上一章/下一頁按鈕列、版權列）之上 → 那些 UI 反而被截進來。
+
+// 近純色門檻（亮度值域 max−min，0–255）：比 [CROP_DETECT_UNIFORM_RANGE] 更嚴，因為這裡是**逐頁動刀**，
+// 寧可不修也不要咬到畫面（漫畫內容列值域通常 >100，網站底色 ≈0，漸層背景也多在 10 以內）。
+private const val AUTO_TRIM_UNIFORM_RANGE = 16
+
+// 取樣間隔（每幾列取一列）與每列取樣點數（取中央 50% 寬，避開左右邊欄/捲軸）。
+private const val AUTO_TRIM_ROW_STEP = 3
+private const val AUTO_TRIM_COL_SAMPLES = 24
+
+// 護欄①：連續空白帶要大於總高這個比例才修（小白邊＝漫畫本身的留白，不動）。
+private const val AUTO_TRIM_MIN_BAND_FRACTION = 0.08f
+
+// 護欄②：單邊最多修掉的比例（防止整頁被吃）。
+private const val AUTO_TRIM_MAX_SIDE_FRACTION = 0.6f
+
+// 護欄③：修完剩餘高度至少要佔安全區這個比例，否則整個放棄（判定異常，例如整頁近純色的載入中畫面）。
+private const val AUTO_TRIM_MIN_KEEP_FRACTION = 0.2f
+
+/**
+ * 算出當頁要修掉的上下空白：回傳 `(topPx, bottomPx)`＝上/下各修掉幾**像素**；不修＝`0 to 0`。
+ *
+ * 做法：取畫面**中央 50% 直條**，每 [AUTO_TRIM_ROW_STEP] 列取一列、每列取 [AUTO_TRIM_COL_SAMPLES] 個點算
+ * 亮度值域（max−min）；值域 < [AUTO_TRIM_UNIFORM_RANGE] ⇒ 該列視為「空白列」。由**頂端往下**、**底端往上**
+ * 各數出「從邊緣開始的連續空白帶」，邊界取該空白帶的內側**再退一個取樣間隔**（取樣列之間沒掃到的列也留給內容，
+ * 寧可少修）。三道保守護欄見 [AUTO_TRIM_MIN_BAND_FRACTION] / [AUTO_TRIM_MAX_SIDE_FRACTION] /
+ * [AUTO_TRIM_MIN_KEEP_FRACTION]。
+ *
+ * 成本：只讀中央直條的取樣列（1080×2400 約 40 萬像素、數毫秒），一頁一次，可忽略。輸入為存檔用的 bitmap
+ * （ARGB_8888）；不修改也不回收輸入。
+ */
+fun autoTrimBounds(bitmap: Bitmap): Pair<Int, Int> {
+    val w = bitmap.width
+    val h = bitmap.height
+    if (bitmap.isRecycled || w <= 0 || h < AUTO_TRIM_ROW_STEP * 8) return 0 to 0
+    val x0 = w / 4
+    val stripW = (w - w / 4 - x0).coerceAtLeast(1)
+    val step = (stripW / AUTO_TRIM_COL_SAMPLES).coerceAtLeast(1)
+    val rowCount = h / AUTO_TRIM_ROW_STEP
+    if (rowCount < 8) return 0 to 0
+    val strip = IntArray(stripW)
+    val uniform = BooleanArray(rowCount)
+    for (r in 0 until rowCount) {
+        val y = (r * AUTO_TRIM_ROW_STEP).coerceAtMost(h - 1)
+        // 只讀中央直條那半條（不是整列）：省一半像素、也自動避開左右邊欄。讀失敗（尺寸異常）＝放棄修邊。
+        runCatching { bitmap.getPixels(strip, 0, stripW, x0, y, stripW, 1) }.getOrElse { return 0 to 0 }
+        var min = 255
+        var max = 0
+        var i = 0
+        while (i < stripW) {
+            val c = strip[i]
+            val luma = (((c shr 16) and 0xFF) * 299 + ((c shr 8) and 0xFF) * 587 + (c and 0xFF) * 114) / 1000
+            if (luma < min) min = luma
+            if (luma > max) max = luma
+            i += step
+        }
+        uniform[r] = (max - min) < AUTO_TRIM_UNIFORM_RANGE
+    }
+
+    // 從頂端往下數連續空白列；從底端往上同理。
+    var topRun = 0
+    while (topRun < rowCount && uniform[topRun]) topRun++
+    var bottomRun = 0
+    while (bottomRun < rowCount - topRun && uniform[rowCount - 1 - bottomRun]) bottomRun++
+
+    // 邊界退一個取樣間隔：取樣列之間沒掃到的列可能已經是內容（寧可少修一點）。
+    var top = ((topRun - 1) * AUTO_TRIM_ROW_STEP).coerceAtLeast(0)
+    var bottom = (h - (rowCount - bottomRun + 1) * AUTO_TRIM_ROW_STEP).coerceAtLeast(0)
+
+    // 護欄①：空白帶不夠大就不修（漫畫本身的小白邊不動）。
+    val minBand = (h * AUTO_TRIM_MIN_BAND_FRACTION).roundToInt()
+    if (top < minBand) top = 0
+    if (bottom < minBand) bottom = 0
+    if (top <= 0 && bottom <= 0) return 0 to 0
+
+    // 護欄③：**先**判「修完剩太少＝異常」再套單邊上限——順序不能反。若先夾 60% 再判剩餘，
+    // 整頁近純色的載入中畫面（空白帶＝整頁）會被夾成「只修 60%」而通過剩餘檢查，反而存出一條空白。
+    val kept = h - top - bottom
+    if (kept < (h * AUTO_TRIM_MIN_KEEP_FRACTION).roundToInt() || kept < MIN_CROP_KEEP_PX) return 0 to 0
+
+    // 護欄②：單邊上限（夾完 kept 只會變大，不必重判）。
+    val maxSide = (h * AUTO_TRIM_MAX_SIDE_FRACTION).roundToInt()
+    return top.coerceAtMost(maxSide) to bottom.coerceAtMost(maxSide)
 }
 
 // ── 話數（章名）解析 / 格式化 / 建議 ────────────────────────────────────────

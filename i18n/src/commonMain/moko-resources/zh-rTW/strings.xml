@@ -371,6 +371,9 @@
     <string name="capture_crop_auto">自動偵測</string>
     <string name="capture_crop_auto_none">找不到明顯分界，請自己拖線</string>
     <string name="capture_crop_clear">不裁切</string>
+    <!-- Yakuyomi：擷取的自動修邊（第二層逐頁裁切，修掉網站背景空白） -->
+    <string name="capture_auto_trim">自動修邊</string>
+    <string name="capture_auto_trim_summary">存檔前自動修掉頁面上下大片空白：雙開頁／短頁不會多截到網站頁尾；正常頁不受影響</string>
     <!-- Yakuyomi：擷取的自動翻頁（模擬點擊該站的「下一頁」按鈕） -->
     <string name="capture_autotap">自動翻頁</string>
     <string name="capture_autotap_summary">每截完一頁自動點本站的「下一頁」</string>
@@ -384,8 +387,7 @@
     <string name="capture_tap_delay_summary">太短會在頁面還沒載完就點、太長浪費時間</string>
     <string name="capture_tap_delay_shorter">縮短</string>
     <string name="capture_tap_delay_longer">延長</string>
-    <string name="capture_target_pages">本話頁數（選填）</string>
-    <string name="capture_target_pages_summary">截滿就自動停止；留空＝點了畫面沒變時自動停止</string>
+    <string name="capture_target_pages">本話頁數</string>
     <string name="capture_continuous_count_target">已截 %1$d/%2$d 頁</string>
     <string name="capture_continuous_hint_target">已截 %1$d/%2$d 頁 · 翻到下一頁繼續</string>
     <string name="capture_continuous_hint_auto">自動翻頁中 · 已截 %1$d 頁</string>

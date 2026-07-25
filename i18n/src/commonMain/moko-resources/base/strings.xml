@@ -326,6 +326,9 @@
     <string name="capture_crop_auto">Auto-detect</string>
     <string name="capture_crop_auto_none">Could not find the edges, drag the lines yourself</string>
     <string name="capture_crop_clear">Don\'t crop</string>
+    <!-- Yakuyomi: capture auto-trim (second, per-page crop that removes blank site background) -->
+    <string name="capture_auto_trim">Auto-trim blank edges</string>
+    <string name="capture_auto_trim_summary">Trims large blank areas above/below the page before saving, so double-page spreads and short pages don\'t drag the site\'s footer into the shot. Normal pages are left untouched.</string>
     <!-- Yakuyomi: capture auto page turn (simulated tap on the site's next-page button) -->
     <string name="capture_autotap">Auto page turn</string>
     <string name="capture_autotap_summary">Taps this site\'s next-page button after each capture</string>
@@ -339,8 +342,7 @@
     <string name="capture_tap_delay_summary">Too short taps before the page finishes loading; too long wastes time</string>
     <string name="capture_tap_delay_shorter">Shorter</string>
     <string name="capture_tap_delay_longer">Longer</string>
-    <string name="capture_target_pages">Pages in this chapter (optional)</string>
-    <string name="capture_target_pages_summary">Stops automatically once this many pages are captured; leave empty to stop when tapping stops changing the page</string>
+    <string name="capture_target_pages">Pages</string>
     <string name="capture_continuous_count_target">Captured %1$d/%2$d</string>
     <string name="capture_continuous_hint_target">Captured %1$d/%2$d · turn to the next page to continue</string>
     <string name="capture_continuous_hint_auto">Turning pages automatically · captured %1$d</string>

@@ -4,12 +4,19 @@ import android.graphics.Bitmap
 import android.graphics.Rect
 import android.net.Uri
 import android.os.SystemClock
+import android.provider.Settings
 import android.view.MotionEvent
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -32,10 +39,12 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -78,6 +87,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -92,6 +102,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -101,6 +114,7 @@ import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
@@ -163,13 +177,20 @@ private const val CROP_MIN_KEEP_FRACTION = 0.15f
 // 太長會被判成長按（跳出選單）。50–80ms 是「輕點」的自然區間。
 private const val TAP_DOWN_UP_GAP_MS = 60L
 
-// 點擊位置標記的半徑（dp）：設定模式＝大圓（好拖）、擷取模式常駐＝小圓（只是提示點在哪、不擋畫面）。
-private val TAP_MARKER_SETUP_RADIUS = 22.dp
-private val TAP_MARKER_IDLE_RADIUS = 10.dp
+// 點擊位置標記的半徑（dp）：設定模式＝大圓（好拖、好瞄準）、擷取模式常駐＝小圓（只是提示點在哪、不擋畫面）。
+// 設定模式 22→30dp：使用者回報拖曳時看不太清楚（見 [drawTapMarker] 的雙層描邊）。
+private val TAP_MARKER_SETUP_RADIUS = 30.dp
+private val TAP_MARKER_IDLE_RADIUS = 11.dp
+
+// 準心「呼吸」脈動一圈的時間（ms）；系統動畫關閉時不播（見 tapSetupMode overlay 的 motionEnabled）。
+private const val TAP_MARKER_PULSE_MS = 1600
 
 // 位置沒設定過時，設定模式的預設落點（畫面正中偏下＝多數站「下一頁」鈕的位置）。
 private const val TAP_DEFAULT_X = 0.5f
 private const val TAP_DEFAULT_Y = 0.9f
+
+// 底部「本話頁數」輸入格的寬度：只吃 4 位數字，窄到不撐爆底部 bar。
+private val TARGET_PAGES_FIELD_WIDTH = 64.dp
 
 // 頁面設定 panel 最高高度（加了自動翻頁一整段後可能超過一屏 → 內部可捲）。
 private val PAGE_PANEL_MAX_HEIGHT = 420.dp
@@ -177,6 +198,54 @@ private val PAGE_PANEL_MAX_HEIGHT = 420.dp
 // 「加入最愛」對話框的別名預設草稿：取網址 host（去掉 www.）當好記名字；取不到就退回整串網址。
 private fun defaultBookmarkAlias(url: String): String =
     Uri.parse(url).host?.removePrefix("www.")?.takeIf { it.isNotEmpty() } ?: url
+
+/**
+ * 自動翻頁「點擊準心」的統一畫法（設定模式的大準心 ＋ 擷取模式的常駐小標記共用）。
+ *
+ * ★ **雙層描邊**：先畫較粗的**深色**外層，再在其上疊細的**白色**主體 ⇒ 底下不論是白紙、深色頁還是複雜
+ * 畫面都看得見。單一顏色（舊版只有半透明主色）必然會在某種背景上糊掉——這正是「拖曳時看不太清楚」的主因。
+ *
+ * [emphasis]＝設定模式：加大加粗、**十字準心從圓內延伸到圓外一小段**（像瞄準器）、中心留一個主色小點標示
+ * 精確落點。非 emphasis＝擷取模式的常駐提示：同樣雙層描邊（辨識度提高），但只有小圓、無十字無中心點，
+ * 維持低調不干擾閱讀。
+ *
+ * 純繪圖（DrawScope），不吃觸控、不含狀態；呼叫端負責 gate（`!hideOverlayForCapture` 等）與座標系對齊。
+ */
+private fun DrawScope.drawTapMarker(
+    center: Offset,
+    radius: Float,
+    accent: Color,
+    emphasis: Boolean,
+) {
+    val body = Color.White
+    val outline = Color.Black.copy(alpha = 0.55f)
+    val ring = (if (emphasis) 2.5f else 1.5f).dp.toPx()
+    val halo = ring + (if (emphasis) 3f else 2f).dp.toPx()
+    // 內填：主色極淡一層（淺色頁上多一層辨識），淡到不擋住底下的「下一頁」按鈕文字。
+    drawCircle(color = accent.copy(alpha = if (emphasis) 0.20f else 0.14f), radius = radius, center = center)
+    drawCircle(color = outline, radius = radius, center = center, style = Stroke(width = halo))
+    drawCircle(color = body, radius = radius, center = center, style = Stroke(width = ring))
+    if (!emphasis) return
+
+    // 十字：中心留空（給落點小點）、末端超出圓外，兩段式描邊同樣先深後淺。
+    val inner = radius * 0.45f
+    val outer = radius * 1.5f
+    val arms = listOf(Offset(1f, 0f), Offset(-1f, 0f), Offset(0f, 1f), Offset(0f, -1f))
+    listOf(outline to halo, body to ring).forEach { (color, width) ->
+        arms.forEach { d ->
+            drawLine(
+                color = color,
+                start = Offset(center.x + d.x * inner, center.y + d.y * inner),
+                end = Offset(center.x + d.x * outer, center.y + d.y * outer),
+                strokeWidth = width,
+                cap = StrokeCap.Round,
+            )
+        }
+    }
+    // 精確落點：深色外圈 + 主色小點（與白色十字區隔，一眼看出「會點這裡」）。
+    drawCircle(color = outline, radius = ring * 2.4f, center = center)
+    drawCircle(color = accent, radius = ring * 1.4f, center = center)
+}
 
 /**
  * 畫面層級的 WebView 持有者（`remember` 在 CaptureScreenContent 裡，與整個 composition 同生命週期）。
@@ -962,14 +1031,13 @@ fun CaptureScreenContent(
                         .fillMaxHeight()
                         .fillMaxWidth(canvasFraction),
                 ) {
-                    val center = Offset(markerX * size.width, markerY * size.height)
-                    val radius = TAP_MARKER_IDLE_RADIUS.toPx()
-                    drawCircle(color = markerColor.copy(alpha = 0.22f), radius = radius, center = center)
-                    drawCircle(
-                        color = markerColor.copy(alpha = 0.6f),
-                        radius = radius,
-                        center = center,
-                        style = Stroke(width = 1.5.dp.toPx()),
+                    // 雙層描邊的小標記（深色外層 + 白色主體）：深色網頁上也看得見，但仍維持低調
+                    // （無十字、無中心點——它只是提示「等下會點這裡」，不需要跟設定模式一樣搶眼）。
+                    drawTapMarker(
+                        center = Offset(markerX * size.width, markerY * size.height),
+                        radius = TAP_MARKER_IDLE_RADIUS.toPx(),
+                        accent = markerColor,
+                        emphasis = false,
                     )
                 }
             }
@@ -1651,6 +1719,31 @@ fun CaptureScreenContent(
                                     }
                                 }
 
+                                // ②-b 自動修邊（第二層裁切、逐頁動態、**預設開**）：固定裁切是照「正常頁」設的，
+                                // 遇到雙開頁（fit 寬度後高度只有一半）或彩頁/短頁時圖片下方會留一大片網站背景、
+                                // 反而把網站頁尾截進來 → 這個開關在固定裁切後把上下大片單色空白修掉。
+                                // 正常頁＝no-op（沒有大片空白就不動作），所以預設開著也安全。
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = stringResource(MR.strings.capture_auto_trim),
+                                            style = MaterialTheme.typography.labelLarge,
+                                        )
+                                        Text(
+                                            text = stringResource(MR.strings.capture_auto_trim_summary),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    Switch(
+                                        checked = siteSetting.autoTrim,
+                                        onCheckedChange = { commitSiteSetting(siteSetting.copy(autoTrim = it)) },
+                                    )
+                                }
+
                                 // ③ 自動翻頁（逐站）：連續擷取存完一頁後自動點該站的「下一頁」→ 全自動擷取。
                                 // 開關 + 點擊位置 + 點擊延遲 + 本話頁數，全放這裡（都與「這一站怎麼截」同一組設定）。
                                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
@@ -1784,26 +1877,9 @@ fun CaptureScreenContent(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
-
-                                // ④ 本話頁數（選填、**per-session 不記憶**）：截滿即自動停止進確認頁。
-                                // 刻意**不**綁自動翻頁——手動翻頁時「這話 16 頁、截滿自動停」一樣好用
-                                // （model 的停止條件①與自動翻頁無關）。留空＝不設上限，行為完全同以前。
-                                Spacer(modifier = Modifier.height(8.dp))
-                                OutlinedTextField(
-                                    value = targetPagesDraft,
-                                    onValueChange = { input ->
-                                        targetPagesDraft = input.filter { it.isDigit() }.take(4)
-                                    },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    label = { Text(stringResource(MR.strings.capture_target_pages)) },
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                )
-                                Text(
-                                    text = stringResource(MR.strings.capture_target_pages_summary),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
+                                // ★「本話頁數」已從這個 panel 移到**底部細長 bar**（見下方 targetPagesBar）：
+                                // 這個 panel 很高、正好蓋住網站頁面頂端的頁數顯示（如「2/16P」），使用者得關掉
+                                // panel 看一眼再開回來填。底部 bar 只有一列高、不擋頂端。
                             }
                         }
                     }
@@ -1849,6 +1925,77 @@ fun CaptureScreenContent(
                                     Text(text = stringResource(MR.strings.action_cancel))
                                 }
                             }
+                        }
+                    }
+                }
+
+                // ── 本話頁數：底部細長 bar（★ 從「頁面設定」panel 搬過來）────────────────
+                // 為什麼搬：網站的頁數顯示（如 manhuagui 的「2/16P」）在**頁面頂端**，正好被那個很高的
+                // panel 蓋住 → 使用者得關掉 panel 看一眼、再開回來填。這條 bar 只有一列高、貼在左下角，
+                // 不擋頂端也不擋畫面中央；行為完全沿用（同一個 targetPagesDraft、per-session 不記憶、
+                // 換話清空、留空＝不設上限）。
+                // 顯示條件：正常擷取模式（[CaptureMode.CAPTURING]）、**未在連續擷取中**（連續中不該改目標）、
+                // 非單張（重截/插入）模式；並跟著「開始」一起解鎖（canStart）——頁數是按「開始」前才要填的東西，
+                // 還在瀏覽/設定書名的階段不必先擺出來。工具列收起時一併收起（＝乾淨看漫畫）。
+                if (!singleShotMode && !continuousRunning && canStart) {
+                    Surface(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .navigationBarsPadding()
+                            .padding(8.dp),
+                        color = barColor,
+                        contentColor = barContentColor,
+                        shape = MaterialTheme.shapes.large,
+                        shadowElevation = 3.dp,
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = stringResource(MR.strings.capture_target_pages),
+                                style = MaterialTheme.typography.labelLarge,
+                            )
+                            // 用 BasicTextField（而非 OutlinedTextField）：後者最小高 56dp + 最小寬 280dp，
+                            // 會把「很薄的底部 bar」撐成一大塊；這裡只要一格數字。
+                            BasicTextField(
+                                value = targetPagesDraft,
+                                onValueChange = { input ->
+                                    targetPagesDraft = input.filter { it.isDigit() }.take(4)
+                                },
+                                modifier = Modifier
+                                    .padding(start = 8.dp)
+                                    .width(TARGET_PAGES_FIELD_WIDTH),
+                                textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                    color = barContentColor,
+                                    textAlign = TextAlign.Center,
+                                ),
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(
+                                    keyboardType = KeyboardType.Number,
+                                    imeAction = ImeAction.Done,
+                                ),
+                                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                decorationBox = { innerTextField ->
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(MaterialTheme.shapes.small)
+                                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        // 空＝不設上限（照舊行為）：畫一個破折號當提示，不是可翻譯字串。
+                                        if (targetPagesDraft.isEmpty()) {
+                                            Text(
+                                                text = "–",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                        innerTextField()
+                                    }
+                                },
+                            )
                         }
                     }
                 }
@@ -2301,6 +2448,31 @@ fun CaptureScreenContent(
         // 不畫 dim（使用者要看清楚網頁上的「下一頁」鈕才對得準）；截圖時整層藏起（護欄：截圖零 overlay）。
         if (tapSetupMode && !hideOverlayForCapture && !reviewMode) {
             val markerColor = MaterialTheme.colorScheme.primary
+            // 輕微「呼吸」脈動（一圈往外擴散的環）幫助定位。★ 尊重系統的「關閉動畫」設定
+            // （ANIMATOR_DURATION_SCALE == 0 ＝ 開發者選項/無障礙關掉動畫，等同 prefers-reduced-motion）：
+            // 關閉時**完全不建立** infinite transition（不只是不畫），靜態的雙層描邊本身已足夠清楚。
+            val motionEnabled = remember {
+                runCatching {
+                    Settings.Global.getFloat(
+                        context.contentResolver,
+                        Settings.Global.ANIMATOR_DURATION_SCALE,
+                        1f,
+                    )
+                }.getOrDefault(1f) > 0f
+            }
+            val pulseState: State<Float>? = if (motionEnabled) {
+                rememberInfiniteTransition(label = "capture-tap-pulse").animateFloat(
+                    initialValue = 0f,
+                    targetValue = 1f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(TAP_MARKER_PULSE_MS, easing = LinearEasing),
+                        repeatMode = RepeatMode.Restart,
+                    ),
+                    label = "capture-tap-pulse",
+                )
+            } else {
+                null
+            }
             Box(modifier = Modifier.fillMaxSize()) {
                 Box(
                     modifier = Modifier
@@ -2336,27 +2508,22 @@ fun CaptureScreenContent(
                         Canvas(modifier = Modifier.fillMaxSize()) {
                             val center = Offset(tapXDraft * size.width, tapYDraft * size.height)
                             val radius = TAP_MARKER_SETUP_RADIUS.toPx()
-                            drawCircle(color = markerColor.copy(alpha = 0.28f), radius = radius, center = center)
-                            drawCircle(
-                                color = markerColor,
-                                radius = radius,
+                            // 脈動環（有開動畫才有）：在**準心底下**先畫，往外擴散同時淡出 → 不遮蓋準心本體。
+                            // 在 draw 階段讀 state ⇒ 只重繪、不重組。
+                            val pulse = pulseState?.value ?: 0f
+                            if (pulse > 0f) {
+                                drawCircle(
+                                    color = markerColor.copy(alpha = 0.45f * (1f - pulse)),
+                                    radius = radius * (1f + 0.5f * pulse),
+                                    center = center,
+                                    style = Stroke(width = 2.dp.toPx()),
+                                )
+                            }
+                            drawTapMarker(
                                 center = center,
-                                style = Stroke(width = 2.dp.toPx()),
-                            )
-                            // 十字準心：讓使用者對得準按鈕中心（圓的中心不好目測）。
-                            val arm = radius * 1.6f
-                            val hair = 1.5.dp.toPx()
-                            drawLine(
-                                color = markerColor,
-                                start = Offset(center.x - arm, center.y),
-                                end = Offset(center.x + arm, center.y),
-                                strokeWidth = hair,
-                            )
-                            drawLine(
-                                color = markerColor,
-                                start = Offset(center.x, center.y - arm),
-                                end = Offset(center.x, center.y + arm),
-                                strokeWidth = hair,
+                                radius = radius,
+                                accent = markerColor,
+                                emphasis = true,
                             )
                         }
                     }
