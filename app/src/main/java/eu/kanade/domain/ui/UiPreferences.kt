@@ -60,6 +60,14 @@ class UiPreferences(
     // `[{"url":"...","alias":"..."}]`，最新加入的在最前；與自動記錄的網址歷史（captureUrlHistory）分開。
     val captureBookmarks: Preference<String> = preferenceStore.getString("capture_bookmarks", "[]")
 
+    // Yakuyomi：擷取的**逐站（host）設定**——網頁畫布寬度% + 去頭去尾裁切比例。JSON 物件
+    // `{"<host>":{"scale":80,"cropTop":0.08,"cropBottom":0.12}}`：
+    // - `scale`＝畫布寬度百分比（50–100，100＝不縮，套用方式見 CaptureScreenContent 的 applyInitialScale）
+    // - `cropTop`/`cropBottom`＝存檔前從**上／下**各裁掉多少，**佔畫面高度的比例 0.0–1.0**
+    //   （存比例而非像素 → 換解析度/旋轉/摺疊展開都適用）
+    // host 已正規化（小寫、去 `www.`）；全為預設值的站不寫入（保持 pref 乾淨）。
+    val captureSiteSettings: Preference<String> = preferenceStore.getString("capture_site_settings", "{}")
+
     companion object {
         fun dateFormat(format: String): DateTimeFormatter = when (format) {
             "" -> DateTimeFormatter.ofLocalizedDate(FormatStyle.SHORT)

@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.ui.capture
 import android.app.Application
 import android.graphics.Bitmap
 import android.graphics.Rect
+import android.net.Uri
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -84,6 +85,17 @@ private const val MAX_WEBVIEW_URL_HISTORY = 20
 // 封面檔名：對齊 LocalCoverManager 的 DEFAULT_COVER_NAME＝存書名夾根的 `cover.jpg`，LocalSource 才認得
 // （find() 找 nameWithoutExtension=="cover" 的圖）。存這個名字 → 書櫃自動顯示封面。
 private const val COVER_NAME = "cover.jpg"
+
+// ── 逐站設定（畫布寬度% + 去頭去尾裁切）的可調常數 ──────────────────────────────
+// 畫布寬度可調範圍（%）：低於 50% 內容太小、高於 100% 沒有意義（100＝網站原本的 fit 寬度）。
+const val CAPTURE_SCALE_MIN = 50
+const val CAPTURE_SCALE_MAX = 100
+
+// 畫布寬度 −/＋ 一次的級距（%）。
+const val CAPTURE_SCALE_STEP = 5
+
+// 裁切後最少要留幾 px 高（防呆：設定壞掉時寧可整張存、不要存出一條線）。
+private const val MIN_CROP_KEEP_PX = 32
 
 /**
  * 連續截圖狀態：是否進行中 + 本 session 已截頁數（給 UI 顯示「已截 N 頁」）+
@@ -239,6 +251,9 @@ class CaptureScreen(
             coverProvider = { book -> screenModel.findCoverUri(book) },
             // 「新漫畫」確定時記漫畫來源網址（供日後「繼續擷取」）。
             onWriteMangaMeta = { book, url -> screenModel.writeMangaMeta(book, url) },
+            // 逐站設定（畫布寬度% + 去頭去尾裁切）：以當前網址的 host 為 key 讀寫。
+            siteSettingProvider = { url -> screenModel.siteSettingFor(url) },
+            onSaveSiteSetting = { url, setting -> screenModel.saveSiteSetting(url, setting) },
             // 確認面板＝疊在常駐 WebView 上的一層 composable（原本的獨立 Screen 內容，邏輯不變）。
             reviewContent = {
                 CaptureReviewScreenContent(
@@ -286,6 +301,40 @@ data class InsertTarget(
     val insertAtPage: Int,
     val url: String? = null,
 )
+
+/**
+ * 逐站（host）的擷取設定：**畫布寬度%** ＋ **去頭去尾裁切比例**（階段 4）。
+ *
+ * - [scale]＝網頁畫布寬度百分比（[CAPTURE_SCALE_MIN]–[CAPTURE_SCALE_MAX]）。100＝維持網站原本的 fit-寬度；
+ *   小於 100＝把整頁縮小（寬螢幕上讓一整頁漫畫塞得進一屏，不必上下捲）。套用方式＝原生
+ *   [android.webkit.WebView.setInitialScale]，**不注入 JS、不碰 DOM**（見 CaptureScreenContent）。
+ * - [cropTop] / [cropBottom]＝**存檔前**從畫面上/下各裁掉多少，單位是**佔畫面高度的比例 0.0–1.0**
+ *   （存比例不存像素 → 換解析度 / 旋轉 / 摺疊展開都適用）。0＝不裁。
+ */
+data class CaptureSiteSetting(
+    val scale: Int = CAPTURE_SCALE_MAX,
+    val cropTop: Float = 0f,
+    val cropBottom: Float = 0f,
+) {
+    /** 全預設（沒縮放、沒裁切）＝不必寫進 pref。 */
+    val isDefault: Boolean
+        get() = scale >= CAPTURE_SCALE_MAX && cropTop <= 0f && cropBottom <= 0f
+
+    /** 有裁切設定（存檔時要動刀）。 */
+    val hasCrop: Boolean
+        get() = cropTop > 0f || cropBottom > 0f
+}
+
+/** 網址 → 逐站設定的 key：小寫 host、去掉 `www.`；空白 / about:blank / 解析不到 host ⇒ null。 */
+fun captureHostOf(url: String?): String? {
+    val trimmed = url?.trim().orEmpty()
+    if (trimmed.isEmpty() || trimmed == "about:blank") return null
+    return runCatching { Uri.parse(trimmed).host }
+        .getOrNull()
+        ?.lowercase()
+        ?.removePrefix("www.")
+        ?.takeIf { it.isNotEmpty() }
+}
 
 /** 我的最愛的一筆：常用站網址 + 使用者命名的別名（別名空白時退回顯示網址）。 */
 data class CaptureBookmark(
@@ -365,6 +414,8 @@ class CaptureScreenModel(
     fun addWebViewUrl(url: String, title: String = "") {
         val trimmed = url.trim()
         if (trimmed.isEmpty() || trimmed == "about:blank") return
+        // 順手記下「目前在哪一站」：存檔時若那一頁沒記到網址（url==null），仍能取得逐站裁切設定。
+        captureHostOf(trimmed)?.let { activeHost = it }
         val current = webViewUrlHistory()
         val cleanTitle = title.trim().takeIf { it != "about:blank" }.orEmpty()
         val keptTitle = cleanTitle.ifEmpty { current.firstOrNull { it.url == trimmed }?.title.orEmpty() }
@@ -423,6 +474,83 @@ class CaptureScreenModel(
             arr.put(JSONObject().put("url", bm.url).put("alias", bm.alias))
         }
         uiPreferences.captureBookmarks.set(arr.toString())
+    }
+
+    // ── 逐站設定：畫布寬度% + 去頭去尾裁切（階段 4）──────────────────────────────
+    // 存 UiPreferences.captureSiteSettings（JSON 物件 `{host:{scale,cropTop,cropBottom}}`），key＝正規化 host。
+    // 讀寫都很輕（一次一個小物件），不快取，避免與設定畫面/多處寫入不同步。
+
+    /** 目前所在站台的 host（由 [addWebViewUrl] 隨導覽更新）：存檔那頁沒記到網址時的 fallback。 */
+    @Volatile
+    var activeHost: String? = null
+
+    /** 讀某網址（取其 host）的逐站設定；沒設定過 / 解析失敗 ⇒ 預設值（不縮放、不裁切）。 */
+    fun siteSettingFor(url: String?): CaptureSiteSetting {
+        val host = captureHostOf(url) ?: return CaptureSiteSetting()
+        return readSiteSettings()[host] ?: CaptureSiteSetting()
+    }
+
+    /** 寫某網址（取其 host）的逐站設定；全預設＝把該站整筆移除（pref 不留垃圾）。取不到 host ⇒ 不動作。 */
+    fun saveSiteSetting(url: String?, setting: CaptureSiteSetting) {
+        val host = captureHostOf(url) ?: return
+        val map = readSiteSettings().toMutableMap()
+        if (setting.isDefault) map.remove(host) else map[host] = setting
+        val obj = JSONObject()
+        map.forEach { (h, s) ->
+            obj.put(
+                h,
+                JSONObject()
+                    .put("scale", s.scale)
+                    .put("cropTop", s.cropTop.toDouble())
+                    .put("cropBottom", s.cropBottom.toDouble()),
+            )
+        }
+        uiPreferences.captureSiteSettings.set(obj.toString())
+    }
+
+    private fun readSiteSettings(): Map<String, CaptureSiteSetting> = runCatching {
+        val obj = JSONObject(uiPreferences.captureSiteSettings.get())
+        buildMap {
+            for (key in obj.keys()) {
+                val o = obj.optJSONObject(key) ?: continue
+                put(
+                    key,
+                    CaptureSiteSetting(
+                        scale = o.optInt("scale", CAPTURE_SCALE_MAX).coerceIn(CAPTURE_SCALE_MIN, CAPTURE_SCALE_MAX),
+                        cropTop = o.optDouble("cropTop", 0.0).toFloat().coerceIn(0f, 1f),
+                        cropBottom = o.optDouble("cropBottom", 0.0).toFloat().coerceIn(0f, 1f),
+                    ),
+                )
+            }
+        }
+    }.getOrElse { emptyMap() }
+
+    /**
+     * 存檔前套用該站的**去頭去尾**裁切（只切上下、寬度不動）：[url] 取不到 host 時退回 [activeHost]。
+     * 沒設定 / 設定切完剩不到 [MIN_CROP_KEEP_PX] ⇒ 原樣回傳**同一顆 bitmap**（呼叫端據此判斷要不要 recycle）。
+     * ★ 封面框選（[saveCover]）刻意不套用——那是使用者自己框的範圍。
+     */
+    private fun cropForSave(bitmap: Bitmap, url: String?): Bitmap {
+        if (bitmap.isRecycled) return bitmap
+        val setting = siteSettingFor(url ?: activeHost?.let { "https://$it" })
+        if (!setting.hasCrop) return bitmap
+        val h = bitmap.height
+        val top = (h * setting.cropTop).roundToInt().coerceIn(0, h)
+        val bottom = (h * (1f - setting.cropBottom)).roundToInt().coerceIn(0, h)
+        if (top == 0 && bottom == h) return bitmap
+        if (bottom - top < MIN_CROP_KEEP_PX) return bitmap
+        // createBitmap(src,0,top,w,h') 覆蓋整張時會回傳同一物件 → 呼叫端一律用 !== 判斷才 recycle。
+        return runCatching { Bitmap.createBitmap(bitmap, 0, top, bitmap.width, bottom - top) }.getOrDefault(bitmap)
+    }
+
+    /** 依逐站裁切設定寫檔：裁出來的新 bitmap 用完即回收，原圖（呼叫端還要用）不動。 */
+    private fun writePage(file: UniFile, bitmap: Bitmap, url: String?) {
+        val out = cropForSave(bitmap, url)
+        try {
+            openTruncating(file).use { out.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        } finally {
+            if (out !== bitmap && !out.isRecycled) out.recycle()
+        }
     }
 
     /**
@@ -713,7 +841,8 @@ class CaptureScreenModel(
             val page = nextPageNumber(chapterDir)
             val name = "%03d.png".format(page)
             val file = chapterDir.createFile(name) ?: error("Cannot create page file")
-            openTruncating(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            // 依該站的「去頭去尾」設定裁掉上下（沒設定＝原樣存）。
+            writePage(file, bitmap, url)
             updateMetaUrl(chapterDir, page, url)
             // ★ 安全網（件 1）：確保**漫畫層** meta（.yakuyomi_manga）存在——供日後「繼續擷取」開回原站。
             // 不再只靠「新漫畫 panel 按確定」那一條（continue-capture 帶著書名進來根本不開該 panel、就漏寫）；
@@ -746,7 +875,7 @@ class CaptureScreenModel(
             val file = chapterDir.findFile(pageName)
                 ?: chapterDir.createFile(pageName)
                 ?: error("Cannot create page file")
-            openTruncating(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            writePage(file, bitmap, url)
 
             val page = pageName.substringBeforeLast('.').toIntOrNull() ?: 0
             updateMetaUrl(chapterDir, page, url)
@@ -805,7 +934,7 @@ class CaptureScreenModel(
 
             val name = "%03d.png".format(insertAtPage)
             val file = chapterDir.findFile(name) ?: chapterDir.createFile(name) ?: error("Cannot create page file")
-            openTruncating(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            writePage(file, bitmap, url)
 
             // 安全網同 [saveCapture]：純靠插入補頁的書也要有漫畫層 meta。
             ensureMangaMeta(mangaDir, url)
@@ -873,6 +1002,87 @@ class CaptureScreenModel(
                 "Cannot open output stream for ${f.uri}"
             }
         }
+}
+
+// ── 去頭去尾分界的自動偵測（件 3-B 輔助）────────────────────────────────────
+// 純函式（不碰 I/O、不碰 Compose）：吃一張畫面截圖 → 猜「頂線 / 底線」的比例，供裁切模式**預先擺好**兩條線
+// 讓使用者確認/微調（不直接套用）。做法：只看截圖**中央直條**（避開左右邊欄/捲軸），逐列算亮度值域
+// （max−min）：值域小＝近乎純色（網站 nav / 標題 / footer 底色），值域大＝漫畫內容。從畫面中央往上、
+// 往下掃，遇到「連續數列近純色」就把邊界定在該純色帶的**內側**。啟發式而已，偵測不到就回 0（不裁）。
+
+// 近純色門檻（亮度值域 0–255）：漫畫內容列通常 >100，純色底 ≈0。
+private const val CROP_DETECT_UNIFORM_RANGE = 24
+
+// 連續幾個「取樣列」都近純色才算邊界（避免被漫畫裡的一小條留白騙走）。
+private const val CROP_DETECT_RUN_ROWS = 6
+
+// 取樣間隔（每幾列取一列）與每列取樣點數（取中央 50% 寬）。
+private const val CROP_DETECT_ROW_STEP = 4
+private const val CROP_DETECT_COL_SAMPLES = 24
+
+// 單邊最多裁掉的比例（防誤判把漫畫本體吃掉）。
+private const val CROP_DETECT_MAX_FRACTION = 0.4f
+
+/**
+ * 自動偵測去頭去尾分界。回傳 `(cropTop, cropBottom)`＝上/下各要裁掉的**畫面高度比例**（0f–[CROP_DETECT_MAX_FRACTION]）；
+ * 偵測不到該邊就回 0（不裁）。輸入為 WebView 畫面截圖（ARGB_8888）。
+ */
+fun detectCropBounds(bitmap: Bitmap): Pair<Float, Float> {
+    val w = bitmap.width
+    val h = bitmap.height
+    if (bitmap.isRecycled || w <= 0 || h <= CROP_DETECT_ROW_STEP * CROP_DETECT_RUN_ROWS * 2) return 0f to 0f
+    val x0 = w / 4
+    val x1 = w - w / 4
+    val step = ((x1 - x0) / CROP_DETECT_COL_SAMPLES).coerceAtLeast(1)
+    val rowCount = h / CROP_DETECT_ROW_STEP
+    val uniform = BooleanArray(rowCount)
+    val row = IntArray(w)
+    for (r in 0 until rowCount) {
+        val y = (r * CROP_DETECT_ROW_STEP).coerceAtMost(h - 1)
+        runCatching { bitmap.getPixels(row, 0, w, 0, y, w, 1) }.getOrElse { return 0f to 0f }
+        var min = 255
+        var max = 0
+        var x = x0
+        while (x < x1) {
+            val c = row[x]
+            val luma = (((c shr 16) and 0xFF) * 299 + ((c shr 8) and 0xFF) * 587 + (c and 0xFF) * 114) / 1000
+            if (luma < min) min = luma
+            if (luma > max) max = luma
+            x += step
+        }
+        uniform[r] = (max - min) < CROP_DETECT_UNIFORM_RANGE
+    }
+
+    val center = rowCount / 2
+    // 往上找：純色帶的**下緣**（第一列非純色的位置）＝頂線。
+    var top = 0f
+    var run = 0
+    for (r in center - 1 downTo 0) {
+        if (uniform[r]) {
+            run++
+            if (run >= CROP_DETECT_RUN_ROWS) {
+                top = ((r + run) * CROP_DETECT_ROW_STEP).toFloat() / h
+                break
+            }
+        } else {
+            run = 0
+        }
+    }
+    // 往下找：純色帶的**上緣**＝底線；轉成「從底部裁掉多少」。
+    var bottom = 0f
+    run = 0
+    for (r in center + 1 until rowCount) {
+        if (uniform[r]) {
+            run++
+            if (run >= CROP_DETECT_RUN_ROWS) {
+                bottom = 1f - ((r - run + 1) * CROP_DETECT_ROW_STEP).toFloat() / h
+                break
+            }
+        } else {
+            run = 0
+        }
+    }
+    return top.coerceIn(0f, CROP_DETECT_MAX_FRACTION) to bottom.coerceIn(0f, CROP_DETECT_MAX_FRACTION)
 }
 
 // ── 話數（章名）解析 / 格式化 / 建議 ────────────────────────────────────────

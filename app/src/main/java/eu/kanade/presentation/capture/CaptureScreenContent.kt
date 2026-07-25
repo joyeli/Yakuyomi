@@ -40,8 +40,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.CollectionsBookmark
+import androidx.compose.material.icons.outlined.ContentCut
 import androidx.compose.material.icons.outlined.Crop
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.Edit
@@ -49,8 +51,10 @@ import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Public
+import androidx.compose.material.icons.outlined.Remove
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.UnfoldLess
 import androidx.compose.material.icons.outlined.UnfoldMore
 import androidx.compose.material3.AlertDialog
@@ -61,6 +65,7 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -68,6 +73,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -105,15 +111,24 @@ import com.kevinnzou.web.WebViewNavigator
 import com.kevinnzou.web.WebViewState
 import eu.kanade.presentation.webview.captureWebView
 import eu.kanade.presentation.webview.findActivity
+import eu.kanade.tachiyomi.ui.capture.CAPTURE_SCALE_MAX
+import eu.kanade.tachiyomi.ui.capture.CAPTURE_SCALE_MIN
+import eu.kanade.tachiyomi.ui.capture.CAPTURE_SCALE_STEP
 import eu.kanade.tachiyomi.ui.capture.CaptureBookmark
 import eu.kanade.tachiyomi.ui.capture.CaptureMode
 import eu.kanade.tachiyomi.ui.capture.CaptureSaveResult
+import eu.kanade.tachiyomi.ui.capture.CaptureSiteSetting
 import eu.kanade.tachiyomi.ui.capture.CaptureUrlEntry
 import eu.kanade.tachiyomi.ui.capture.FrameGrabber
+import eu.kanade.tachiyomi.ui.capture.captureHostOf
+import eu.kanade.tachiyomi.ui.capture.detectCropBounds
 import eu.kanade.tachiyomi.ui.capture.suggestCaptureChapterNames
 import eu.kanade.tachiyomi.util.system.setDefaultSettings
 import eu.kanade.tachiyomi.util.system.toast
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlin.math.abs
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.core.common.i18n.stringResource as contextStringResource
@@ -126,6 +141,9 @@ private enum class CaptureListSheet { HISTORY, BOOKMARKS }
 
 // 瀏覽 panel 內「我的最愛」快選最多顯示幾筆（其餘走全屏清單）；再多會把 panel 撐爆。
 private const val BROWSE_BOOKMARK_PREVIEW = 3
+
+// 去頭去尾裁切：兩條線之間至少要留多少比例的畫面（防止把保留區拖到 0）。
+private const val CROP_MIN_KEEP_FRACTION = 0.15f
 
 // 「加入最愛」對話框的別名預設草稿：取網址 host（去掉 www.）當好記名字；取不到就退回整串網址。
 private fun defaultBookmarkAlias(url: String): String =
@@ -229,6 +247,9 @@ fun CaptureScreenContent(
     coverProvider: suspend (String) -> String? = { null },
     // 「新漫畫」確定時記漫畫來源網址（供日後「繼續擷取」；這批只寫）。
     onWriteMangaMeta: (String, String?) -> Unit = { _, _ -> },
+    // 逐站設定（畫布寬度% + 去頭去尾裁切）：以當前網址的 host 為 key 讀 / 寫。
+    siteSettingProvider: (String?) -> CaptureSiteSetting = { CaptureSiteSetting() },
+    onSaveSiteSetting: (String?, CaptureSiteSetting) -> Unit = { _, _ -> },
 ) {
     val reCaptureMode = reCaptureTargetPage != null
     val insertMode = insertTargetPage != null
@@ -300,11 +321,66 @@ fun CaptureScreenContent(
     var coverPreviewUri by remember { mutableStateOf<String?>(null) }
     var coverReloadKey by remember { mutableIntStateOf(0) }
 
+    // ── 逐站設定：畫布寬度% + 去頭去尾裁切（階段 4）─────────────────────────────
+    // 目前站台（host）的設定；換站時重讀 pref。
+    var siteSetting by remember { mutableStateOf(CaptureSiteSetting()) }
+    // 「頁面設定」panel（畫布寬度滑桿 + 裁切設定入口）展開與否。
+    var pagePanelExpanded by remember { mutableStateOf(false) }
+    // 畫布寬度草稿（滑桿拖曳中的值；放開才寫回 pref + 套用）。
+    var scaleDraft by remember { mutableIntStateOf(CAPTURE_SCALE_MAX) }
+    // 目前**實際套用到 WebView** 的畫布寬度%（100＝沒套自訂）＋它屬於哪一站（換站要先還原再重量）。
+    var appliedScalePercent by remember { mutableIntStateOf(CAPTURE_SCALE_MAX) }
+    var appliedScaleHost by remember { mutableStateOf<String?>(null) }
+    // 這一站「沒套自訂縮放時」量到的自然縮放（WebViewClient.onScaleChanged 回報值；0＝還沒量到）。
+    // ★ 為何要量：原生 setInitialScale(percent) 的 percent 與 WebView 的 scale 同單位（scale == percent/100）、
+    // 且**不考慮螢幕密度**，也不知道網站的 viewport 寬 —— 直接餵 80 會變成「1 CSS px = 0.8 實體 px」（超小）。
+    // 所以先量該站在預設（fit 寬度）下的 scale，再乘上使用者要的百分比才是「畫布寬度 80%」。
+    var naturalScale by remember { mutableFloatStateOf(0f) }
+    var naturalHost by remember { mutableStateOf<String?>(null) }
+    // ── 去頭去尾裁切設定模式（件 3-A）：兩條可拖曳的水平線 ────────────────────
+    var cropSetupMode by remember { mutableStateOf(false) }
+    // 草稿＝上/下各裁掉的畫面高度比例（0f–1f）；按「儲存」才寫回 pref。
+    var cropTopDraft by remember { mutableFloatStateOf(0f) }
+    var cropBottomDraft by remember { mutableFloatStateOf(0f) }
+    // 自動偵測進行中（截圖 + 分析期間鎖住按鈕）。
+    var cropAutoBusy by remember { mutableStateOf(false) }
+
+    /**
+     * 把「畫布寬度%」推進 WebView 的原生 [WebView.setInitialScale]（**純 WebView API、不注入 JS、不碰 DOM**）。
+     * 100%（或還沒量到自然縮放）＝ setInitialScale(0)＝交還給 useWideViewPort + loadWithOverviewMode 的預設行為。
+     */
+    fun pushInitialScale(wv: WebView, percent: Int) {
+        if (percent >= CAPTURE_SCALE_MAX || naturalScale <= 0f) {
+            wv.setInitialScale(0)
+        } else {
+            wv.setInitialScale((naturalScale * percent).roundToInt().coerceIn(1, 1000))
+        }
+    }
+
+    /**
+     * 導覽到 [url] 之前/當下把畫布寬度對齊該站：
+     * - 同一站 → 重推目前套用值（setInitialScale **只在頁面載入時生效**，且已知後續 loadUrl 的頁面不一定沿用
+     *   ⇒ 每個載入起點都重推最保險）。
+     * - 換站 → 回預設 0（新站先以自然縮放呈現，才量得到它自己的 naturalScale）。
+     */
+    fun syncInitialScaleFor(wv: WebView, url: String?) {
+        val host = captureHostOf(url)
+        if (host != null && host == appliedScaleHost) {
+            pushInitialScale(wv, appliedScalePercent)
+        } else if (appliedScalePercent != CAPTURE_SCALE_MAX) {
+            wv.setInitialScale(0)
+            appliedScalePercent = CAPTURE_SCALE_MAX
+            appliedScaleHost = null
+        }
+    }
+
     // 網址列上的當前網址（隨 WebView 導覽同步）；造訪時記錄進歷史 pref。
     val webClient = remember {
         object : AccompanistWebViewClient() {
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
                 super.onPageStarted(view, url, favicon)
+                // 每個載入起點都把畫布寬度對齊該站（setInitialScale 只在載入時生效，見 syncInitialScaleFor）。
+                syncInitialScaleFor(view, url)
                 url?.let {
                     address = it
                     loadedUrl = it
@@ -337,10 +413,23 @@ fun CaptureScreenContent(
                 val target = request?.url?.toString() ?: return false
                 if (target.startsWith("intent://")) return true
                 if ((target.startsWith("http") || target.startsWith("https")) && target != view?.url) {
+                    // ★ 在 loadUrl **之前**推畫布寬度：這是 setInitialScale 唯一保證生效的時機（載入起點）。
+                    view?.let { syncInitialScaleFor(it, target) }
                     view?.loadUrl(target)
                     return true
                 }
                 return false
+            }
+
+            /**
+             * 追蹤 WebView 目前的實際縮放（原生回呼、非 JS）。只有「沒套自訂縮放」時量到的才是這一站的
+             * **自然縮放**（fit 寬度）；套過之後量到的是我們自己設下去的值，記了會讓下次換算複利放大。
+             */
+            override fun onScaleChanged(view: WebView, oldScale: Float, newScale: Float) {
+                super.onScaleChanged(view, oldScale, newScale)
+                if (newScale <= 0f || appliedScalePercent != CAPTURE_SCALE_MAX) return
+                naturalScale = newScale
+                naturalHost = captureHostOf(view.url) ?: captureHostOf(loadedUrl)
             }
         }
     }
@@ -376,6 +465,15 @@ fun CaptureScreenContent(
         // 標題此刻未知（頁面還沒載），onPageFinished 會補上。
         onAddUrl(normalized, "")
         navigate(normalized)
+    }
+
+    // 目前站台（以 WebView **實際載入**的網址取 host）＝逐站設定（畫布寬度 / 裁切）的 key。
+    val siteHost = captureHostOf(loadedUrl)
+
+    /** 寫回逐站設定：即時更新畫面狀態 + 落地 pref（key＝當前網址的 host）。 */
+    fun commitSiteSetting(updated: CaptureSiteSetting) {
+        siteSetting = updated
+        onSaveSiteSetting(currentUrl() ?: loadedUrl, updated)
     }
 
     fun capture() {
@@ -486,6 +584,39 @@ fun CaptureScreenContent(
         }
     }
 
+    // 去頭去尾「自動偵測」（件 3-B）：截一張**乾淨**當前畫面 → [detectCropBounds] 猜上下分界 → 只把兩條線
+    // **預先擺好**（寫進草稿），不直接套用；使用者確認/微調後才按儲存。偵測不到就維持 0（不裁）。
+    fun autoDetectCrop() {
+        if (cropAutoBusy) return
+        scope.launch {
+            cropAutoBusy = true
+            // 與截圖同一套護欄：先藏 overlay（含兩條線）、等兩 frame 讓隱藏重繪上螢幕，抓到的才是純網頁畫面。
+            hideOverlayForCapture = true
+            withFrameNanos {}
+            withFrameNanos {}
+            val window = context.findActivity()?.window
+            captureWebView(webView, window) { bitmap ->
+                hideOverlayForCapture = false
+                if (bitmap == null) {
+                    cropAutoBusy = false
+                    context.toast(context.contextStringResource(MR.strings.webview_capture_failed))
+                    return@captureWebView
+                }
+                scope.launch {
+                    val (top, bottom) = withContext(Dispatchers.Default) { detectCropBounds(bitmap) }
+                    if (!bitmap.isRecycled) bitmap.recycle()
+                    if (top <= 0f && bottom <= 0f) {
+                        context.toast(context.contextStringResource(MR.strings.capture_crop_auto_none))
+                    } else {
+                        cropTopDraft = top
+                        cropBottomDraft = bottom
+                    }
+                    cropAutoBusy = false
+                }
+            }
+        }
+    }
+
     // 連續截圖 toggle：進行中→停止（停止後切確認模式檢視/剔除/儲存這次的截圖，WebView 原地留著）；
     // 否則檢查書名/章名後把兩個「抓幀器」交給 ScreenModel 驅動迴圈。
     // 只有使用者「按停止」才進確認模式；生命週期 ON_STOP / onDispose 直接呼叫 onStopContinuous、不切模式。
@@ -540,9 +671,57 @@ fun CaptureScreenContent(
     val canStart = bookName.isNotBlank() && chapterName.isNotBlank() && hasUrl
 
     // 條件退回（例如把書名清空）時收起對應 panel，免得停在一個已按不到的面板上。
-    LaunchedEffect(canNewManga, canNewChapter) {
+    LaunchedEffect(canNewManga, canNewChapter, hasUrl) {
         if (!canNewManga) mangaPanelExpanded = false
         if (!canNewChapter) chapterPanelExpanded = false
+        if (!hasUrl) {
+            pagePanelExpanded = false
+            cropSetupMode = false
+        }
+    }
+
+    // 換站＝重讀該站的設定（畫布寬度 + 裁切）。沒有 host（about:blank）＝回預設。
+    LaunchedEffect(siteHost) {
+        siteSetting = if (siteHost == null) CaptureSiteSetting() else siteSettingProvider(loadedUrl)
+    }
+
+    // 開「頁面設定」panel（或該站設定變了）＝同步滑桿草稿。
+    LaunchedEffect(pagePanelExpanded, siteSetting.scale) {
+        if (pagePanelExpanded) scaleDraft = siteSetting.scale
+    }
+
+    // 套用該站的畫布寬度。setInitialScale **只在頁面載入時生效** ⇒ 值變了就 reload() 讓它落地
+    // （reload 是同一頁重載：cookie / 登入保留，且**不碰 state.content** ⇒ 不破「WebView 常駐」護欄）。
+    // 換算需要該站的自然縮放；還沒量到（naturalScale==0）就先讓它以預設載入，onScaleChanged 量到後本效果
+    // 會被 naturalScale 的變動重新觸發、那時才套。
+    LaunchedEffect(siteHost, siteSetting.scale, naturalScale, naturalHost, webView) {
+        val wv = webView ?: return@LaunchedEffect
+        if (siteHost == null) return@LaunchedEffect
+        val want = siteSetting.scale.coerceIn(CAPTURE_SCALE_MIN, CAPTURE_SCALE_MAX)
+        when {
+            // ① 目前套的是**別站**的縮放 → 先回預設並重載（這站才會以自然縮放呈現、也才量得到它的 naturalScale）。
+            appliedScalePercent != CAPTURE_SCALE_MAX && appliedScaleHost != siteHost -> {
+                appliedScalePercent = CAPTURE_SCALE_MAX
+                appliedScaleHost = null
+                wv.setInitialScale(0)
+                wv.reload()
+            }
+            // ② 這站要 100%（不縮）但目前套著自訂 → 還原。
+            want >= CAPTURE_SCALE_MAX && appliedScalePercent != CAPTURE_SCALE_MAX -> {
+                appliedScalePercent = CAPTURE_SCALE_MAX
+                appliedScaleHost = null
+                wv.setInitialScale(0)
+                wv.reload()
+            }
+            // ③ 這站要自訂寬度，且已量到自然縮放 → 換算成絕對 initialScale 後重載套用。
+            want < CAPTURE_SCALE_MAX && appliedScalePercent != want &&
+                naturalScale > 0f && naturalHost == siteHost -> {
+                appliedScalePercent = want
+                appliedScaleHost = siteHost
+                pushInitialScale(wv, want)
+                wv.reload()
+            }
+        }
     }
 
     // 開「新漫畫」panel ＝草稿同步當前書名。
@@ -581,11 +760,14 @@ fun CaptureScreenContent(
     // 系統返回：確認模式＝回擷取模式（等同「繼續擷取」，不刪任何頁）；單張模式＝取消回確認模式；
     // 擷取模式下 WebView 還能上一頁＝WebView 上一頁（而非直接關畫面）。
     BackHandler(
-        enabled = listSheet != null || coverCropMode || reviewMode || singleShotMode || navigator.canGoBack,
+        enabled = listSheet != null || coverCropMode || cropSetupMode || reviewMode || singleShotMode ||
+            navigator.canGoBack,
     ) {
         when {
             // 全屏清單開著＝先關清單（回瀏覽 panel），不關畫面 / 不上一頁。
             listSheet != null -> listSheet = null
+            // 裁切設定中按返回＝取消（不存草稿），不關畫面。
+            cropSetupMode -> cropSetupMode = false
             // 封面框選中按返回＝取消框選（回工具列），不關畫面。
             coverCropMode -> {
                 coverCropMode = false
@@ -656,8 +838,9 @@ fun CaptureScreenContent(
 
         // ★ 截圖進行中：不 render 任何浮動 overlay（頂部 bar / 底部 bar / 收起小鈕 / panel / 對話框）。
         // 確認模式時整片被面板蓋住，浮動工具列一併不畫（免壓在面板下方漏出來）。
-        // 封面框選模式（coverCropMode）也整個藏起工具列 → 使用者看得到畫面拖框（見下方框選 overlay）。
-        if (!hideOverlayForCapture && !reviewMode && !coverCropMode) {
+        // 封面框選模式（coverCropMode）/ 裁切設定模式（cropSetupMode）也整個藏起工具列 → 使用者看得到畫面
+        // 拖框 / 拖線（見下方兩個 overlay）。
+        if (!hideOverlayForCapture && !reviewMode && !coverCropMode && !cropSetupMode) {
             if (toolbarExpanded) {
                 // 頂部浮動工具列（5 鍵）+ 可展開的瀏覽 / 新話數 panel。
                 Column(
@@ -693,6 +876,7 @@ fun CaptureScreenContent(
                                     if (browseExpanded) {
                                         mangaPanelExpanded = false
                                         chapterPanelExpanded = false
+                                        pagePanelExpanded = false
                                     }
                                 },
                             ) {
@@ -728,6 +912,7 @@ fun CaptureScreenContent(
                                             if (mangaPanelExpanded) {
                                                 browseExpanded = false
                                                 chapterPanelExpanded = false
+                                                pagePanelExpanded = false
                                             }
                                         },
                                         enabled = canNewManga,
@@ -750,6 +935,7 @@ fun CaptureScreenContent(
                                             if (chapterPanelExpanded) {
                                                 browseExpanded = false
                                                 mangaPanelExpanded = false
+                                                pagePanelExpanded = false
                                             }
                                         },
                                         enabled = canNewChapter,
@@ -769,6 +955,28 @@ fun CaptureScreenContent(
                                         Icon(
                                             imageVector = Icons.Outlined.PlayArrow,
                                             contentDescription = stringResource(MR.strings.capture_continuous_start),
+                                        )
+                                    }
+                                    // 6) 頁面設定（逐站的畫布寬度% + 去頭去尾裁切）：要有網址（host 是設定的 key）。
+                                    IconButton(
+                                        onClick = {
+                                            pagePanelExpanded = !pagePanelExpanded
+                                            if (pagePanelExpanded) {
+                                                browseExpanded = false
+                                                mangaPanelExpanded = false
+                                                chapterPanelExpanded = false
+                                            }
+                                        },
+                                        enabled = hasUrl,
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Tune,
+                                            contentDescription = stringResource(MR.strings.capture_page_settings),
+                                            tint = if (pagePanelExpanded) {
+                                                MaterialTheme.colorScheme.primary
+                                            } else {
+                                                LocalContentColor.current
+                                            },
                                         )
                                     }
                                 }
@@ -1165,6 +1373,130 @@ fun CaptureScreenContent(
                             }
                         }
                     }
+
+                    // 頁面設定 panel（階段 4）：**逐站**的畫布寬度% + 去頭去尾裁切入口。
+                    // 兩者都以當前網址的 host 為 key 記住，換到該站自動套用。
+                    if (pagePanelExpanded && !singleShotMode && !continuousRunning) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Surface(
+                            color = barColor,
+                            contentColor = barContentColor,
+                            shape = MaterialTheme.shapes.large,
+                            shadowElevation = 3.dp,
+                        ) {
+                            Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
+                                // 這組設定套用在哪一站（讓使用者知道是逐站記憶、不是全域）。
+                                Text(
+                                    text = stringResource(
+                                        MR.strings.capture_site_settings_for,
+                                        siteHost.orEmpty(),
+                                    ),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+
+                                // ① 畫布寬度%：寬螢幕上 100%（fit 寬度）會讓漫畫太高、一屏放不下 → 縮小畫布，
+                                // 讓整頁塞得進一屏。放開滑桿（或按 −/＋）才寫回 pref 並套用（會重載當前頁）。
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = stringResource(MR.strings.capture_canvas_width),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                    Spacer(modifier = Modifier.weight(1f))
+                                    Text(
+                                        text = "$scaleDraft%",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    IconButton(
+                                        onClick = {
+                                            val next = (scaleDraft - CAPTURE_SCALE_STEP)
+                                                .coerceIn(CAPTURE_SCALE_MIN, CAPTURE_SCALE_MAX)
+                                            scaleDraft = next
+                                            commitSiteSetting(siteSetting.copy(scale = next))
+                                        },
+                                        enabled = scaleDraft > CAPTURE_SCALE_MIN,
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Remove,
+                                            contentDescription = stringResource(MR.strings.capture_canvas_narrower),
+                                        )
+                                    }
+                                    Slider(
+                                        value = scaleDraft.toFloat(),
+                                        onValueChange = { scaleDraft = it.roundToInt() },
+                                        onValueChangeFinished = {
+                                            commitSiteSetting(siteSetting.copy(scale = scaleDraft))
+                                        },
+                                        valueRange = CAPTURE_SCALE_MIN.toFloat()..CAPTURE_SCALE_MAX.toFloat(),
+                                        steps = (CAPTURE_SCALE_MAX - CAPTURE_SCALE_MIN) / CAPTURE_SCALE_STEP - 1,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    IconButton(
+                                        onClick = {
+                                            val next = (scaleDraft + CAPTURE_SCALE_STEP)
+                                                .coerceIn(CAPTURE_SCALE_MIN, CAPTURE_SCALE_MAX)
+                                            scaleDraft = next
+                                            commitSiteSetting(siteSetting.copy(scale = next))
+                                        },
+                                        enabled = scaleDraft < CAPTURE_SCALE_MAX,
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Add,
+                                            contentDescription = stringResource(MR.strings.capture_canvas_wider),
+                                        )
+                                    }
+                                }
+
+                                // ② 去頭去尾：顯示目前設定 + 進入拖線的裁切設定模式。
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = if (siteSetting.hasCrop) {
+                                            stringResource(
+                                                MR.strings.capture_crop_current,
+                                                (siteSetting.cropTop * 100).roundToInt(),
+                                                (siteSetting.cropBottom * 100).roundToInt(),
+                                            )
+                                        } else {
+                                            stringResource(MR.strings.capture_crop_none)
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    TextButton(
+                                        onClick = {
+                                            cropTopDraft = siteSetting.cropTop
+                                            cropBottomDraft = siteSetting.cropBottom
+                                            cropSetupMode = true
+                                        },
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.ContentCut,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                        Text(
+                                            text = stringResource(MR.strings.capture_crop_setup),
+                                            modifier = Modifier.padding(start = 4.dp),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
 
                 // 底部浮動 bar：僅重截 / 插入（singleShot）用的單張截圖鍵（保留現有行為）。
@@ -1453,6 +1785,152 @@ fun CaptureScreenContent(
                                 cropEnd = null
                             },
                         ) {
+                            Text(text = stringResource(MR.strings.action_cancel))
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── 去頭去尾裁切設定 overlay（件 3-A：手動兩線）────────────────────────────
+        // 疊在**仍然活著**的 WebView 上，且套用與 WebView 同樣的系統列 padding ⇒ 這層的座標系＝截圖 bitmap 的
+        // 座標系（captureWebView 抓的就是 WebView 那塊）→ 線的位置直接除以本層高度就是要存的比例。
+        // 兩條線之間＝保留區，上下＝半透明遮罩（＝存檔時會被裁掉的部分）。截圖時本層一併藏起（護欄：截圖零 overlay），
+        // **實際裁切是存檔時在 bitmap 上做**（見 CaptureScreenModel.cropForSave），與 overlay 無關。
+        if (cropSetupMode && !hideOverlayForCapture && !reviewMode) {
+            val cropLineColor = MaterialTheme.colorScheme.primary
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+                    .pointerInput(Unit) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown()
+                            down.consume() // 吃掉觸控 → 拖線期間 WebView 不捲/不點
+                            val h = size.height.toFloat()
+                            if (h <= 0f) return@awaitEachGesture
+                            // 按下點離哪條線近就拖哪條（頂線／底線）。
+                            val topY = cropTopDraft * h
+                            val bottomY = (1f - cropBottomDraft) * h
+                            val dragTop = abs(down.position.y - topY) <= abs(down.position.y - bottomY)
+                            fun moveTo(y: Float) {
+                                val f = (y / h).coerceIn(0f, 1f)
+                                if (dragTop) {
+                                    cropTopDraft = f.coerceAtMost(
+                                        (1f - cropBottomDraft - CROP_MIN_KEEP_FRACTION).coerceAtLeast(0f),
+                                    )
+                                } else {
+                                    cropBottomDraft = (1f - f).coerceAtMost(
+                                        (1f - cropTopDraft - CROP_MIN_KEEP_FRACTION).coerceAtLeast(0f),
+                                    )
+                                }
+                            }
+                            moveTo(down.position.y)
+                            drag(down.id) { change ->
+                                change.consume()
+                                moveTo(change.position.y)
+                            }
+                        }
+                    },
+            ) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val dim = Color.Black.copy(alpha = 0.55f)
+                    val topY = cropTopDraft * size.height
+                    val bottomY = (1f - cropBottomDraft) * size.height
+                    // 會被裁掉的頭尾＝遮罩；中間保留區維持透明（看得到真實網頁）。
+                    drawRect(color = dim, topLeft = Offset(0f, 0f), size = Size(size.width, topY))
+                    drawRect(
+                        color = dim,
+                        topLeft = Offset(0f, bottomY),
+                        size = Size(size.width, size.height - bottomY),
+                    )
+                    val stroke = 2.dp.toPx()
+                    drawRect(
+                        color = cropLineColor,
+                        topLeft = Offset(0f, topY - stroke / 2),
+                        size = Size(size.width, stroke),
+                    )
+                    drawRect(
+                        color = cropLineColor,
+                        topLeft = Offset(0f, bottomY - stroke / 2),
+                        size = Size(size.width, stroke),
+                    )
+                    // 把手：兩條線中央各畫一段粗條，讓人知道可以拖。
+                    val handleW = 56.dp.toPx()
+                    val handleH = 6.dp.toPx()
+                    drawRect(
+                        color = cropLineColor,
+                        topLeft = Offset((size.width - handleW) / 2, topY - handleH / 2),
+                        size = Size(handleW, handleH),
+                    )
+                    drawRect(
+                        color = cropLineColor,
+                        topLeft = Offset((size.width - handleW) / 2, bottomY - handleH / 2),
+                        size = Size(handleW, handleH),
+                    )
+                }
+
+                // 頂部提示（含目前比例）。
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(8.dp),
+                    color = barColor,
+                    contentColor = barContentColor,
+                    shape = MaterialTheme.shapes.large,
+                    shadowElevation = 3.dp,
+                ) {
+                    Text(
+                        text = stringResource(
+                            MR.strings.capture_crop_hint,
+                            (cropTopDraft * 100).roundToInt(),
+                            (cropBottomDraft * 100).roundToInt(),
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                }
+
+                // 底部動作：自動偵測 / 儲存 / 不裁切 / 取消。
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(8.dp),
+                    color = barColor,
+                    contentColor = barContentColor,
+                    shape = MaterialTheme.shapes.large,
+                    shadowElevation = 3.dp,
+                ) {
+                    FlowRow(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        OutlinedButton(onClick = { autoDetectCrop() }, enabled = !cropAutoBusy) {
+                            Text(text = stringResource(MR.strings.capture_crop_auto))
+                        }
+                        Button(
+                            onClick = {
+                                commitSiteSetting(
+                                    siteSetting.copy(cropTop = cropTopDraft, cropBottom = cropBottomDraft),
+                                )
+                                cropSetupMode = false
+                            },
+                        ) {
+                            Text(text = stringResource(MR.strings.action_save))
+                        }
+                        TextButton(
+                            onClick = {
+                                cropTopDraft = 0f
+                                cropBottomDraft = 0f
+                                commitSiteSetting(siteSetting.copy(cropTop = 0f, cropBottom = 0f))
+                                cropSetupMode = false
+                            },
+                        ) {
+                            Text(text = stringResource(MR.strings.capture_crop_clear))
+                        }
+                        TextButton(onClick = { cropSetupMode = false }) {
                             Text(text = stringResource(MR.strings.action_cancel))
                         }
                     }

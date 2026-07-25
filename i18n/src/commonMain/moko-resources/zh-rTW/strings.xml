@@ -358,6 +358,19 @@
     <string name="capture_cover_too_small">框選範圍太小，請拖大一點</string>
     <!-- Yakuyomi：漫畫詳情頁「繼續擷取」入口 -->
     <string name="capture_continue">繼續擷取</string>
+    <!-- Yakuyomi：擷取的逐站設定（畫布寬度% + 去頭去尾裁切） -->
+    <string name="capture_page_settings">頁面設定</string>
+    <string name="capture_site_settings_for">%1$s 的設定</string>
+    <string name="capture_canvas_width">畫布寬度</string>
+    <string name="capture_canvas_narrower">縮小</string>
+    <string name="capture_canvas_wider">放大</string>
+    <string name="capture_crop_setup">裁切</string>
+    <string name="capture_crop_none">未設定裁切</string>
+    <string name="capture_crop_current">裁切：上 %1$d%% · 下 %2$d%%</string>
+    <string name="capture_crop_hint">拖曳兩條線去掉頭尾（上 %1$d%% · 下 %2$d%%）</string>
+    <string name="capture_crop_auto">自動偵測</string>
+    <string name="capture_crop_auto_none">找不到明顯分界，請自己拖線</string>
+    <string name="capture_crop_clear">不裁切</string>
     <string name="pref_category_library">書櫃</string>
     <string name="ext_obsolete">過舊</string>
     <string name="obsolete_extension_message">這個擴充套件已無法使用，其可能無法正確運作或導致本程式發生問題，建議解除安裝</string>

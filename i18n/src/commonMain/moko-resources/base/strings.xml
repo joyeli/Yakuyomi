@@ -313,6 +313,19 @@
     <string name="capture_cover_too_small">Selection too small, drag a larger area</string>
     <!-- Yakuyomi: continue capturing from a local manga's detail page -->
     <string name="capture_continue">Continue capturing</string>
+    <!-- Yakuyomi: capture per-site settings (canvas width % + top/bottom crop) -->
+    <string name="capture_page_settings">Page settings</string>
+    <string name="capture_site_settings_for">Settings for %1$s</string>
+    <string name="capture_canvas_width">Canvas width</string>
+    <string name="capture_canvas_narrower">Narrower</string>
+    <string name="capture_canvas_wider">Wider</string>
+    <string name="capture_crop_setup">Crop</string>
+    <string name="capture_crop_none">No crop</string>
+    <string name="capture_crop_current">Crop: top %1$d%% · bottom %2$d%%</string>
+    <string name="capture_crop_hint">Drag the lines to trim the header/footer (top %1$d%% · bottom %2$d%%)</string>
+    <string name="capture_crop_auto">Auto-detect</string>
+    <string name="capture_crop_auto_none">Could not find the edges, drag the lines yourself</string>
+    <string name="capture_crop_clear">Don\'t crop</string>
     <string name="action_start_downloading_now">Start downloading now</string>
     <string name="action_not_now">Not now</string>
     <string name="action_add_anyway">Add anyway</string>

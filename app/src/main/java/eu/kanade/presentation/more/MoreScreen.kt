@@ -133,6 +133,15 @@ fun MoreScreen(
                 )
             }
             item {
+                // Yakuyomi：擷取漫畫——內建 WebView 截頁 → 存成 LocalSource 漫畫（可加進書庫、可翻譯）。
+                // 放在「下載佇列」下方，與下載 / 翻譯佇列那群工具擺一起（原本在下面的設定群裡）。
+                TextPreferenceWidget(
+                    title = stringResource(MR.strings.capture_manga),
+                    icon = Icons.Outlined.PhotoCamera,
+                    onPreferenceClick = onOpenCapture,
+                )
+            }
+            item {
                 // Yakuyomi：「更新」分頁從導覽列移除後，改由此進入（翻譯佇列已移到導覽列分頁）。
                 TextPreferenceWidget(
                     title = stringResource(MR.strings.label_recent_updates),
@@ -164,14 +173,6 @@ fun MoreScreen(
 
             item { HorizontalDivider() }
 
-            item {
-                // Yakuyomi：擷取漫畫——內建 WebView 截頁 → 存成 LocalSource 漫畫（可加進書庫、可翻譯）。
-                TextPreferenceWidget(
-                    title = stringResource(MR.strings.capture_manga),
-                    icon = Icons.Outlined.PhotoCamera,
-                    onPreferenceClick = onOpenCapture,
-                )
-            }
             item {
                 TextPreferenceWidget(
                     title = stringResource(MR.strings.label_settings),
