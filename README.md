@@ -42,6 +42,21 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 <sub><b>Live translation as you read</b>, <b>one-tap re-render</b> of the text-removal method, and a <b>per-manga translation queue</b> — expand chapters, jump a title to the front, pause it.</sub>
 </div>
 
+**Capture**
+- **Built-in browser, saved as a chapter** — open any address in Yakuyomi's full-screen browser and save what it renders as page images in your local library. The result is an ordinary local manga: read it, file it in a category, and run it through the same on-device OCR and translation pipeline as everything else.
+- **Semi-automatic or hands-free** — a frame-diff detector (the screen settled *and* the content actually changed) saves each new page by itself while you swipe, skipping the near-blank frames a page shows while it loads. Set a tap position once and it turns the pages itself — a simulated touch, no scripts injected into the page — for a whole chapter unattended.
+- **Three ways it stops** — the page count you entered is reached, two taps in a row leave the screen unchanged (last page, or the tap position is off), or you stop it yourself. Whichever it was, the review screen says so.
+- **Per-site settings, remembered by domain** — canvas width (narrow the page on a wide screen so a full page fits in one shot), draggable trim lines for a site's header and footer (marked by a persistent grey overlay), auto-trim for the blank margins that spreads and short pages leave behind, and the tap position and delay used for automatic page turns.
+- **Review before it becomes a chapter** — stopping opens a three-column thumbnail grid: tick pages to delete, re-capture a single page (it reopens the address that page came from), insert a page you missed between two others, keep capturing, or save — saved pages are renumbered into a gapless sequence. The title can be lifted from the page title, the cover is a drag-to-frame crop, and **Continue capturing** on a local manga's detail page reopens the original address and appends to the same book.
+- **What it can't capture** — content the system marks as protected (DRM) comes out blank. That's by design; Yakuyomi doesn't work around it.
+
+<div align="center">
+<img src="./.github/assets/yakuyomi-capture-auto.gif" alt="Automatic capture: the built-in browser turns the page by itself, each settled page is saved, and the counter climbs page by page" height="440" hspace="6"/>
+<img src="./.github/assets/yakuyomi-capture-review.gif" alt="Capture review: a three-column grid of captured page thumbnails, with delete, re-capture and insert before saving the chapter" height="440" hspace="6"/>
+<br>
+<sub><b>Hands-free capture</b> — the browser turns the page, every settled frame is saved — and a <b>review grid</b> to delete, re-capture or insert pages before they become a chapter.</sub>
+</div>
+
 **Reader**
 - **Auto webtoon detection** — long vertical strips switch to continuous-vertical reading on their own; a per-manga choice always wins.
 - **In-reader chapter list** — jump to any chapter from a list inside the reader, without backing out to the details page.
