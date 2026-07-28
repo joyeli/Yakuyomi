@@ -132,15 +132,19 @@ internal fun PreferenceItem(
                     onValueChange = { scope.launch { item.onValueChanged(it) } },
                 )
             }
-            is Preference.PreferenceItem.MultiSelectListPreference -> {
+            is Preference.PreferenceItem.MultiSelectListPreference<*> -> {
                 val values by item.preference.collectAsState()
                 MultiSelectListPreferenceWidget(
-                    preference = item,
                     values = values,
+                    title = item.title,
+                    titleBadge = item.titleBadge,
+                    subtitle = item.internalSubtitleProvider(values, item.entries),
+                    icon = item.icon,
+                    entries = item.entries,
                     onValuesChange = { newValues ->
                         scope.launch {
-                            if (item.onValueChanged(newValues)) {
-                                item.preference.set(newValues.toMutableSet())
+                            if (item.internalOnValueChanged(newValues)) {
+                                item.internalSet(newValues)
                             }
                         }
                     },
@@ -177,7 +181,7 @@ internal fun PreferenceItem(
                 }
                 TrackingPreferenceWidget(
                     tracker = item.tracker,
-                    checked = isLoggedIn,
+                    isLoggedIn = isLoggedIn,
                     onClick = { if (isLoggedIn) item.logout() else item.login() },
                 )
             }

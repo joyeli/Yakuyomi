@@ -72,8 +72,8 @@ android {
             isPseudoLocalesEnabled = true
         }
         val release = getByName("release") {
-            isMinifyEnabled = Config.enableCodeShrink
-            isShrinkResources = Config.enableCodeShrink
+            isMinifyEnabled = true
+            isShrinkResources = true
 
             // 有 keystore.properties → 用 release 簽章；否則退回 debug（不擋 CI/他人建置）。
             signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")

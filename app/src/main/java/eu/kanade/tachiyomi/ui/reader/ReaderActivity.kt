@@ -85,7 +85,6 @@ import eu.kanade.tachiyomi.ui.reader.setting.ReaderSettingsScreenModel
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.PagerViewer
-import eu.kanade.tachiyomi.ui.reader.viewer.pager.R2LPagerViewer
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
 import eu.kanade.tachiyomi.util.system.isNightMode
 import eu.kanade.tachiyomi.util.system.isTabletUiMode
@@ -570,8 +569,12 @@ class ReaderActivity : BaseActivity() {
         val doublePageViewer = (state.viewer as? PagerViewer)?.takeIf { it.isDoublePage }
         val cropEnabled = if (isPagerType) cropBorderPaged else cropBorderWebtoon
 
-        val verticalNavigatorForLongStrip by readerPreferences.verticalNavigatorForLongStrip.collectAsState()
+        val verticalNavigatorModes by readerPreferences.verticalNavigator.collectAsState()
+        val verticalNavigator = verticalNavigatorModes.contains(
+            ReadingMode.fromPreference(viewModel.getMangaReadingMode()),
+        )
         val verticalNavigatorOnLeft by readerPreferences.verticalNavigatorOnLeft.collectAsState()
+        val verticalNavigatorHeight by readerPreferences.verticalNavigatorHeight.collectAsState()
 
         ReaderAppBars(
             visible = state.menuVisible,
@@ -586,9 +589,9 @@ class ReaderActivity : BaseActivity() {
             onOpenInBrowser = ::openChapterInBrowser.takeIf { isHttpSource },
             onShare = ::shareChapter.takeIf { isHttpSource },
 
-            chapterNavigatorType = if (isPagerType || !verticalNavigatorForLongStrip) {
+            chapterNavigatorType = if (!verticalNavigator) {
                 // Yakuyomi：用 PagerViewer.isRtl 判斷（涵蓋 R2LPagerViewer 與 R2LDoublePagerViewer）——
-                // 雙頁對開的 R2LDoublePagerViewer 不是 R2LPagerViewer 子類，原本的 `is R2LPagerViewer` 會漏判、進度條方向反掉。
+                // 雙頁對開的 R2LDoublePagerViewer 不是 R2LPagerViewer 子類，上游的 `is R2LPagerViewer` 會漏判、進度條方向反掉。
                 if ((state.viewer as? PagerViewer)?.isRtl == true) {
                     ChapterNavigatorType.HORIZONTAL_RTL
                 } else {
@@ -601,6 +604,7 @@ class ReaderActivity : BaseActivity() {
                     ChapterNavigatorType.VERTICAL_RIGHT
                 }
             },
+            verticalNavigatorHeight = verticalNavigatorHeight / 100f,
             onNextChapter = ::loadNextChapter,
             enabledNext = state.viewerChapters?.nextChapter != null,
             onPreviousChapter = ::loadPreviousChapter,
