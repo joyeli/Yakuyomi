@@ -491,7 +491,7 @@
     <string name="enhancements_guide_se_floating_title">Floating search</string>
     <string name="enhancements_guide_se_floating_desc">A one-handed search pill that collapses to a ball when idle; long-press it for a quick menu.</string>
     <string name="enhancements_guide_se_saved_title">Saved searches &amp; advanced syntax</string>
-    <string name="enhancements_guide_se_saved_desc">Save a search to recall later; \",\" = AND, \"-\" = exclude, and genre: / author: / artist: prefixes for precise queries.</string>
+    <string name="enhancements_guide_se_saved_desc">Save a search to recall later. Space or \",\" = AND, \"||\" = OR, \"-\" = exclude, \"()\" groups; prefixes genre: / author: / artist: / source: / notes:, quotes for values with spaces (genre:\"school life\"), and comparisons like unread&gt;0.</string>
     <string name="enhancements_guide_se_compactnav_title">Compact navigation bar</string>
     <string name="enhancements_guide_se_compactnav_desc">An icons-only, tighter bottom navigation bar option.</string>
     <!-- Page 6: Large screens & foldables -->

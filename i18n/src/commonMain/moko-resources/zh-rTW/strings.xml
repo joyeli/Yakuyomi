@@ -1266,7 +1266,7 @@
     <string name="enhancements_guide_se_floating_title">浮動搜尋</string>
     <string name="enhancements_guide_se_floating_desc">單手搜尋膠囊，閒置時縮成小球；長壓小球彈出快捷選單。</string>
     <string name="enhancements_guide_se_saved_title">已存搜尋與進階語法</string>
-    <string name="enhancements_guide_se_saved_desc">把搜尋存起來日後重用；「,」= AND、「-」= 排除，並有 genre: / author: / artist: 前綴做精準查詢。</string>
+    <string name="enhancements_guide_se_saved_desc">把搜尋存起來日後重用。空白或「,」= AND、「||」= OR、「-」= 排除、「()」可分組；前綴有 genre: / author: / artist: / source: / notes:，值含空白要加引號（genre:\"school life\"），還可用 unread&gt;0 這類比較。</string>
     <string name="enhancements_guide_se_compactnav_title">精簡導覽列</string>
     <string name="enhancements_guide_se_compactnav_desc">可選僅圖示、更緊緻的底部導覽列。</string>
     <!-- 頁 6：大螢幕與折疊機 -->
