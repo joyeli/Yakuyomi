@@ -19,7 +19,7 @@ class BasePreferences(
 
     val incognitoMode: Preference<Boolean> = preferenceStore.getBoolean(Preference.appStateKey("incognito_mode"), false)
 
-    // Yakuyomi：墨水屏一鍵的狀態（切換時連動套用/還原一組 reader 設定，見 MoreScreenModel.setEinkMode）。
+    // Yakuyomi：墨水屏一鍵的狀態（切換時連動套用/還原一組 reader 設定，見 MoreViewModel.setEinkMode）。
     val einkMode: Preference<Boolean> = preferenceStore.getBoolean("pref_eink_mode", false)
 
     val extensionInstaller: ExtensionInstallerPreference = ExtensionInstallerPreference(context, preferenceStore)

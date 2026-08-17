@@ -28,7 +28,7 @@ import kotlin.random.Random
 /**
  * Yakuyomi：探索批次擷取的常駐管理器（單一全域槽、不持久化）。
  *
- * 解決原本 `startBatchFetch` 跑在 `screenModelScope`、一離開探索畫面就被取消的問題：擷取改在本單例的
+ * 解決原本 `startBatchFetch` 跑在 `viewModelScope`、一離開探索畫面就被取消的問題：擷取改在本單例的
  * process-level scope 跑 → 送出後可離開畫面、前景繼續操作；[BrowseFetchJob] 前景服務保活（背景不被回收）。
  *
  * **單一全域槽 + 忙線硬拒**：同時只跑一份。[start] 在已有任務時回 false（UI 的送出按鈕在 Running 時本就

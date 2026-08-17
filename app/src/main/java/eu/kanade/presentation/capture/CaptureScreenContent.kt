@@ -430,7 +430,7 @@ private class CaptureWebViewHolder {
  *
  * ★ 連續擷取零閃爍：偵測用的「比較幀」不隱藏工具列（靜態工具列前後幀都在、不影響 frame-diff），
  * 只有真的要存那一刻才用 cleanGrabber 隱藏 overlay 抓乾淨幀（見
- * [eu.kanade.tachiyomi.ui.capture.CaptureScreenModel.startContinuous]）。
+ * [eu.kanade.tachiyomi.ui.capture.CaptureViewModel.startContinuous]）。
  */
 @Composable
 fun CaptureScreenContent(
@@ -1115,7 +1115,7 @@ fun CaptureScreenContent(
         // ① **不吃觸控**：整層只有 Box + Canvas、**零 clickable / 零 pointerInput** ⇒ 在 Compose 的 hit test 裡
         //    根本不是候選節點，觸控直接落到下面的 WebView（照常捲頁 / 點連結 / 之後的自動翻頁點擊）。
         // ② **截圖不入鏡**：跟其他 overlay 同一個 `!hideOverlayForCapture` gate ⇒ 抓乾淨幀那兩個 frame 內不 render。
-        //    真正的裁切是存檔時在 bitmap 上做（CaptureScreenModel.cropForSave），與這層無關、不會裁兩次。
+        //    真正的裁切是存檔時在 bitmap 上做（CaptureViewModel.cropForSave），與這層無關、不會裁兩次。
         // ③ **對齊畫布**：與 WebView 同樣的系統列 padding + 同樣的置中 [canvasFraction] 寬 ⇒ 只塗畫布那塊、
         //    不塗左右留白，比例也與存檔時用的「佔畫面高度比例」一致。
         // 只在正常擷取模式畫：REVIEW / SINGLE_SHOT 不畫；封面框選、裁切設定模式各有自己的遮罩，不疊兩層。
@@ -2562,7 +2562,7 @@ fun CaptureScreenContent(
         // [canvasFraction] 寬）⇒ 遮罩只蓋在**畫布**上，一眼看得出「裁的是畫布這塊」；高度不受畫布寬度影響，
         // 線的位置除以本層高度＝要存的比例（與截圖 bitmap 的高度座標系一致，captureWebView 抓的就是 WebView 那塊）。
         // 兩條線之間＝保留區，上下＝半透明遮罩（＝存檔時會被裁掉的部分）。截圖時本層一併藏起（護欄：截圖零 overlay），
-        // **實際裁切是存檔時在 bitmap 上做**（見 CaptureScreenModel.cropForSave），與 overlay 無關。
+        // **實際裁切是存檔時在 bitmap 上做**（見 CaptureViewModel.cropForSave），與 overlay 無關。
         if (cropSetupMode && !hideOverlayForCapture && !reviewMode) {
             val cropLineColor = MaterialTheme.colorScheme.primary
             Box(modifier = Modifier.fillMaxSize()) {

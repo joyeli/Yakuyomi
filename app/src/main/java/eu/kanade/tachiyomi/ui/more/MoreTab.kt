@@ -8,9 +8,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import cafe.adriel.voyager.core.model.ScreenModel
-import cafe.adriel.voyager.core.model.rememberScreenModel
-import cafe.adriel.voyager.core.model.screenModelScope
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.compose.viewModel
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.Navigator
 import cafe.adriel.voyager.navigator.currentOrThrow
@@ -66,18 +66,18 @@ data object MoreTab : Tab {
     override fun Content() {
         val navigator = LocalNavigator.currentOrThrow
         val scope = rememberCoroutineScope()
-        val screenModel = rememberScreenModel { MoreScreenModel() }
-        val downloadQueueState by screenModel.downloadQueueState.collectAsState()
+        val viewModel = viewModel<MoreViewModel>()
+        val downloadQueueState by viewModel.downloadQueueState.collectAsState()
         MoreScreen(
             downloadQueueStateProvider = { downloadQueueState },
-            einkMode = screenModel.einkMode,
-            onEinkModeChange = { screenModel.applyEinkMode(it) },
-            downloadedOnly = screenModel.downloadedOnly,
-            onDownloadedOnlyChange = { screenModel.downloadedOnly = it },
-            incognitoMode = screenModel.incognitoMode,
-            onIncognitoModeChange = { screenModel.incognitoMode = it },
-            translationMasterEnabled = screenModel.translationMasterEnabled,
-            onTranslationMasterChange = { screenModel.setTranslationMaster(it) },
+            einkMode = viewModel.einkMode,
+            onEinkModeChange = { viewModel.applyEinkMode(it) },
+            downloadedOnly = viewModel.downloadedOnly,
+            onDownloadedOnlyChange = { viewModel.downloadedOnly = it },
+            incognitoMode = viewModel.incognitoMode,
+            onIncognitoModeChange = { viewModel.incognitoMode = it },
+            translationMasterEnabled = viewModel.translationMasterEnabled,
+            onTranslationMasterChange = { viewModel.setTranslationMaster(it) },
             onClickDownloadQueue = { navigator.push(DownloadQueueScreen) },
             // Yakuyomi：「更新」分頁已從導覽列移除 → 從這裡切換過去（翻譯佇列改成導覽列分頁）。
             onClickUpdates = { scope.launch { HomeScreen.openTab(HomeScreen.Tab.Updates) } },
@@ -93,19 +93,19 @@ data object MoreTab : Tab {
     }
 }
 
-private class MoreScreenModel(
+class MoreViewModel(
     private val downloadManager: DownloadManager = Injekt.get(),
     private val translationManager: TranslationManager = Injekt.get(),
     preferences: BasePreferences = Injekt.get(),
     translationPreferences: TranslationPreferences = Injekt.get(),
     private val readerPreferences: ReaderPreferences = Injekt.get(),
-) : ScreenModel {
+) : ViewModel() {
 
-    var downloadedOnly by preferences.downloadedOnly.asState(screenModelScope)
-    var incognitoMode by preferences.incognitoMode.asState(screenModelScope)
+    var downloadedOnly by preferences.downloadedOnly.asState(viewModelScope)
+    var incognitoMode by preferences.incognitoMode.asState(viewModelScope)
 
     // Yakuyomi：墨水屏一鍵——切換時把一組 reader 設定一次套上/還原（灰階／白底／換頁閃白／關動畫）。
-    var einkMode by preferences.einkMode.asState(screenModelScope)
+    var einkMode by preferences.einkMode.asState(viewModelScope)
     fun applyEinkMode(enabled: Boolean) {
         einkMode = enabled
         readerPreferences.grayscale.set(enabled)
@@ -118,7 +118,7 @@ private class MoreScreenModel(
     }
 
     // Yakuyomi：翻譯總開關快捷切換（與翻譯設定頁綁同一 pref、連動）；set 後觸發 manager 副作用（停/續 + 引擎）。
-    var translationMasterEnabled by translationPreferences.translationMasterEnabled.asState(screenModelScope)
+    var translationMasterEnabled by translationPreferences.translationMasterEnabled.asState(viewModelScope)
     fun setTranslationMaster(enabled: Boolean) {
         translationMasterEnabled = enabled
         translationManager.onMasterEnabledChanged(enabled)
@@ -133,7 +133,7 @@ private class MoreScreenModel(
 
     init {
         // Handle running/paused status change and queue progress updating
-        screenModelScope.launchIO {
+        viewModelScope.launchIO {
             combine(
                 downloadManager.isDownloaderRunning,
                 downloadManager.queueState,
@@ -148,7 +148,7 @@ private class MoreScreenModel(
                 }
         }
         // 翻譯佇列狀態（與下載各自獨立）
-        screenModelScope.launchIO {
+        viewModelScope.launchIO {
             combine(
                 translationManager.queueState,
                 translationManager.isPaused,

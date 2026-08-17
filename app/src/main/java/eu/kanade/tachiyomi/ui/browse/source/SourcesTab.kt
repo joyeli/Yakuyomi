@@ -11,7 +11,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import cafe.adriel.voyager.core.model.rememberScreenModel
+import androidx.lifecycle.viewmodel.compose.viewModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
@@ -21,7 +21,7 @@ import eu.kanade.presentation.browse.SourcesScreen
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.TabContent
 import eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceScreen
-import eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceScreenModel
+import eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceViewModel
 import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -34,8 +34,8 @@ import tachiyomi.presentation.core.util.collectAsState as prefCollectAsState
 @Composable
 fun Screen.sourcesTab(): TabContent {
     val navigator = LocalNavigator.currentOrThrow
-    val screenModel = rememberScreenModel { SourcesScreenModel() }
-    val state by screenModel.state.collectAsState()
+    val viewModel = viewModel<SourcesViewModel>()
+    val state by viewModel.state.collectAsState()
 
     return TabContent(
         titleRes = MR.strings.label_sources,
@@ -54,7 +54,7 @@ fun Screen.sourcesTab(): TabContent {
         content = { contentPadding, snackbarHostState ->
             // Yakuyomi：回到此頁時刷新「哪些來源有快照」（可能剛在某來源頁存了快照）。
             LaunchedEffect(Unit) {
-                screenModel.refreshSnapshots()
+                viewModel.refreshSnapshots()
             }
 
             // Yakuyomi：「預設最新」開時隱藏各來源右側的「最新」按鈕。
@@ -67,30 +67,30 @@ fun Screen.sourcesTab(): TabContent {
                 onClickItem = { source, listing ->
                     navigator.push(BrowseSourceScreen(source.id, listing.query))
                 },
-                onClickPin = screenModel::togglePin,
-                onLongClickItem = screenModel::showSourceDialog,
+                onClickPin = viewModel::togglePin,
+                onLongClickItem = viewModel::showSourceDialog,
                 snapshotSourceIds = state.snapshotSourceIds,
                 onClickSnapshot = { source ->
                     navigator.push(
-                        BrowseSourceScreen(source.id, BrowseSourceScreenModel.Listing.Snapshot.query),
+                        BrowseSourceScreen(source.id, BrowseSourceViewModel.Listing.Snapshot.query),
                     )
                 },
-                onLongClickSnapshot = screenModel::showSnapshotClearDialog,
+                onLongClickSnapshot = viewModel::showSnapshotClearDialog,
                 showSourceLatestButton = !defaultToLatest,
             )
 
             state.snapshotClearTarget?.let { target ->
                 AlertDialog(
-                    onDismissRequest = screenModel::dismissSnapshotClearDialog,
+                    onDismissRequest = viewModel::dismissSnapshotClearDialog,
                     title = { Text(text = stringResource(MR.strings.action_clear_snapshot)) },
                     text = { Text(text = stringResource(MR.strings.snapshot_clear_confirm)) },
                     confirmButton = {
-                        TextButton(onClick = { screenModel.clearSnapshot(target) }) {
+                        TextButton(onClick = { viewModel.clearSnapshot(target) }) {
                             Text(text = stringResource(MR.strings.action_ok))
                         }
                     },
                     dismissButton = {
-                        TextButton(onClick = screenModel::dismissSnapshotClearDialog) {
+                        TextButton(onClick = viewModel::dismissSnapshotClearDialog) {
                             Text(text = stringResource(MR.strings.action_cancel))
                         }
                     },
@@ -102,22 +102,22 @@ fun Screen.sourcesTab(): TabContent {
                 SourceOptionsDialog(
                     source = source,
                     onClickPin = {
-                        screenModel.togglePin(source)
-                        screenModel.closeDialog()
+                        viewModel.togglePin(source)
+                        viewModel.closeDialog()
                     },
                     onClickDisable = {
-                        screenModel.toggleSource(source)
-                        screenModel.closeDialog()
+                        viewModel.toggleSource(source)
+                        viewModel.closeDialog()
                     },
-                    onDismiss = screenModel::closeDialog,
+                    onDismiss = viewModel::closeDialog,
                 )
             }
 
             val internalErrString = stringResource(MR.strings.internal_error)
             LaunchedEffect(Unit) {
-                screenModel.events.collectLatest { event ->
+                viewModel.events.collectLatest { event ->
                     when (event) {
-                        SourcesScreenModel.Event.FailedFetchingSources -> {
+                        SourcesViewModel.Event.FailedFetchingSources -> {
                             launch { snackbarHostState.showSnackbar(internalErrString) }
                         }
                     }

@@ -1,8 +1,8 @@
 package eu.kanade.tachiyomi.ui.capture
 
 import android.app.Application
-import cafe.adriel.voyager.core.model.ScreenModel
-import cafe.adriel.voyager.core.model.screenModelScope
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.hippo.unifile.UniFile
 import dev.icerock.moko.resources.StringResource
 import eu.kanade.tachiyomi.util.storage.DiskUtil
@@ -47,7 +47,7 @@ data class CapturePage(val file: UniFile, val name: String, val url: String? = n
 /**
  * 確認頁狀態：載入中 / 目前頁清單 / 已勾選（uri 字串集合）/ 儲存中。
  * [reloadKey] 每次重掃遞增，供縮圖破 coil 快取（重截同檔名覆蓋後顯示新圖，不留舊快取殘影）。
- * [sessionPageCount]＝本次連續截圖存下的頁數（>0 才顯示「放棄這次截圖」），由 [CaptureReviewScreenModel.configure] 設。
+ * [sessionPageCount]＝本次連續截圖存下的頁數（>0 才顯示「放棄這次截圖」），由 [CaptureReviewViewModel.configure] 設。
  * [stopReason]/[stopDetail]＝連續擷取**自己**停下來的原因（按停止進來＝null）：頂端顯示一行提示，
  * 讓使用者知道「為什麼突然跳到這裡」（尤其是存檔失敗那種以前完全無聲的情況）。
  */
@@ -77,14 +77,14 @@ sealed interface CaptureReviewEvent {
     data class Insert(val target: InsertTarget) : CaptureReviewEvent
 }
 
-class CaptureReviewScreenModel(
+class CaptureReviewViewModel(
     private val storageManager: StorageManager = Injekt.get(),
     private val networkToLocalManga: NetworkToLocalManga = Injekt.get(),
     // 寫整章 meta（.yakuyomi_meta.json）需 context 開截斷串流（見 [writeMeta]）。
     private val context: Application = Injekt.get(),
-) : ScreenModel {
+) : ViewModel() {
 
-    // 章夾定位用「安全檔名」（與 CaptureScreenModel.saveCapture 落地時同一套 sanitise）。
+    // 章夾定位用「安全檔名」（與 CaptureViewModel.saveCapture 落地時同一套 sanitise）。
     // ★ 改成 var：本 model 的實例跟著常駐的 CaptureScreen 活著（不再每次進確認頁 new 一個），
     // 進入確認模式時由 [configure] 設定當下的書名/章名/本次 session 頁碼。
     private var safeBook = ""
@@ -159,7 +159,7 @@ class CaptureReviewScreenModel(
             .takeIf { it.isNotEmpty() }
 
     fun loadPages() {
-        screenModelScope.launch {
+        viewModelScope.launch {
             val pages = withIOContext { chapterDir()?.let(::scanPages).orEmpty() }
             _state.update { s ->
                 val uris = pages.map { it.uri }.toSet()
@@ -175,7 +175,7 @@ class CaptureReviewScreenModel(
 
     /** 對某頁發起重截：帶該頁記錄的網址 [CapturePage.url] + 章夾定位 + 檔名，切到單張擷取模式。 */
     fun reCapture(page: CapturePage) {
-        screenModelScope.launch {
+        viewModelScope.launch {
             _events.send(
                 CaptureReviewEvent.ReCapture(ReCaptureTarget(page.url, safeBook, safeChapter, page.name)),
             )
@@ -185,12 +185,12 @@ class CaptureReviewScreenModel(
     /**
      * 在某頁前/後插入一張新截圖：算出插入位置頁碼（before＝該頁頁碼 N、after＝N+1）→ 切到單張擷取模式，
      * 並帶被長按那頁的網址 [CapturePage.url]（有記網址才 loadUrl 過去、否則 WebView 保持現狀讓使用者自己捲）。
-     * 頁碼取自檔名（`003.png` → 3；解析不到＝忽略）。實際騰位與存檔在 [CaptureScreenModel.saveInsert]。
+     * 頁碼取自檔名（`003.png` → 3；解析不到＝忽略）。實際騰位與存檔在 [CaptureViewModel.saveInsert]。
      */
     fun insert(page: CapturePage, before: Boolean) {
         val pageNo = page.name.substringBeforeLast('.').toIntOrNull() ?: return
         val insertAt = if (before) pageNo else pageNo + 1
-        screenModelScope.launch {
+        viewModelScope.launch {
             _events.send(CaptureReviewEvent.Insert(InsertTarget(safeBook, safeChapter, insertAt, page.url)))
         }
     }
@@ -208,7 +208,7 @@ class CaptureReviewScreenModel(
     fun deleteSelected() {
         val selected = _state.value.selected
         if (selected.isEmpty()) return
-        screenModelScope.launch {
+        viewModelScope.launch {
             withIOContext {
                 val dir = chapterDir() ?: return@withIOContext
                 val meta = readMeta(dir)
@@ -232,7 +232,7 @@ class CaptureReviewScreenModel(
      * 只在該章夾內、存在才刪、找不到＝no-op；**不動接續截圖前既有的其他頁** → 發 Back 事件回擷取模式（WebView 不動）。
      */
     fun discardSession() {
-        screenModelScope.launch {
+        viewModelScope.launch {
             withIOContext {
                 val dir = chapterDir() ?: return@withIOContext
                 val targets = sessionPages.map { "%03d".format(it) }.toSet()
@@ -262,7 +262,7 @@ class CaptureReviewScreenModel(
      */
     fun save() {
         if (_state.value.saving) return
-        screenModelScope.launch {
+        viewModelScope.launch {
             _state.update { it.copy(saving = true) }
             val mangaId = withIOContext {
                 chapterDir()?.let { renumber(it) }

@@ -63,8 +63,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import cafe.adriel.voyager.core.model.ScreenModel
-import cafe.adriel.voyager.core.model.rememberScreenModel
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.Navigator
 import cafe.adriel.voyager.navigator.currentOrThrow
@@ -109,8 +111,8 @@ object TranslationQueueScreen : Screen() {
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.currentOrThrow
-        val screenModel = rememberScreenModel { TranslationQueueScreenModel() }
-        TranslationQueueContent(screenModel, navigateUp = navigator::pop)
+        val viewModel = viewModel<TranslationQueueViewModel>(factory = TranslationQueueViewModel.Factory)
+        TranslationQueueContent(viewModel, navigateUp = navigator::pop)
     }
 }
 
@@ -120,7 +122,7 @@ object TranslationQueueScreen : Screen() {
  */
 data object TranslationTab : Tab {
 
-    // Yakuyomi：再點一次「翻譯」分頁 → 三態循環（見 TranslationQueueScreenModel.cycleEngineState）。
+    // Yakuyomi：再點一次「翻譯」分頁 → 三態循環（見 TranslationQueueViewModel.cycleEngineState）。
     private val reselectChannel = Channel<Unit>()
 
     override val options: TabOptions
@@ -138,14 +140,14 @@ data object TranslationTab : Tab {
 
     @Composable
     override fun Content() {
-        val screenModel = rememberScreenModel { TranslationQueueScreenModel() }
+        val viewModel = viewModel<TranslationQueueViewModel>(factory = TranslationQueueViewModel.Factory)
         val context = LocalContext.current
         LaunchedEffect(Unit) {
             reselectChannel.receiveAsFlow().collectLatest {
-                context.toast(screenModel.cycleEngineState())
+                context.toast(viewModel.cycleEngineState())
             }
         }
-        TranslationQueueContent(screenModel, navigateUp = null)
+        TranslationQueueContent(viewModel, navigateUp = null)
     }
 }
 
@@ -157,13 +159,13 @@ private data class MangaGroup(
 
 @Composable
 private fun TranslationQueueContent(
-    screenModel: TranslationQueueScreenModel,
+    viewModel: TranslationQueueViewModel,
     navigateUp: (() -> Unit)?,
 ) {
     val navigator = LocalNavigator.currentOrThrow
-    val items by screenModel.queueState.collectAsState()
-    val isPaused by screenModel.isPaused.collectAsState()
-    val pausedMangas by screenModel.pausedMangas.collectAsState()
+    val items by viewModel.queueState.collectAsState()
+    val isPaused by viewModel.isPaused.collectAsState()
+    val pausedMangas by viewModel.pausedMangas.collectAsState()
     // 硬總開關：關閉時藏引擎面板（不讓手動預載繞過總開關）、佇列空則顯示「翻譯已關閉」。佇列非空（殘留）仍可看/清。
     val masterEnabled by remember { Injekt.get<TranslationPreferences>() }.translationMasterEnabled.collectAsState()
 
@@ -195,7 +197,7 @@ private fun TranslationQueueContent(
     val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
         val moved = reorderGroups.removeAt(from.index)
         reorderGroups.add(to.index, moved)
-        screenModel.reorderMangas(reorderGroups.map { it.manga.id })
+        viewModel.reorderMangas(reorderGroups.map { it.manga.id })
     }
     LaunchedEffect(groups) {
         if (!reorderableState.isAnyItemDragging) {
@@ -234,7 +236,7 @@ private fun TranslationQueueContent(
                         if (isTablet) {
                             // 平板＝主從雙欄、無收合概念 → 把「展開/收合全部」換成「重試全部失敗」（有失敗才顯示）。
                             if (hasFailed) {
-                                IconButton(onClick = { screenModel.retryAllFailed() }) {
+                                IconButton(onClick = { viewModel.retryAllFailed() }) {
                                     Icon(
                                         imageVector = Icons.Outlined.Refresh,
                                         contentDescription = stringResource(MR.strings.action_retry_all_failed),
@@ -273,7 +275,7 @@ private fun TranslationQueueContent(
                             persistentListOf(
                                 AppBar.OverflowAction(
                                     title = stringResource(MR.strings.action_cancel_all),
-                                    onClick = screenModel::clearQueue,
+                                    onClick = viewModel::clearQueue,
                                 ),
                             ),
                         )
@@ -298,7 +300,7 @@ private fun TranslationQueueContent(
                         contentDescription = null,
                     )
                 },
-                onClick = { if (isPaused) screenModel.resume() else screenModel.pause() },
+                onClick = { if (isPaused) viewModel.resume() else viewModel.pause() },
                 expanded = true,
                 modifier = Modifier.animateFloatingActionButton(
                     visible = groups.isNotEmpty(),
@@ -339,13 +341,13 @@ private fun TranslationQueueContent(
                                     showExpandIcon = false,
                                     onToggleExpand = { selectedMangaId = group.manga.id },
                                     onClickCover = { navigator.push(MangaScreen(group.manga.id)) },
-                                    onStartNow = { screenModel.startMangaNow(group.manga.id) },
-                                    onPauseManga = { screenModel.pauseManga(group.manga.id) },
-                                    onResumeManga = { screenModel.resumeManga(group.manga.id) },
-                                    onRetryManga = { screenModel.retryManga(group.manga.id) },
-                                    onCancelManga = { screenModel.cancelManga(group.manga.id) },
-                                    onSetMethod = { method -> screenModel.setMangaMethod(group.manga.id, method) },
-                                    onCancelChapter = { id -> screenModel.cancelChapter(id) },
+                                    onStartNow = { viewModel.startMangaNow(group.manga.id) },
+                                    onPauseManga = { viewModel.pauseManga(group.manga.id) },
+                                    onResumeManga = { viewModel.resumeManga(group.manga.id) },
+                                    onRetryManga = { viewModel.retryManga(group.manga.id) },
+                                    onCancelManga = { viewModel.cancelManga(group.manga.id) },
+                                    onSetMethod = { method -> viewModel.setMangaMethod(group.manga.id, method) },
+                                    onCancelChapter = { id -> viewModel.cancelChapter(id) },
                                 )
                             }
                         }
@@ -353,7 +355,7 @@ private fun TranslationQueueContent(
                     endContent = {
                         DetailPane(
                             group = groups.firstOrNull { it.manga.id == selectedMangaId },
-                            onCancelChapter = { id -> screenModel.cancelChapter(id) },
+                            onCancelChapter = { id -> viewModel.cancelChapter(id) },
                             modifier = Modifier.fillMaxSize(),
                         )
                     },
@@ -375,13 +377,13 @@ private fun TranslationQueueContent(
                                     }
                                 },
                                 onClickCover = { navigator.push(MangaScreen(group.manga.id)) },
-                                onStartNow = { screenModel.startMangaNow(group.manga.id) },
-                                onPauseManga = { screenModel.pauseManga(group.manga.id) },
-                                onResumeManga = { screenModel.resumeManga(group.manga.id) },
-                                onRetryManga = { screenModel.retryManga(group.manga.id) },
-                                onCancelManga = { screenModel.cancelManga(group.manga.id) },
-                                onSetMethod = { method -> screenModel.setMangaMethod(group.manga.id, method) },
-                                onCancelChapter = { id -> screenModel.cancelChapter(id) },
+                                onStartNow = { viewModel.startMangaNow(group.manga.id) },
+                                onPauseManga = { viewModel.pauseManga(group.manga.id) },
+                                onResumeManga = { viewModel.resumeManga(group.manga.id) },
+                                onRetryManga = { viewModel.retryManga(group.manga.id) },
+                                onCancelManga = { viewModel.cancelManga(group.manga.id) },
+                                onSetMethod = { method -> viewModel.setMangaMethod(group.manga.id, method) },
+                                onCancelChapter = { id -> viewModel.cancelChapter(id) },
                             )
                         }
                     }
@@ -764,11 +766,20 @@ private fun statusLine(item: TranslationItem): String {
     return "$chapter • $status"
 }
 
-private class TranslationQueueScreenModel(
+private class TranslationQueueViewModel(
     private val translationManager: TranslationManager = Injekt.get(),
     private val engineService: TranslationEngineService = Injekt.get(),
     private val translationPreferences: TranslationPreferences = Injekt.get(),
-) : ScreenModel {
+) : ViewModel() {
+
+    companion object {
+        // Yakuyomi：本類別是 private（JVM package-private）→ AndroidX 預設 factory 的反射建不出來，
+        // 必須給明確 factory（對照上游 WorkerInfoScreen/TrackInfoDialog 的私有 Model 寫法）。
+        val Factory = viewModelFactory {
+            initializer { TranslationQueueViewModel() }
+        }
+    }
+
     val queueState: StateFlow<List<TranslationItem>> = translationManager.queueState
     val isPaused: StateFlow<Boolean> = translationManager.isPaused
     val pausedMangas: StateFlow<Set<Long>> = translationManager.pausedMangas

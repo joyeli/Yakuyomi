@@ -47,13 +47,13 @@ class UiPreferences(
     val coverBasedTheme: Preference<Boolean> = preferenceStore.getBoolean("pref_cover_based_theme", false)
 
     // Yakuyomi：**舊** More「以 WebView 開啟網址」入口的輸入歷史（純 url JSON 陣列 `["a","b"]`，最近的在最前）。
-    // 該入口已被獨立的「擷取漫畫」畫面取代並移除 → 現在**只剩讀取**：CaptureScreenModel 在新的
+    // 該入口已被獨立的「擷取漫畫」畫面取代並移除 → 現在**只剩讀取**：CaptureViewModel 在新的
     // captureUrlHistory 還空時讀這裡當初值做遷移（見下）。**別刪**，刪了既有使用者的歷史會消失。
     val lastWebViewUrls: Preference<String> = preferenceStore.getString("last_webview_urls", "[]")
 
     // Yakuyomi：擷取瀏覽器的網址歷史（**帶頁面標題**）。JSON 陣列 `[{"url":"...","title":"..."}]`，最新在最前。
     // 與舊 More 入口的 lastWebViewUrls（純 url 陣列、無標題）刻意分開的格式。首次讀取（本 pref 還空）時
-    // 讀 lastWebViewUrls 當初值（標題留空、相容舊資料），待下次造訪/刪除才以新格式落地（見 CaptureScreenModel）。
+    // 讀 lastWebViewUrls 當初值（標題留空、相容舊資料），待下次造訪/刪除才以新格式落地（見 CaptureViewModel）。
     val captureUrlHistory: Preference<String> = preferenceStore.getString("capture_url_history", "[]")
 
     // Yakuyomi：擷取瀏覽器的「我的最愛」（手動存常用站 + 命名別名）。JSON 陣列

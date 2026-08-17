@@ -57,7 +57,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
-import cafe.adriel.voyager.core.model.rememberScreenModel
+import androidx.lifecycle.viewmodel.CreationExtras
+import androidx.lifecycle.viewmodel.compose.viewModel
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import eu.kanade.core.util.ifSourcesLoaded
@@ -78,7 +79,7 @@ import eu.kanade.presentation.util.Screen
 import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.ui.browse.extension.details.SourcePreferencesScreen
-import eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceScreenModel.Listing
+import eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceViewModel.Listing
 import eu.kanade.tachiyomi.ui.category.CategoryScreen
 import eu.kanade.tachiyomi.ui.manga.MangaScreen
 import eu.kanade.tachiyomi.ui.webview.WebViewScreen
@@ -120,47 +121,53 @@ data class BrowseSourceScreen(
             return
         }
 
-        val screenModel = rememberScreenModel { BrowseSourceScreenModel(sourceId, listingQuery) }
-        val state by screenModel.state.collectAsState()
+        val viewModel = viewModel<BrowseSourceViewModel>(
+            factory = BrowseSourceViewModel.Factory,
+            extras = CreationExtras {
+                set(BrowseSourceViewModel.SOURCE_ID_KEY, sourceId)
+                set(BrowseSourceViewModel.LISTING_QUERY_KEY, listingQuery)
+            },
+        )
+        val state by viewModel.state.collectAsState()
 
         // Yakuyomi：探索全域篩選（收藏/開卷/擷取）狀態 + sheet 顯示旗標。
-        val favoriteFilter by screenModel.browseFilterFavorite.prefCollectAsState()
-        val readFilter by screenModel.browseFilterRead.prefCollectAsState()
-        val fetchedFilter by screenModel.browseFilterFetched.prefCollectAsState()
+        val favoriteFilter by viewModel.browseFilterFavorite.prefCollectAsState()
+        val readFilter by viewModel.browseFilterRead.prefCollectAsState()
+        val fetchedFilter by viewModel.browseFilterFetched.prefCollectAsState()
         var showGlobalFilter by remember { mutableStateOf(false) }
 
         // Yakuyomi：錨點 url（已設就在任何清單顯示旗標徽章，含快照）。
-        val anchorUrlPref by screenModel.browseAnchor.prefCollectAsState()
+        val anchorUrlPref by viewModel.browseAnchor.prefCollectAsState()
         val anchorUrl = anchorUrlPref.takeIf { it.isNotEmpty() }
         // Yakuyomi：自動載入續傳頁碼（>0＝可續 → 按鈕顯示「繼續載入」引導）。
-        val anchorResumePage by screenModel.browseAnchorResumePage.prefCollectAsState()
+        val anchorResumePage by viewModel.browseAnchorResumePage.prefCollectAsState()
         // Yakuyomi：錨點被當前全域篩選濾掉、僅被強制留下 → 該本加區別視覺。
-        val anchorFilteredOut by screenModel.anchorFilteredOut.collectAsState()
+        val anchorFilteredOut by viewModel.anchorFilteredOut.collectAsState()
 
         // Yakuyomi：清單分頁項 + 捲動狀態（自動載入到錨點要驅動載入＋視覺捲動，故 hoist 到此）。
         val context = LocalContext.current
-        val mangaList = screenModel.mangaPagerFlowFlow.collectAsLazyPagingItems()
+        val mangaList = viewModel.mangaPagerFlowFlow.collectAsLazyPagingItems()
         val gridState = rememberLazyGridState()
         val listState = rememberLazyListState()
 
         // Yakuyomi：探索批次擷取的全域狀態（背景單一槽）+ 完成結果（含失敗清單）。
-        val fetchState by screenModel.browseFetchState.collectAsState()
-        val fetchResult by screenModel.browseFetchResult.collectAsState()
+        val fetchState by viewModel.browseFetchState.collectAsState()
+        val fetchResult by viewModel.browseFetchResult.collectAsState()
 
         // Yakuyomi：快照（離線清單）狀態 + 自動載入到錨點（改為背景任務）+ 相關對話框旗標。
-        val snapshotRaw by screenModel.browseSnapshot.prefCollectAsState()
-        val snapshot = remember(snapshotRaw) { screenModel.readSnapshot() }
+        val snapshotRaw by viewModel.browseSnapshot.prefCollectAsState()
+        val snapshot = remember(snapshotRaw) { viewModel.readSnapshot() }
         val isSnapshotListing = state.listing is Listing.Snapshot
         // 自動載入到錨點＝背景 BrowseAnchorLoadManager（週期冷卻防 ban、可停、完成自動存快照）；autoLoading 由其狀態決定。
-        val anchorLoadState by screenModel.anchorLoadState.collectAsState()
-        val anchorLoadResult by screenModel.anchorLoadResult.collectAsState()
+        val anchorLoadState by viewModel.anchorLoadState.collectAsState()
+        val anchorLoadResult by viewModel.anchorLoadResult.collectAsState()
         val autoLoading = anchorLoadState.running
         var showSnapshotOverwriteConfirm by remember { mutableStateOf(false) }
         var showSnapshotClearConfirm by remember { mutableStateOf(false) }
         var showLeaveSnapshotClearConfirm by remember { mutableStateOf(false) }
 
         // Yakuyomi：浮動搜尋（探索版）——全局開關開時，頂部窄 bar + 右下球取代傳統工具列/chip/FAB。里程碑①骨架。
-        val floatingBar by screenModel.floatingSearchBar.prefCollectAsState()
+        val floatingBar by viewModel.floatingSearchBar.prefCollectAsState()
         var ballExpanded by remember { mutableStateOf(true) } // 初始展開（借鏡書庫），閒置後收成球
         var ballMenuOpen by remember { mutableStateOf(false) }
         var ballSearchFocused by remember { mutableStateOf(false) }
@@ -174,7 +181,7 @@ data class BrowseSourceScreen(
             else -> BrowseListingKind.POPULAR
         }
         val snapshotCount = snapshot?.urls?.size ?: -1
-        // 搜尋/快照＝頂部清單鈕顯示（並返回）「最後所在的列表清單」。此狀態存在 screenModel（state.lastListListing）
+        // 搜尋/快照＝頂部清單鈕顯示（並返回）「最後所在的列表清單」。此狀態存在 viewModel（state.lastListListing）
         // → 進漫畫再返回也保留，不像 Composable remember 會被重置成預設（曾是「返回後鈕變熱門」的 bug）。
         val preSearchListing = if (state.listing is Listing.Latest || state.lastListListing is Listing.Latest) {
             BrowseListingKind.LATEST
@@ -199,7 +206,7 @@ data class BrowseSourceScreen(
             else -> ""
         }
         val onStopBgJob: () -> Unit = {
-            if (fetchState.running) screenModel.cancelBatchFetch() else screenModel.cancelAnchorLoad()
+            if (fetchState.running) viewModel.cancelBatchFetch() else viewModel.cancelAnchorLoad()
         }
         val bgJobRunningState = rememberUpdatedState(bgJobRunning)
         // 使用者主動點球展開時才聚焦搜尋框（非快照）；捲動書目時收回球（讓書目全螢幕）。
@@ -243,14 +250,14 @@ data class BrowseSourceScreen(
         val navigator = LocalNavigator.currentOrThrow
         val navigateUp: () -> Unit = {
             when {
-                !state.isUserQuery && state.toolbarQuery != null -> screenModel.setToolbarQuery(null)
+                !state.isUserQuery && state.toolbarQuery != null -> viewModel.setToolbarQuery(null)
                 else -> navigator.pop()
             }
         }
 
-        if (screenModel.source is StubSource) {
+        if (viewModel.source is StubSource) {
             MissingSourceScreen(
-                source = screenModel.source,
+                source = viewModel.source,
                 navigateUp = navigateUp,
             )
             return
@@ -263,7 +270,7 @@ data class BrowseSourceScreen(
 
         val onHelpClick = { uriHandler.openUri(LocalSource.HELP_URL) }
         val onWebViewClick = f@{
-            val source = screenModel.source as? HttpSource ?: return@f
+            val source = viewModel.source as? HttpSource ?: return@f
             navigator.push(
                 WebViewScreen(
                     url = source.getHomeUrl(),
@@ -273,14 +280,14 @@ data class BrowseSourceScreen(
             )
         }
 
-        LaunchedEffect(screenModel.source) {
-            assistUrl = (screenModel.source as? HttpSource)?.getHomeUrl()
+        LaunchedEffect(viewModel.source) {
+            assistUrl = (viewModel.source as? HttpSource)?.getHomeUrl()
         }
 
         // Yakuyomi：把目前已載入清單存成快照（覆蓋同 source 舊的），並提示存了幾本。
         val saveSnapshotNow: () -> Unit = {
             val urls = mangaList.itemSnapshotList.items.map { it.value.url }
-            screenModel.saveSnapshot(urls)
+            viewModel.saveSnapshot(urls)
             scope.launchIO {
                 snackbarHostState.showSnackbar(
                     context.contextStringResource(MR.strings.snapshot_saved, urls.size),
@@ -300,13 +307,13 @@ data class BrowseSourceScreen(
                     },
                 )
             }
-            screenModel.consumeAnchorLoadResult()
+            viewModel.consumeAnchorLoadResult()
         }
 
         // Yakuyomi：離開快照模式時，詢問是否清除快照。
         var prevSnapshotListing by remember { mutableStateOf(isSnapshotListing) }
         LaunchedEffect(isSnapshotListing) {
-            if (prevSnapshotListing && !isSnapshotListing && screenModel.hasSnapshot()) {
+            if (prevSnapshotListing && !isSnapshotListing && viewModel.hasSnapshot()) {
                 showLeaveSnapshotClearConfirm = true
             }
             prevSnapshotListing = isSnapshotListing
@@ -316,9 +323,9 @@ data class BrowseSourceScreen(
         // 背景單一全域槽 → 結果帶 sourceId，非本來源不彈（背景跑時你可能在別的來源畫面）。
         LaunchedEffect(fetchResult) {
             val result = fetchResult
-            if (result != null && result.sourceId == screenModel.source.id) {
+            if (result != null && result.sourceId == viewModel.source.id) {
                 navigator.push(SourceFetchResultsScreen(result.failedIds))
-                screenModel.consumeFetchResult()
+                viewModel.consumeFetchResult()
             }
         }
 
@@ -327,24 +334,24 @@ data class BrowseSourceScreen(
             topBar = {
                 if (floatingBar) {
                     BrowseSourceTopControlBar(
-                        sourceName = screenModel.source.name,
+                        sourceName = viewModel.source.name,
                         navigateUp = navigateUp,
-                        supportsLatest = screenModel.source.supportsLatest,
+                        supportsLatest = viewModel.source.supportsLatest,
                         shownListing = topBarShownListing,
                         listingHighlighted = listingHighlighted,
                         onSelectPopular = {
-                            screenModel.resetFilters()
-                            screenModel.setListing(Listing.Popular)
+                            viewModel.resetFilters()
+                            viewModel.setListing(Listing.Popular)
                         },
                         onSelectLatest = {
-                            screenModel.resetFilters()
-                            screenModel.setListing(Listing.Latest)
+                            viewModel.resetFilters()
+                            viewModel.setListing(Listing.Latest)
                         },
                         snapshotCount = snapshotCount,
                         snapshotSelected = isSnapshotListing,
                         onSnapshotClick = {
                             if (snapshot == null) saveSnapshotNow()
-                            screenModel.setListing(Listing.Snapshot)
+                            viewModel.setListing(Listing.Snapshot)
                         },
                     )
                 } else {
@@ -355,15 +362,15 @@ data class BrowseSourceScreen(
                     ) {
                         BrowseSourceToolbar(
                             searchQuery = state.toolbarQuery,
-                            onSearchQueryChange = screenModel::setToolbarQuery,
-                            source = screenModel.source,
-                            displayMode = screenModel.displayMode,
-                            onDisplayModeChange = { screenModel.displayMode = it },
+                            onSearchQueryChange = viewModel::setToolbarQuery,
+                            source = viewModel.source,
+                            displayMode = viewModel.displayMode,
+                            onDisplayModeChange = { viewModel.displayMode = it },
                             navigateUp = navigateUp,
                             onWebViewClick = onWebViewClick,
                             onHelpClick = onHelpClick,
                             onSettingsClick = { navigator.push(SourcePreferencesScreen(sourceId)) },
-                            onSearch = screenModel::search,
+                            onSearch = viewModel::search,
                             // 錨點的 start/stop/mark 移到右下 FAB（比照擷取詳情：進度可見、就地可停；
                             // 最新＋有錨點→載入到錨點，其餘→直接存當前頁快照）。設錨點改由長按書本「設為錨點」。
                             onStopAutoLoad = null,
@@ -387,8 +394,8 @@ data class BrowseSourceScreen(
                             FilterChip(
                                 selected = state.listing == Listing.Popular,
                                 onClick = {
-                                    screenModel.resetFilters()
-                                    screenModel.setListing(Listing.Popular)
+                                    viewModel.resetFilters()
+                                    viewModel.setListing(Listing.Popular)
                                 },
                                 leadingIcon = {
                                     Icon(
@@ -402,12 +409,12 @@ data class BrowseSourceScreen(
                                     Text(text = stringResource(MR.strings.popular))
                                 },
                             )
-                            if (screenModel.source.supportsLatest) {
+                            if (viewModel.source.supportsLatest) {
                                 FilterChip(
                                     selected = state.listing == Listing.Latest,
                                     onClick = {
-                                        screenModel.resetFilters()
-                                        screenModel.setListing(Listing.Latest)
+                                        viewModel.resetFilters()
+                                        viewModel.setListing(Listing.Latest)
                                     },
                                     leadingIcon = {
                                         Icon(
@@ -448,7 +455,7 @@ data class BrowseSourceScreen(
                                 onClick = {
                                     // 沒快照→存當下清單並切過去；有快照→切到快照清單。清除走 overflow 選單。
                                     if (snapshot == null) saveSnapshotNow()
-                                    screenModel.setListing(Listing.Snapshot)
+                                    viewModel.setListing(Listing.Snapshot)
                                 },
                                 leadingIcon = {
                                     Icon(
@@ -480,7 +487,7 @@ data class BrowseSourceScreen(
                         autoLoading -> {
                             anchorIcon = Icons.Filled.Stop
                             anchorLabel = context.contextStringResource(MR.strings.action_stop_auto_load)
-                            onAnchor = { screenModel.cancelAnchorLoad() }
+                            onAnchor = { viewModel.cancelAnchorLoad() }
                         }
                         state.listing is Listing.Latest && anchorUrlPref.isNotEmpty() -> {
                             anchorIcon = Icons.Outlined.PlayArrow
@@ -492,7 +499,7 @@ data class BrowseSourceScreen(
                                 },
                             )
                             onAnchor = {
-                                val started = screenModel.startAnchorLoad()
+                                val started = viewModel.startAnchorLoad()
                                 context.toast(
                                     if (started) {
                                         MR.strings.browse_anchor_load_started
@@ -512,9 +519,9 @@ data class BrowseSourceScreen(
                     val fetchDetailsAction: () -> Unit = {
                         val list = mangaList.itemSnapshotList.items.map { it.value }
                         when {
-                            fetchState.running -> screenModel.cancelBatchFetch()
+                            fetchState.running -> viewModel.cancelBatchFetch()
                             list.isEmpty() -> context.toast(MR.strings.fetch_details_empty)
-                            !screenModel.startBatchFetch(list) -> context.toast(MR.strings.browse_fetch_busy)
+                            !viewModel.startBatchFetch(list) -> context.toast(MR.strings.browse_fetch_busy)
                         }
                     }
                     // 快照左側標題：閒置「快照 · N 本」、擷取中「擷取中 X/N」。
@@ -532,7 +539,7 @@ data class BrowseSourceScreen(
                             BrowseBallMenuItem(
                                 label = context.contextStringResource(MR.strings.action_display_mode),
                                 onClick = {
-                                    screenModel.displayMode = when (screenModel.displayMode) {
+                                    viewModel.displayMode = when (viewModel.displayMode) {
                                         LibraryDisplayMode.ComfortableGrid -> LibraryDisplayMode.CompactGrid
                                         LibraryDisplayMode.CompactGrid -> LibraryDisplayMode.List
                                         else -> LibraryDisplayMode.ComfortableGrid
@@ -540,7 +547,7 @@ data class BrowseSourceScreen(
                                 },
                             ),
                         )
-                        if (screenModel.source is HttpSource) {
+                        if (viewModel.source is HttpSource) {
                             add(
                                 BrowseBallMenuItem(
                                     label = context.contextStringResource(MR.strings.action_open_in_web_view),
@@ -548,7 +555,7 @@ data class BrowseSourceScreen(
                                 ),
                             )
                         }
-                        if (screenModel.source is ConfigurableSource) {
+                        if (viewModel.source is ConfigurableSource) {
                             add(
                                 BrowseBallMenuItem(
                                     label = context.contextStringResource(MR.strings.action_settings),
@@ -556,7 +563,7 @@ data class BrowseSourceScreen(
                                 ),
                             )
                         }
-                        if (screenModel.source is LocalSource) {
+                        if (viewModel.source is LocalSource) {
                             add(
                                 BrowseBallMenuItem(
                                     label = context.contextStringResource(MR.strings.label_help),
@@ -623,13 +630,13 @@ data class BrowseSourceScreen(
                         },
                         focusRequester = ballFocusRequester,
                         searchQuery = state.toolbarQuery,
-                        onSearchQueryChange = screenModel::setToolbarQuery,
-                        onSubmitSearch = screenModel::search,
+                        onSearchQueryChange = viewModel::setToolbarQuery,
+                        onSubmitSearch = viewModel::search,
                         onClearSearch = {
                             // 清除＝清搜尋框並離開搜尋結果，回到搜尋前所在的列表清單（Search 當隱藏頁）。
-                            screenModel.setToolbarQuery(null)
+                            viewModel.setToolbarQuery(null)
                             if (state.listing is Listing.Search) {
-                                screenModel.setListing(
+                                viewModel.setListing(
                                     when (preSearchListing) {
                                         BrowseListingKind.LATEST -> Listing.Latest
                                         else -> Listing.Popular
@@ -687,7 +694,7 @@ data class BrowseSourceScreen(
                                     )
                                 },
                                 icon = { Icon(Icons.Filled.Stop, contentDescription = null) },
-                                onClick = { screenModel.cancelAnchorLoad() },
+                                onClick = { viewModel.cancelAnchorLoad() },
                             )
                         }
                         isSnapshotListing -> {
@@ -716,7 +723,7 @@ data class BrowseSourceScreen(
                                 },
                                 onClick = {
                                     if (running) {
-                                        screenModel.cancelBatchFetch()
+                                        viewModel.cancelBatchFetch()
                                     } else {
                                         val list = mangaList.itemSnapshotList.items.map { it.value }
                                         if (list.isEmpty()) {
@@ -725,7 +732,7 @@ data class BrowseSourceScreen(
                                                     context.contextStringResource(MR.strings.fetch_details_empty),
                                                 )
                                             }
-                                        } else if (!screenModel.startBatchFetch(list)) {
+                                        } else if (!viewModel.startBatchFetch(list)) {
                                             // 後端忙線硬拒（理論上 UI 已擋，作後援）。
                                             scope.launchIO {
                                                 snackbarHostState.showSnackbar(
@@ -750,7 +757,7 @@ data class BrowseSourceScreen(
                                 },
                                 icon = { Icon(Icons.Outlined.PlayArrow, contentDescription = null) },
                                 onClick = {
-                                    val started = screenModel.startAnchorLoad()
+                                    val started = viewModel.startAnchorLoad()
                                     context.toast(
                                         if (started) {
                                             MR.strings.browse_anchor_load_started
@@ -774,10 +781,10 @@ data class BrowseSourceScreen(
             },
         ) { paddingValues ->
             BrowseSourceContent(
-                source = screenModel.source,
+                source = viewModel.source,
                 mangaList = mangaList,
-                columns = screenModel.getColumnsPreference(),
-                displayMode = screenModel.displayMode,
+                columns = viewModel.getColumnsPreference(),
+                displayMode = viewModel.displayMode,
                 snackbarHostState = snackbarHostState,
                 contentPadding = paddingValues,
                 onWebViewClick = onWebViewClick,
@@ -791,7 +798,7 @@ data class BrowseSourceScreen(
                 onMangaClick = { navigator.push((MangaScreen(it.id, true))) },
                 onMangaLongClick = { manga ->
                     // Yakuyomi：長按 → 動作選單（加入/移除書庫 + 設/清錨點），取代原本「長按直接收藏」。
-                    screenModel.setDialog(BrowseSourceScreenModel.Dialog.MangaActions(manga))
+                    viewModel.setDialog(BrowseSourceViewModel.Dialog.MangaActions(manga))
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                 },
             )
@@ -799,15 +806,15 @@ data class BrowseSourceScreen(
 
         // 長按選單的「加入/移除書庫」實際動作（沿用原本 favorite/duplicate/remove 邏輯）。先關選單；favorite/duplicate 會再開各自對話框。
         val onToggleLibrary: (tachiyomi.domain.manga.model.Manga) -> Unit = { manga ->
-            screenModel.setDialog(null)
+            viewModel.setDialog(null)
             scope.launchIO {
-                val duplicates = screenModel.getDuplicateLibraryManga(manga)
+                val duplicates = viewModel.getDuplicateLibraryManga(manga)
                 when {
-                    manga.favorite -> screenModel.setDialog(BrowseSourceScreenModel.Dialog.RemoveManga(manga))
-                    duplicates.isNotEmpty() -> screenModel.setDialog(
-                        BrowseSourceScreenModel.Dialog.AddDuplicateManga(manga, duplicates),
+                    manga.favorite -> viewModel.setDialog(BrowseSourceViewModel.Dialog.RemoveManga(manga))
+                    duplicates.isNotEmpty() -> viewModel.setDialog(
+                        BrowseSourceViewModel.Dialog.AddDuplicateManga(manga, duplicates),
                     )
-                    else -> screenModel.addFavorite(manga)
+                    else -> viewModel.addFavorite(manga)
                 }
             }
         }
@@ -817,15 +824,15 @@ data class BrowseSourceScreen(
                 favorite = favoriteFilter,
                 read = readFilter,
                 fetched = fetchedFilter,
-                onToggleFavorite = screenModel::toggleGlobalFavoriteFilter,
-                onToggleRead = screenModel::toggleGlobalReadFilter,
-                onToggleFetched = screenModel::toggleGlobalFetchedFilter,
-                onClear = screenModel::clearGlobalFilters,
+                onToggleFavorite = viewModel::toggleGlobalFavoriteFilter,
+                onToggleRead = viewModel::toggleGlobalReadFilter,
+                onToggleFetched = viewModel::toggleGlobalFetchedFilter,
+                onClear = viewModel::clearGlobalFilters,
                 onDismissRequest = { showGlobalFilter = false },
                 hasSourceFilters = state.filters.isNotEmpty(),
                 onOpenSourceFilters = {
                     showGlobalFilter = false
-                    screenModel.openFilterSheet()
+                    viewModel.openFilterSheet()
                 },
             )
         }
@@ -863,8 +870,8 @@ data class BrowseSourceScreen(
                         onClick = {
                             showSnapshotClearConfirm = false
                             // 若正看快照，先切回最新避免停在空清單。
-                            if (isSnapshotListing) screenModel.setListing(Listing.Latest)
-                            screenModel.clearSnapshot()
+                            if (isSnapshotListing) viewModel.setListing(Listing.Latest)
+                            viewModel.clearSnapshot()
                         },
                     ) { Text(text = stringResource(MR.strings.action_ok)) }
                 },
@@ -886,7 +893,7 @@ data class BrowseSourceScreen(
                     TextButton(
                         onClick = {
                             showLeaveSnapshotClearConfirm = false
-                            screenModel.clearSnapshot()
+                            viewModel.clearSnapshot()
                         },
                     ) { Text(text = stringResource(MR.strings.action_ok)) }
                 },
@@ -898,9 +905,9 @@ data class BrowseSourceScreen(
             )
         }
 
-        val onDismissRequest = { screenModel.setDialog(null) }
+        val onDismissRequest = { viewModel.setDialog(null) }
         when (val dialog = state.dialog) {
-            is BrowseSourceScreenModel.Dialog.MangaActions -> {
+            is BrowseSourceViewModel.Dialog.MangaActions -> {
                 BrowseMangaActionsDialog(
                     favorite = dialog.manga.favorite,
                     isAnchor = dialog.manga.url == anchorUrlPref,
@@ -908,7 +915,7 @@ data class BrowseSourceScreen(
                         onToggleLibrary(dialog.manga)
                     },
                     onToggleAnchor = {
-                        screenModel.toggleAnchor(dialog.manga)
+                        viewModel.toggleAnchor(dialog.manga)
                         onDismissRequest()
                     },
                     onOpenManga = {
@@ -918,26 +925,26 @@ data class BrowseSourceScreen(
                     onDismissRequest = onDismissRequest,
                 )
             }
-            is BrowseSourceScreenModel.Dialog.Filter -> {
+            is BrowseSourceViewModel.Dialog.Filter -> {
                 SourceFilterDialog(
                     onDismissRequest = onDismissRequest,
                     filters = state.filters,
-                    onReset = screenModel::resetFilters,
-                    onFilter = { screenModel.search(filters = state.filters) },
-                    onUpdate = screenModel::setFilters,
+                    onReset = viewModel::resetFilters,
+                    onFilter = { viewModel.search(filters = state.filters) },
+                    onUpdate = viewModel::setFilters,
                 )
             }
-            is BrowseSourceScreenModel.Dialog.AddDuplicateManga -> {
+            is BrowseSourceViewModel.Dialog.AddDuplicateManga -> {
                 DuplicateMangaDialog(
                     duplicates = dialog.duplicates,
                     onDismissRequest = onDismissRequest,
-                    onConfirm = { screenModel.addFavorite(dialog.manga) },
+                    onConfirm = { viewModel.addFavorite(dialog.manga) },
                     onOpenManga = { navigator.push(MangaScreen(it.id)) },
-                    onMigrate = { screenModel.setDialog(BrowseSourceScreenModel.Dialog.Migrate(dialog.manga, it)) },
+                    onMigrate = { viewModel.setDialog(BrowseSourceViewModel.Dialog.Migrate(dialog.manga, it)) },
                 )
             }
 
-            is BrowseSourceScreenModel.Dialog.Migrate -> {
+            is BrowseSourceViewModel.Dialog.Migrate -> {
                 MigrateMangaDialog(
                     current = dialog.current,
                     target = dialog.target,
@@ -946,23 +953,23 @@ data class BrowseSourceScreen(
                     onDismissRequest = onDismissRequest,
                 )
             }
-            is BrowseSourceScreenModel.Dialog.RemoveManga -> {
+            is BrowseSourceViewModel.Dialog.RemoveManga -> {
                 RemoveMangaDialog(
                     onDismissRequest = onDismissRequest,
                     onConfirm = {
-                        screenModel.changeMangaFavorite(dialog.manga)
+                        viewModel.changeMangaFavorite(dialog.manga)
                     },
                     mangaToRemove = dialog.manga,
                 )
             }
-            is BrowseSourceScreenModel.Dialog.ChangeMangaCategory -> {
+            is BrowseSourceViewModel.Dialog.ChangeMangaCategory -> {
                 ChangeCategoryDialog(
                     initialSelection = dialog.initialSelection,
                     onDismissRequest = onDismissRequest,
                     onEditCategories = { navigator.push(CategoryScreen()) },
                     onConfirm = { include, _ ->
-                        screenModel.changeMangaFavorite(dialog.manga)
-                        screenModel.moveMangaToCategories(dialog.manga, include)
+                        viewModel.changeMangaFavorite(dialog.manga)
+                        viewModel.moveMangaToCategories(dialog.manga, include)
                     },
                 )
             }
@@ -973,8 +980,8 @@ data class BrowseSourceScreen(
             queryEvent.receiveAsFlow()
                 .collectLatest {
                     when (it) {
-                        is SearchType.Genre -> screenModel.searchGenre(it.txt)
-                        is SearchType.Text -> screenModel.search(it.txt)
+                        is SearchType.Genre -> viewModel.searchGenre(it.txt)
+                        is SearchType.Text -> viewModel.search(it.txt)
                     }
                 }
         }

@@ -14,9 +14,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
-import cafe.adriel.voyager.core.model.ScreenModel
-import cafe.adriel.voyager.core.model.rememberScreenModel
-import cafe.adriel.voyager.core.model.screenModelScope
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.compose.viewModel
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import com.hippo.unifile.UniFile
@@ -84,7 +84,7 @@ private const val BLANK_RANGE_THRESHOLD = 36
 // 存完一頁後暫停偵測的時間：期間顯示「已擷取第 N 頁 · 請翻下一頁」，也順便避開使用者翻頁動作中的中間幀。
 private const val CAPTURE_PAUSE_MS = 1800L
 
-// 網址列輸入歷史保留上限（與 MoreScreenModel 一致）。
+// 網址列輸入歷史保留上限（與 MoreViewModel 一致）。
 private const val MAX_WEBVIEW_URL_HISTORY = 20
 
 // 封面檔名：對齊 LocalCoverManager 的 DEFAULT_COVER_NAME＝存書名夾根的 `cover.jpg`，LocalSource 才認得
@@ -157,7 +157,7 @@ enum class CaptureStopReason { TARGET_REACHED, TAP_NO_EFFECT, SAVE_FAILED, MANUA
  *
  * [targetPages]＝本話頁數（使用者選填，null＝沒設）：有值時 UI 顯示「已截 5/16 頁」、截滿即自動停止。
  * [stopReason]＝這一輪為什麼停（見 [CaptureStopReason]）；非 null 且非 [CaptureStopReason.MANUAL] 時畫面層
- * 比照按停止進確認頁並顯示原因，消費後要呼叫 [CaptureScreenModel.consumeStopReason] 歸零（一次性事件）。
+ * 比照按停止進確認頁並顯示原因，消費後要呼叫 [CaptureViewModel.consumeStopReason] 歸零（一次性事件）。
  * [stopDetail]＝[CaptureStopReason.SAVE_FAILED] 時的失敗細項（供確認頁講清楚是哪一種失敗）。
  */
 data class ContinuousCaptureState(
@@ -194,9 +194,9 @@ enum class CaptureMode { CAPTURING, REVIEW, SINGLE_SHOT }
  */
 class CaptureScreen(
     private val initialUrl: String = "",
-    // 「繼續擷取」帶入的書名（詳情頁 overflow 入口）：非空時進畫面即設 [CaptureScreenModel.bookName]，
+    // 「繼續擷取」帶入的書名（詳情頁 overflow 入口）：非空時進畫面即設 [CaptureViewModel.bookName]，
     // 漸進解鎖直接到 S2（書名已定、只差設話數）；null/空＝全新擷取（走 S0）。★ 這個書名必須讓
-    // saveCapture 的 safeBook=buildValidFilename(book) 對回原夾（詳見詳情頁 MangaScreenModel.buildContinueCaptureArgs）。
+    // saveCapture 的 safeBook=buildValidFilename(book) 對回原夾（詳見詳情頁 MangaViewModel.buildContinueCaptureArgs）。
     private val initialBook: String? = null,
 ) : Screen() {
 
@@ -204,16 +204,16 @@ class CaptureScreen(
     override fun Content() {
         val navigator = LocalNavigator.currentOrThrow
         val context = LocalContext.current
-        val screenModel = rememberScreenModel { CaptureScreenModel() }
+        val viewModel = viewModel<CaptureViewModel>()
 
         // 「繼續擷取」：進畫面把帶入的書名塞進 model（一次性；bookName 非空 → 漸進解鎖到 S2）。
         LaunchedEffect(Unit) {
-            initialBook?.trim()?.takeIf { it.isNotEmpty() }?.let { screenModel.bookName = it }
+            initialBook?.trim()?.takeIf { it.isNotEmpty() }?.let { viewModel.bookName = it }
         }
         // 確認面板的 model 與擷取畫面同壽命（不再是獨立 Screen 的 model）：邏輯完全沿用，
         // 只在每次進入確認模式時 configure 目標章夾 + 本次 session 頁碼。
-        val reviewModel = rememberScreenModel(tag = "capture-review") { CaptureReviewScreenModel() }
-        val continuous by screenModel.continuous.collectAsState()
+        val reviewModel = viewModel<CaptureReviewViewModel>(key = "capture-review")
+        val continuous by viewModel.continuous.collectAsState()
         val reviewState by reviewModel.state.collectAsState()
 
         // 目前模式 + 單張模式（重截/插入）的目標；shotToken 每次進單張模式遞增，供內容層重新 loadUrl。
@@ -234,9 +234,9 @@ class CaptureScreen(
             insertTarget = null
             mode = CaptureMode.REVIEW
             reviewModel.configure(
-                screenModel.bookName,
-                screenModel.chapterName,
-                screenModel.sessionPages,
+                viewModel.bookName,
+                viewModel.chapterName,
+                viewModel.sessionPages,
                 stopReason,
                 stopDetail,
             )
@@ -279,7 +279,7 @@ class CaptureScreen(
             val reason = continuous.stopReason
             if (reason != null && reason != CaptureStopReason.MANUAL) {
                 enterReview(reason, continuous.stopDetail)
-                screenModel.consumeStopReason()
+                viewModel.consumeStopReason()
             }
         }
 
@@ -290,32 +290,32 @@ class CaptureScreen(
             onNavigateUp = navigator::pop,
             initialUrl = initialUrl,
             mode = mode,
-            bookName = screenModel.bookName,
-            onBookNameChange = { screenModel.bookName = it },
-            chapterName = screenModel.chapterName,
-            onChapterNameChange = { screenModel.chapterName = it },
+            bookName = viewModel.bookName,
+            onBookNameChange = { viewModel.bookName = it },
+            chapterName = viewModel.chapterName,
+            onChapterNameChange = { viewModel.chapterName = it },
             // 「新話數」panel 的已截話數總覽 / 話數建議來源：掃該書夾下的話夾名稱。
-            existingChaptersProvider = { book -> screenModel.existingChapters(book) },
+            existingChaptersProvider = { book -> viewModel.existingChapters(book) },
             onCapture = when {
                 target != null -> {
                     { bitmap, url ->
-                        screenModel.saveReCapture(bitmap, url, target.safeBook, target.safeChapter, target.pageName)
+                        viewModel.saveReCapture(bitmap, url, target.safeBook, target.safeChapter, target.pageName)
                     }
                 }
                 insert != null -> {
                     { bitmap, url ->
-                        screenModel.saveInsert(bitmap, url, insert.safeBook, insert.safeChapter, insert.insertAtPage)
+                        viewModel.saveInsert(bitmap, url, insert.safeBook, insert.safeChapter, insert.insertAtPage)
                     }
                 }
-                else -> screenModel::saveCapture
+                else -> viewModel::saveCapture
             },
             continuousRunning = continuous.running,
             capturedCount = continuous.count,
             // 本話頁數（使用者選填）：有值時進度顯示「已截 5/16 頁」。
             capturedTarget = continuous.targetPages,
             justCapturedPage = continuous.justCapturedPage,
-            onStartContinuous = screenModel::startContinuous,
-            onStopContinuous = screenModel::stopContinuous,
+            onStartContinuous = viewModel::startContinuous,
+            onStopContinuous = viewModel::stopContinuous,
             // 按停止＝進確認模式（不 push Screen、WebView 續活）；使用者主動停＝不顯示停止原因提示。
             onEnterReview = { enterReview() },
             reCaptureTargetPage = target?.pageNumber,
@@ -329,22 +329,22 @@ class CaptureScreen(
             // 確認模式按系統返回＝繼續擷取（回擷取模式、不刪頁）。
             onReviewContinue = { mode = CaptureMode.CAPTURING },
             // 網址列輸入歷史（帶出歷史清單 + 逐筆刪除 + 造訪時記錄；帶頁面標題）。
-            urlHistoryProvider = { screenModel.webViewUrlHistory() },
-            onAddUrl = { url, title -> screenModel.addWebViewUrl(url, title) },
-            onRemoveUrl = { screenModel.removeWebViewUrl(it) },
+            urlHistoryProvider = { viewModel.webViewUrlHistory() },
+            onAddUrl = { url, title -> viewModel.addWebViewUrl(url, title) },
+            onRemoveUrl = { viewModel.removeWebViewUrl(it) },
             // 我的最愛（手動存常用站 + 命名別名；置頂快選、與自動歷史分開）。
-            bookmarksProvider = { screenModel.listBookmarks() },
-            onAddBookmark = { url, alias -> screenModel.addBookmark(url, alias) },
-            onRemoveBookmark = { screenModel.removeBookmark(it) },
+            bookmarksProvider = { viewModel.listBookmarks() },
+            onAddBookmark = { url, alias -> viewModel.addBookmark(url, alias) },
+            onRemoveBookmark = { viewModel.removeBookmark(it) },
             // 封面框選：裁好的 bitmap + bitmap 座標系的裁切框 + 當前書名 → 存書名夾根 cover.jpg，回 uri（縮圖預覽）。
-            onSaveCover = { bitmap, rect, book -> screenModel.saveCover(bitmap, rect, book) },
+            onSaveCover = { bitmap, rect, book -> viewModel.saveCover(bitmap, rect, book) },
             // 開「新漫畫」panel 時撈該書已存的封面（重進顯示縮圖）。
-            coverProvider = { book -> screenModel.findCoverUri(book) },
+            coverProvider = { book -> viewModel.findCoverUri(book) },
             // 「新漫畫」確定時記漫畫來源網址（供日後「繼續擷取」）。
-            onWriteMangaMeta = { book, url -> screenModel.writeMangaMeta(book, url) },
+            onWriteMangaMeta = { book, url -> viewModel.writeMangaMeta(book, url) },
             // 逐站設定（畫布寬度% + 去頭去尾裁切）：以當前網址的 host 為 key 讀寫。
-            siteSettingProvider = { url -> screenModel.siteSettingFor(url) },
-            onSaveSiteSetting = { url, setting -> screenModel.saveSiteSetting(url, setting) },
+            siteSettingProvider = { url -> viewModel.siteSettingFor(url) },
+            onSaveSiteSetting = { url, setting -> viewModel.saveSiteSetting(url, setting) },
             // 確認面板＝疊在常駐 WebView 上的一層 composable（原本的獨立 Screen 內容，邏輯不變）。
             // 參數 onAdjustTapPoint 由**內容層**提供（點擊位置設定模式的 state 住在那裡）：確認頁的
             // 「自動翻頁沒反應」提示列附一顆鈕直通該模式。
@@ -386,7 +386,7 @@ data class ReCaptureTarget(
 
 /**
  * 插入目標：確認頁長按某頁選「在此頁前/後插入」時帶進 [CaptureScreen] 的參數。null＝非插入模式。
- * [insertAtPage]＝新頁要落的頁碼；存檔時把該頁碼（含）以上的既有頁 +1 騰位（見 [CaptureScreenModel.saveInsert]）。
+ * [insertAtPage]＝新頁要落的頁碼；存檔時把該頁碼（含）以上的既有頁 +1 騰位（見 [CaptureViewModel.saveInsert]）。
  * [url]＝被長按那頁記錄的網址（相鄰頁 URL，供插入時開回附近；可能為 null＝該頁當初取不到網址）。
  * 章夾用已 sanitise 的 [safeBook] / [safeChapter] 定位（與存檔時同一套安全檔名）。
  */
@@ -472,11 +472,11 @@ data class CaptureUrlEntry(
     val title: String,
 )
 
-class CaptureScreenModel(
+class CaptureViewModel(
     private val context: Application = Injekt.get(),
     private val storageManager: StorageManager = Injekt.get(),
     private val uiPreferences: UiPreferences = Injekt.get(),
-) : ScreenModel {
+) : ViewModel() {
 
     // 書名 / 章名手動輸入（此步先不做選書流程）。
     var bookName by mutableStateOf("")
@@ -484,7 +484,7 @@ class CaptureScreenModel(
 
     // Yakuyomi：擷取畫面網址列的輸入歷史（**帶頁面標題**）——存 UiPreferences.captureUrlHistory，JSON 陣列
     // `[{"url":..,"title":..}]`、最近的在最前。與 More 共用的純 url 歷史（lastWebViewUrls）分開（見 UiPreferences
-    // 註解）。add/remove 仿 MoreScreenModel（去重 → 放最前 → 截斷上限）。
+    // 註解）。add/remove 仿 MoreViewModel（去重 → 放最前 → 截斷上限）。
 
     /**
      * 讀出歷史清單（最近的在最前，帶標題）。新 pref（captureUrlHistory）有資料就用它；
@@ -788,7 +788,7 @@ class CaptureScreenModel(
         if (trimmed.isEmpty() || trimmed == "about:blank") return
         val safeBook = DiskUtil.buildValidFilename(book.trim())
         if (safeBook.isEmpty()) return
-        screenModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch(Dispatchers.IO) {
             runCatching {
                 val base = storageManager.getLocalSourceDirectory() ?: return@launch
                 val mangaDir = base.findFile(safeBook)?.takeIf { it.isDirectory }
@@ -863,7 +863,7 @@ class CaptureScreenModel(
         if (continuousJob?.isActive == true) return
         val target = targetPages?.takeIf { it > 0 }
         val tapDelay = tapDelayMs.coerceIn(CAPTURE_TAP_DELAY_MIN, CAPTURE_TAP_DELAY_MAX).toLong()
-        continuousJob = screenModelScope.launch {
+        continuousJob = viewModelScope.launch {
             var prev: IntArray? = null // 前一幀縮圖（判穩定）
             var lastCaptured: IntArray? = null // 上次已截那頁的縮圖（判換頁 + 去重）
             // 上次「抓了乾淨幀卻是空白/黑頁」而丟棄的畫面：同一張黑頁不再反覆抓乾淨幀（免無謂閃爍）。
@@ -1049,7 +1049,7 @@ class CaptureScreenModel(
         _continuous.update { it.copy(stopReason = null, stopDetail = null) }
     }
 
-    override fun onDispose() {
+    override fun onCleared() {
         continuousJob?.cancel()
     }
 

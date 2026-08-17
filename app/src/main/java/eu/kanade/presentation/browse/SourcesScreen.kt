@@ -24,8 +24,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import eu.kanade.presentation.browse.components.BaseSourceItem
-import eu.kanade.tachiyomi.ui.browse.source.SourcesScreenModel
-import eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceScreenModel.Listing
+import eu.kanade.tachiyomi.ui.browse.source.SourcesViewModel
+import eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceViewModel.Listing
 import eu.kanade.tachiyomi.util.system.LocaleHelper
 import tachiyomi.domain.source.model.Pin
 import tachiyomi.domain.source.model.Source
@@ -43,7 +43,7 @@ import tachiyomi.source.local.isLocal
 
 @Composable
 fun SourcesScreen(
-    state: SourcesScreenModel.State,
+    state: SourcesViewModel.State,
     contentPadding: PaddingValues,
     onClickItem: (Source, Listing) -> Unit,
     onClickPin: (Source) -> Unit,

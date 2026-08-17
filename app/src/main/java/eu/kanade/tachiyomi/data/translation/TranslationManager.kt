@@ -43,7 +43,7 @@ import java.io.File
  *
  * 排入的兩條來源都走這裡：
  *  - **自動**：章下載完、進 cache 後由 `Downloader` 呼叫 [translate]（gate＝[isReady]）。
- *  - **手動**：漫畫頁的翻譯鈕（`MangaScreenModel`）。
+ *  - **手動**：漫畫頁的翻譯鈕（`MangaViewModel`）。
  *
  * **跟隨磁碟實際格式**（CBZ 還是鬆散資料夾由 mihon `saveChaptersAsCBZ` 決定）：
  *  - 鬆散資料夾 → 原地翻（[PageTranslator.translateChapter]，無重壓、無掉檔風險）。

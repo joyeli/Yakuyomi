@@ -1,34 +1,13 @@
 package tachiyomi.domain.release.interactor
 
-import tachiyomi.core.common.preference.Preference
-import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.domain.release.model.Release
 import tachiyomi.domain.release.service.ReleaseService
-import java.time.Instant
-import java.time.temporal.ChronoUnit
 
 class GetApplicationRelease(
     private val service: ReleaseService,
-    private val preferenceStore: PreferenceStore,
 ) {
-
-    private val lastChecked: Preference<Long> by lazy {
-        preferenceStore.getLong(Preference.appStateKey("last_app_check"), 0)
-    }
-
     suspend fun await(arguments: Arguments): Result {
-        val now = Instant.now()
-
-        // Yakuyomi：啟動自動檢查的節流從上游 3 天縮到 6 小時——本 fork 發版節奏快（常一週數版），
-        // 3 天會讓「開 app 就看到更新」形同虛設、只剩「關於」頁手動查（forceCheck 不受此限）。
-        val nextCheckTime = Instant.ofEpochMilli(lastChecked.get()).plus(6, ChronoUnit.HOURS)
-        if (!arguments.forceCheck && now.isBefore(nextCheckTime)) {
-            return Result.NoNewUpdate
-        }
-
         val release = service.latest(arguments) ?: return Result.NoNewUpdate
-
-        lastChecked.set(now.toEpochMilli())
 
         // Check if latest version is different from current version
         val isNewVersion = isNewVersion(

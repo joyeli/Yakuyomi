@@ -99,7 +99,7 @@ private fun parseMangaMetaUrl(file: UniFile): String? = runCatching {
 
 /**
  * 把舊檔名的內容搬到新檔名並刪掉舊檔。新檔是 `createFile` 出來的空檔 ⇒ 不必截斷寫、也就不必拿 Context
- * （[readMangaMeta] 的呼叫端如 `MangaScreenModel` 手上沒有 Context）。best-effort、吞例外。
+ * （[readMangaMeta] 的呼叫端如 `MangaViewModel` 手上沒有 Context）。best-effort、吞例外。
  */
 private fun migrateMangaMeta(dir: UniFile, legacy: UniFile, url: String) {
     runCatching {
