@@ -30,7 +30,7 @@ class TranslationPreferences(
     val translationEnabled = preferenceStore.getBoolean("translation_enabled", false)
 
     /**
-     * 即時翻譯（reader 邊讀邊翻）：開啟後，開「已下載但未翻」的章時，逐頁用快速 boxfill 去字即時翻（預設關）。
+     * 即時翻譯（reader 邊讀邊翻）：開啟後，開「已下載但未翻」的章時，逐頁依 [liveInpaintMethod] 去字即時翻（預設關）。
      * 與 [translationEnabled]（下載後整章離線翻）獨立：即時翻是讀到才翻、不落地（本里程碑），整章翻是預先翻好覆蓋原檔。
      * reader 設定面板可切；切換後現有章會重新透過 ChapterLoader 套用/取消這層包裝。
      */
@@ -119,8 +119,10 @@ class TranslationPreferences(
     val inpaintMethod = preferenceStore.getString("translation_inpaint_method", DEFAULT_INPAINT_METHOD)
 
     /**
-     * 即時翻（邊讀邊翻）專用去字方法。與 [inpaintMethod] 分開＝即時翻求低延遲、預設 boxfill（快速去字）；
-     * 想要即時就看到 AI 去字的可自訂成 aot（較慢、被翻譯網路等待部分蓋住）。
+     * 即時翻（邊讀邊翻）專用去字方法。**預設與 [inpaintMethod] 同為 AI 去字**——AOT-GAN 取代 LaMa 後
+     * 單頁去字快 5–9×，且去字跑在 CPU、與翻譯的網路等待重疊（§11 重貼原文讓兩者解耦），實測延遲可接受，
+     * 不值得再用畫質換。仍保留獨立 pref＝弱機或想要極速翻頁的人可改回 boxfill（快速去字）。
+     * 註：[PageTranslator] 的跨頁流水線深度會依此值自動切換（boxfill 網路綁定深 4／AI 去字 CPU 綁定深 2）。
      */
     val liveInpaintMethod = preferenceStore.getString("translation_live_inpaint_method", DEFAULT_LIVE_INPAINT_METHOD)
 
@@ -212,7 +214,9 @@ class TranslationPreferences(
         const val DEFAULT_SOURCE_LANG = "Japanese"
         const val DEFAULT_ORIENTATION = "auto"
         const val DEFAULT_INPAINT_METHOD = "auto_whole" // 下載/手動翻＝AI 去字（引擎把非 boxfill 一律當 aot·整頁 768）
-        const val DEFAULT_LIVE_INPAINT_METHOD = "boxfill" // 即時翻＝快速去字，求低延遲；可自訂成 aot
+
+        // 即時翻也用 AI 去字：AOT-GAN 換掉 LaMa 後單頁去字快 5–9×，低延遲已不必用畫質換
+        const val DEFAULT_LIVE_INPAINT_METHOD = "auto_whole"
         const val DEFAULT_OCR_CONCURRENCY = "auto" // auto=硬體核數（多數手機8核）；真機 8.9s→4.8s 快46%
         const val DEFAULT_COLOR_MODE = "auto" // auto=依背景亮度判黑/白字
     }

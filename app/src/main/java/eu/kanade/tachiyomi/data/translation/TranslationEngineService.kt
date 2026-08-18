@@ -35,7 +35,7 @@ import java.util.concurrent.atomic.AtomicInteger
  *
  * **去字法可變**：[translatePage] 帶 `methodRaw` 參數（boxfill / auto_whole / auto_tile）。
  * 同一個去字法連續呼叫＝復用 warm 引擎；去字法在章與章間變了＝簽章變→重建（見 [ensureEngine]/[configSignature]）。
- * （即時逐頁低延遲的「固定 boxfill」策略不在本服務——本服務服務的是受管理佇列的整章翻。）
+ * （即時翻走自己的 liveInpaintMethod pref、不是固定值；本服務服務的是受管理佇列的整章翻。）
  *
  * **並發（跨頁流水線）**：warm 引擎的 [translatePage] **可並發呼叫**（偵測/OCR/翻譯/去字 session 共用、真機實測
  * 併發翻多頁不 crash、不汙染輸出）→ reader/佇列可把「頁 N 的網路翻譯」疊上「頁 N+1 的裝置端偵測/OCR」，

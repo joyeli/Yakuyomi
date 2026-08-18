@@ -435,8 +435,9 @@ object SettingsTranslationScreen : SearchableSettings {
                             true
                         },
                     ),
-                    // 即時翻去字方法（原獨立「即時翻譯」組移入）：與下載/手動翻的去字法分開，預設 boxfill 求低延遲、
-                    // 想即時看 AI 去字可選 auto_whole。引擎 mapInpaintMethod 把非 boxfill 一律當 aot。常駐（緊接去字方法下）。
+                    // 即時翻去字方法（原獨立「即時翻譯」組移入）：與下載/手動翻的去字法分開，但預設同為 auto_whole
+                    // （AOT-GAN 夠快、且與翻譯的網路等待重疊）；弱機可改回 boxfill 求極速。引擎 mapInpaintMethod
+                    // 把非 boxfill 一律當 aot。常駐（緊接去字方法下）。
                     Preference.PreferenceItem.ListPreference(
                         preference = prefs.liveInpaintMethod,
                         entries = persistentMapOf(

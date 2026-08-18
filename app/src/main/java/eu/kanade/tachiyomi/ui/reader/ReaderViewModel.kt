@@ -487,7 +487,7 @@ class ReaderViewModel @JvmOverloads constructor(
                 skipCache = true,
             )
             if (downloaded) {
-                // 背景翻（非 atFront）：當前章已被 onActivated 插隊到最前、優先翻完，下一章接著翻。即時翻預取用即時去字法（預設 boxfill）。
+                // 背景翻（非 atFront）：當前章已被 onActivated 插隊到最前、優先翻完，下一章接著翻。即時翻預取用即時去字法（預設 AI 去字）。
                 translationManager.translate(
                     manga,
                     listOf(next),
@@ -1452,7 +1452,7 @@ class ReaderViewModel @JvmOverloads constructor(
                     if (pageLoader is TranslatingPageLoader) {
                         pageLoader.onActivated()
                     } else {
-                        // reader 控制鈕「翻這話」＝即時情境 → 即時去字法（預設 boxfill，與自動即時翻一致）。
+                        // reader 控制鈕「翻這話」＝即時情境 → 即時去字法（預設 AI 去字，與自動即時翻一致）。
                         translationManager.translate(
                             manga,
                             listOf(domainChapter),

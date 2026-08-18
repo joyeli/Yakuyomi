@@ -277,7 +277,7 @@ class PageTranslator(private val context: Context) {
      * @param original   這頁的原圖（引擎輸入；引擎回的是新 bitmap、不會動到它）——存成重繪源。
      * @param translated 譯後圖（覆蓋 [pageFile]）。
      * @param analysis   重繪素材（遮罩 + 文字區）；非 null 才存素材（即時翻一律帶素材，見上）。
-     * @param methodRaw  去字法原始字串（即時翻＝boxfill），存進素材 json 供重繪 round-trip。
+     * @param methodRaw  去字法原始字串（即時翻走 liveInpaintMethod，預設 auto_whole），存進素材 json 供重繪 round-trip。
      * @return 是否落地成功（覆蓋 + 記 manifest 成功）。best-effort：包 runCatching，失敗回 false（下載檔可能已被覆蓋，但這只代表「已翻」，不毀畫）。
      */
     suspend fun persistLivePage(

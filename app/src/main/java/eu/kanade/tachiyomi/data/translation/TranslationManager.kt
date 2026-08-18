@@ -302,7 +302,7 @@ class TranslationManager(private val context: Context) {
 
     /**
      * 即時翻（邊讀邊翻/reader 情境）用的去字方法＝使用者可自訂的 [TranslationPreferences.liveInpaintMethod]，
-     * 預設 boxfill（快速去字、求低延遲）。與下載/手動翻的 [TranslationPreferences.inpaintMethod] 分開。
+     * 預設 auto_whole（AI 去字，AOT-GAN 已夠快）。與下載/手動翻的 [TranslationPreferences.inpaintMethod] 分開＝弱機可單獨調快。
      */
     fun liveInpaintMethod(): String = translationPreferences.liveInpaintMethod.get()
 
@@ -319,7 +319,7 @@ class TranslationManager(private val context: Context) {
     fun translate(manga: Manga, chapters: List<Chapter>, atFront: Boolean = false, method: String? = null) {
         if (chapters.isEmpty()) return
         if (!masterEnabled()) return // 硬總開關：關閉時自動/手動翻一律不排入
-        // method 非 null＝呼叫端指定去字法（即時翻/reader 情境傳 [liveInpaintMethod]，使用者可自訂、預設 boxfill 求快）；
+        // method 非 null＝呼叫端指定去字法（即時翻/reader 情境傳 [liveInpaintMethod]，使用者可自訂、預設 AI 去字）；
         // null＝用設定的去字法（下載時翻、詳情頁手動翻——可慢可高品質）。
         val m = method ?: translationPreferences.inpaintMethod.get()
         synchronized(lock) {

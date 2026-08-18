@@ -1451,7 +1451,7 @@
     <string name="pref_translation_live_categories">Live translation categories</string>
     <string name="pref_translation_live_categories_message">Include categories = translate only those; exclude = skip them; none = all</string>
     <string name="pref_translation_live_inpaint_method">Live text removal</string>
-    <string name="pref_translation_live_inpaint_summary">Text-removal method for live translation, separate from download. Fast (box-fill) by default for low latency; pick AI removal to see it while reading.</string>
+    <string name="pref_translation_live_inpaint_summary">Text-removal method for live translation, kept separate from downloads. AI removal by default — it is fast enough now and runs while the translation request is in flight. Switch to fast (box-fill) on slower devices.</string>
     <string name="pref_translation_excluded_sources">Sources to skip</string>
     <string name="pref_translation_excluded_sources_summary">Picked sources won\'t auto-translate (manual still works): %s</string>
     <string name="pref_translation_remove_after_read_summary">%s (synced with download settings)</string>

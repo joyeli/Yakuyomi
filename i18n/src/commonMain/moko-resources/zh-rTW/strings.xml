@@ -1085,7 +1085,7 @@
     <string name="pref_translation_live_categories">即時翻譯分類</string>
     <string name="pref_translation_live_categories_message">選了「包含」分類＝只翻這些分類的書；選「排除」＝這些分類的書不翻；都不選＝全部</string>
     <string name="pref_translation_live_inpaint_method">即時翻去字方法</string>
-    <string name="pref_translation_live_inpaint_summary">即時翻譯專用的去字方法，與下載時翻譯分開。預設「快速去字」求低延遲；想邊讀邊看 AI 去字可改選「AI 去字」。</string>
+    <string name="pref_translation_live_inpaint_summary">即時翻譯專用的去字方法，與下載時翻譯分開。預設「AI 去字」——現在夠快，而且去字跑在翻譯等待網路的同時。機器較慢可改選「快速去字」。</string>
     <string name="pref_translation_excluded_sources">不翻譯的來源</string>
     <string name="pref_translation_excluded_sources_summary">勾選的來源不自動翻譯（手動翻不受限）：%s</string>
     <string name="pref_translation_remove_after_read_summary">%s（與下載設定連動）</string>

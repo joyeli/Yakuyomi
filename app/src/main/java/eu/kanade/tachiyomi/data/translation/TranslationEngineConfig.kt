@@ -214,7 +214,7 @@ object TranslationEngineConfig {
     /**
      * 用 [prefs] 組出完整 [EngineConfig]（偵測/OCR/翻譯/去字/排版）。
      *
-     * @param methodRaw 去字方法原始字串（[TranslationPreferences.inpaintMethod] 值，或即時翻譯固定的 "boxfill"）。
+     * @param methodRaw 去字方法原始字串（[TranslationPreferences.inpaintMethod] 或即時翻的 [TranslationPreferences.liveInpaintMethod]）。
      *                  此處只決定去字 method/wholeImage，其餘參數一律照 [prefs]。
      *
      * 與舊 [PageTranslator.translateChapter] 內聯的 cfg 區塊**逐欄相同**（行為保持）：緒數裝置相依、

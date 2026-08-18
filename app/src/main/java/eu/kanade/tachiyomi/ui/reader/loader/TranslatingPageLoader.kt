@@ -173,7 +173,7 @@ internal class TranslatingPageLoader(
                 return
             }
             // 整章排入受管理佇列（背景翻、可暫停/取消/重試、清單顯示翻譯中）。atFront＝true：正在讀的章插隊到最前。
-            // 即時翻用即時去字法（預設 boxfill·快），與下載/手動翻的去字法分開——讀到時求低延遲。
+            // 即時翻用即時去字法（預設 AI 去字），與下載/手動翻的去字法分開＝弱機可單獨改回 boxfill 求低延遲。
             translationManager.translate(
                 manga,
                 listOf(domainChapter),
