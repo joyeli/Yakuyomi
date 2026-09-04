@@ -170,6 +170,16 @@ class ReaderPreferences(
 
     val invertedColors: Preference<Boolean> = preferenceStore.getBoolean("pref_inverted_colors", false)
 
+    /**
+     * Yakuyomi 夜讀模式（濾鏡層）：把紙白壓成中灰、黑線維持黑，夜間閱讀不刺眼又保住對比。
+     *
+     * 曲線＝桌面 parity 定案的 `lin8`：`y = 8 + (132/255)·x`（黑 0→8＝避開 OLED 黑碎、紙白 255→140）。
+     * **線性 ⇒ ColorMatrix 可精確重現**，不需要 AGSL/LUT，全 API 版本可用（見 [ReaderActivity] 的
+     * `getCombinedPaint`）。這是「沒有重繪素材的頁」的通用退路；有素材的章日後走夜讀重繪
+     * （分區：氣泡深底白字、背景填黑、前景白描邊），**兩者刻意共用同一條曲線**＝混排時觀感一致。
+     */
+    val nightRead: Preference<Boolean> = preferenceStore.getBoolean("pref_night_read", false)
+
     // endregion
 
     // region Controls

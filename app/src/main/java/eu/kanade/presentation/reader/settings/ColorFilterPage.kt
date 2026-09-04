@@ -122,6 +122,11 @@ internal fun ColumnScope.ColorFilterPage(viewModel: ReaderSettingsViewModel) {
         label = stringResource(MR.strings.pref_inverted_colors),
         pref = viewModel.preferences.invertedColors,
     )
+    // Yakuyomi 夜讀模式：與灰階/反相並列（同一套 ColorMatrix + layer paint 機制）。
+    CheckboxItem(
+        label = stringResource(MR.strings.pref_night_read),
+        pref = viewModel.preferences.nightRead,
+    )
 }
 
 private fun getColorValue(currentColor: Int, color: Int, mask: Long, bitShift: Int): Int {

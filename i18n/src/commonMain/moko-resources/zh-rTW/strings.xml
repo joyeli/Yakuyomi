@@ -658,6 +658,7 @@
     <string name="pref_highest">最高</string>
     <string name="pref_hide_threshold">捲動時隱藏選單的靈敏度</string>
     <string name="pref_inverted_colors">反轉</string>
+    <string name="pref_night_read">夜讀模式</string>
     <string name="theme_tealturquoise">綠松色</string>
     <string name="confirm_lock_change">驗證以確認變更</string>
     <string name="pref_category_appearance">外觀</string>
