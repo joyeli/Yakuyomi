@@ -117,14 +117,6 @@ import kotlin.time.Duration.Companion.seconds
 class ReaderActivity : BaseActivity() {
 
     companion object {
-        /**
-         * 夜讀曲線 lin8 的兩個係數（桌面 parity `nightread.py` 定案值，見 [ReaderPreferences.nightRead]）：
-         * `y = FLOOR + SCALE·x`＝紙白 255→140、黑 0→8。**改這裡就要同步改 parity 與日後的夜讀重繪**，
-         * 濾鏡與重繪共用同一條曲線是刻意要求（同一章混排時觀感才一致）。
-         */
-        private const val NIGHT_READ_SCALE = 132f / 255f
-        private const val NIGHT_READ_FLOOR = 8f
-
         fun newIntent(context: Context, mangaId: Long?, chapterId: Long?): Intent {
             return Intent(context, ReaderActivity::class.java).apply {
                 putExtra("manga", mangaId)
@@ -952,11 +944,7 @@ class ReaderActivity : BaseActivity() {
      */
     private inner class ReaderConfig {
 
-        private fun getCombinedPaint(
-            grayscale: Boolean,
-            invertedColors: Boolean,
-            nightRead: Boolean,
-        ): Paint {
+        private fun getCombinedPaint(grayscale: Boolean, invertedColors: Boolean): Paint {
             return Paint().apply {
                 colorFilter = ColorMatrixColorFilter(
                     ColorMatrix().apply {
@@ -970,21 +958,6 @@ class ReaderActivity : BaseActivity() {
                                         -1f, 0f, 0f, 0f, 255f,
                                         0f, -1f, 0f, 0f, 255f,
                                         0f, 0f, -1f, 0f, 255f,
-                                        0f, 0f, 0f, 1f, 0f,
-                                    ),
-                                ),
-                            )
-                        }
-                        if (nightRead) {
-                            // 夜讀曲線 lin8（桌面 parity 定案）：y = 8 + (132/255)·x —— 黑維持黑（+8 只為
-                            // 避開 OLED 黑碎）、紙白壓到 140 的中灰。**放最後 postConcat**：不論使用者還開了
-                            // 什麼濾鏡，最終輸出一律被壓進 [8,140]，「夜間不刺眼」這個保證不會被別的設定破壞。
-                            postConcat(
-                                ColorMatrix(
-                                    floatArrayOf(
-                                        NIGHT_READ_SCALE, 0f, 0f, 0f, NIGHT_READ_FLOOR,
-                                        0f, NIGHT_READ_SCALE, 0f, 0f, NIGHT_READ_FLOOR,
-                                        0f, 0f, NIGHT_READ_SCALE, 0f, NIGHT_READ_FLOOR,
                                         0f, 0f, 0f, 1f, 0f,
                                     ),
                                 ),
@@ -1029,11 +1002,9 @@ class ReaderActivity : BaseActivity() {
             combine(
                 readerPreferences.grayscale.changes(),
                 readerPreferences.invertedColors.changes(),
-                readerPreferences.nightRead.changes(),
-                ::Triple,
-            )
-                .onEach { (grayscale, invertedColors, nightRead) ->
-                    setLayerPaint(grayscale, invertedColors, nightRead)
+            ) { grayscale, invertedColors -> grayscale to invertedColors }
+                .onEach { (grayscale, invertedColors) ->
+                    setLayerPaint(grayscale, invertedColors)
                 }
                 .launchIn(lifecycleScope)
 
@@ -1123,12 +1094,8 @@ class ReaderActivity : BaseActivity() {
 
             viewModel.setBrightnessOverlayValue(value)
         }
-        private fun setLayerPaint(grayscale: Boolean, invertedColors: Boolean, nightRead: Boolean) {
-            val paint = if (grayscale || invertedColors || nightRead) {
-                getCombinedPaint(grayscale, invertedColors, nightRead)
-            } else {
-                null
-            }
+        private fun setLayerPaint(grayscale: Boolean, invertedColors: Boolean) {
+            val paint = if (grayscale || invertedColors) getCombinedPaint(grayscale, invertedColors) else null
             binding.viewerContainer.setLayerType(LAYER_TYPE_HARDWARE, paint)
         }
     }
