@@ -1,22 +1,28 @@
 package eu.kanade.presentation.more.settings.screen
 
+import android.content.Intent
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -31,12 +37,7 @@ import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import eu.kanade.tachiyomi.data.nightread.NightReadRenderer
+import eu.kanade.tachiyomi.data.nightread.NightReadBenchmark
 import eu.kanade.tachiyomi.data.translation.TranslationEngineConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -48,12 +49,13 @@ import java.io.File
 /**
  * 夜讀模式的上機測試台（實驗性）。
  *
- * 挑一張圖，走完「偵測 → 人物遮罩 → 分區重繪」，並排顯示結果與各階段耗時。
- * 產品化的夜讀會走重繪佇列（與去字法正交的 palette 欄位），這裡只驗證管線在真機上跑得動、
- * 跑多久、畫面對不對。
+ * 一鍵對三張內建測試頁跑兩套模型配方（未量化 / 量化），把結果並排、分段耗時印在同一張大圖上，
+ * 存進相簿。量化的差異多半是局部的（某塊背景填了沒填、某顆泡破沒破），分開看截圖比不出來。
  *
- * 模型：偵測器沿用翻譯引擎的 DBNet；人物遮罩需要 `manga_seg_s.onnx`（38.9MB，必要）與
- * `cartoonseg.onnx`（228MB，可選，加了更準）。兩者放進 app 私有的 `files/models/` 即可。
+ * 模型放在 app 私有的 `files/models/`，外部塞不進去，所以下面有匯入鈕。
+ * 未量化配方要 `dbnet*.param`（NCNN，與翻譯共用）與 `manga_seg_s.onnx`；
+ * 量化配方要 `dbnet*.onnx`（int8）與 `manga_seg_s_int8.onnx`。
+ * `cartoonseg.onnx` 兩套共用、可不放——少它會多幾框違規，但兩邊條件一致，仍比得出量化的影響。
  */
 class NightReadTestScreen : Screen {
 
@@ -65,46 +67,13 @@ class NightReadTestScreen : Screen {
 
         val modelsDir = remember { TranslationEngineConfig.downloadedDir(context) }
         var scan by remember { mutableStateOf(0) }
-        val detectorPath = remember(scan) { findModel(modelsDir, ".param", "dbnet") }
-        val yolosegPath = remember(scan) { findModel(modelsDir, ".onnx", "manga_seg", "yoloseg") }
-        val csegPath = remember(scan) { findModel(modelsDir, ".onnx", "cartoonseg", "cseg") }
+        val models = remember(scan) { resolveModels(modelsDir) }
 
-        var source by remember { mutableStateOf<Bitmap?>(null) }
-        var rendered by remember { mutableStateOf<Bitmap?>(null) }
-        var status by remember { mutableStateOf("") }
         var busy by remember { mutableStateOf(false) }
-
-        val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-            uri ?: return@rememberLauncherForActivityResult
-            scope.launch {
-                busy = true
-                rendered = null
-                status = ""
-                try {
-                    val bmp = withContext(Dispatchers.IO) {
-                        context.contentResolver.openInputStream(uri)?.use {
-                            BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply {
-                                inPreferredConfig = Bitmap.Config.ARGB_8888
-                            })
-                        }
-                    } ?: error("decode failed")
-                    source = bmp
-                    val det = detectorPath ?: error("missing detector")
-                    val yolo = yolosegPath ?: error("missing character model")
-                    val out = withContext(Dispatchers.Default) {
-                        NightReadRenderer(det, yolo, csegPath).use { it.render(bmp) }
-                    }
-                    rendered = out.bitmap
-                    status = "${bmp.width}×${bmp.height} · " +
-                        "detect ${out.timing.detectMs}ms · mask ${out.timing.maskMs}ms · " +
-                        "render ${out.timing.renderMs}ms · total ${out.timing.totalMs}ms"
-                } catch (e: Throwable) {
-                    status = e.message ?: e.javaClass.simpleName
-                } finally {
-                    busy = false
-                }
-            }
-        }
+        var progress by remember { mutableStateOf("") }
+        var summary by remember { mutableStateOf<List<String>>(emptyList()) }
+        var sheet by remember { mutableStateOf<Bitmap?>(null) }
+        var sheetUri by remember { mutableStateOf<Uri?>(null) }
 
         val importer = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
             uri ?: return@rememberLauncherForActivityResult
@@ -112,9 +81,9 @@ class NightReadTestScreen : Screen {
                 busy = true
                 try {
                     val name = withContext(Dispatchers.IO) {
-                        val display = context.contentResolver.query(uri, null, null, null, null)?.use { c ->
-                            val idx = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                            if (idx >= 0 && c.moveToFirst()) c.getString(idx) else null
+                        val display = context.contentResolver.query(uri, null, null, null, null)?.use { cur ->
+                            val idx = cur.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                            if (idx >= 0 && cur.moveToFirst()) cur.getString(idx) else null
                         } ?: "imported.onnx"
                         modelsDir.mkdirs()
                         val dst = File(modelsDir, display)
@@ -123,10 +92,10 @@ class NightReadTestScreen : Screen {
                         }
                         display
                     }
-                    status = "imported $name"
+                    progress = "imported $name"
                     scan++
                 } catch (e: Throwable) {
-                    status = e.message ?: e.javaClass.simpleName
+                    progress = e.message ?: e.javaClass.simpleName
                 } finally {
                     busy = false
                 }
@@ -139,10 +108,7 @@ class NightReadTestScreen : Screen {
                     title = { Text(stringResource(MR.strings.pref_nightread_test)) },
                     navigationIcon = {
                         IconButton(onClick = { navigator.pop() }) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
-                                contentDescription = null,
-                            )
+                            Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = null)
                         }
                     },
                 )
@@ -153,77 +119,148 @@ class NightReadTestScreen : Screen {
                     .padding(paddingValues)
                     .verticalScroll(rememberScrollState())
                     .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
-                    text = stringResource(MR.strings.pref_nightread_test_models),
+                    stringResource(MR.strings.pref_nightread_test_models),
                     style = MaterialTheme.typography.titleSmall,
                 )
-                ModelRow("DBNet (detection)", detectorPath)
-                ModelRow("manga_seg_s.onnx (characters)", yolosegPath)
-                ModelRow("cartoonseg.onnx (optional)", csegPath)
+                models.rows.forEach { (label, path) ->
+                    Text(
+                        text = (if (path != null) "✓ " else "✗ ") + label,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (path != null) {
+                            MaterialTheme.colorScheme.onSurface
+                        } else {
+                            MaterialTheme.colorScheme.error
+                        },
+                    )
+                }
 
-                Button(
+                OutlinedButton(
                     onClick = { importer.launch("*/*") },
                     enabled = !busy,
                     modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(stringResource(MR.strings.pref_nightread_test_import))
-                }
+                ) { Text(stringResource(MR.strings.pref_nightread_test_import)) }
 
                 Button(
-                    onClick = { picker.launch("image/*") },
-                    enabled = !busy && detectorPath != null && yolosegPath != null,
+                    onClick = {
+                        scope.launch {
+                            busy = true
+                            summary = emptyList()
+                            sheet = null
+                            try {
+                                val report = withContext(Dispatchers.Default) {
+                                    NightReadBenchmark(context).run(
+                                        assetPages = PAGES,
+                                        recipes = models.recipes(),
+                                    ) { p -> progress = p }
+                                }
+                                sheet = report.sheet
+                                sheetUri = report.uri
+                                summary = report.lines
+                                progress = if (report.uri != null) "saved to gallery" else "done"
+                            } catch (e: Throwable) {
+                                progress = e.message ?: e.javaClass.simpleName
+                            } finally {
+                                busy = false
+                            }
+                        }
+                    },
+                    enabled = !busy && models.ready,
                     modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(stringResource(MR.strings.pref_nightread_test_pick))
-                }
+                ) { Text(stringResource(MR.strings.pref_nightread_test_run)) }
 
                 if (busy) {
-                    CircularProgressIndicator(modifier = Modifier.padding(8.dp))
+                    CircularProgressIndicator(modifier = Modifier.padding(4.dp))
                 }
-                if (status.isNotEmpty()) {
-                    Text(text = status, style = MaterialTheme.typography.bodySmall)
+                if (progress.isNotEmpty()) {
+                    Text(progress, style = MaterialTheme.typography.bodySmall)
+                }
+                summary.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+
+                sheetUri?.let { uri ->
+                    OutlinedButton(
+                        onClick = {
+                            val share = Intent(Intent.ACTION_SEND).apply {
+                                type = "image/png"
+                                putExtra(Intent.EXTRA_STREAM, uri)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            context.startActivity(Intent.createChooser(share, null))
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(stringResource(MR.strings.pref_nightread_test_share)) }
                 }
 
-                val src = source
-                val out = rendered
-                if (src != null && out != null) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Image(
-                            bitmap = src.asImageBitmap(),
-                            contentDescription = null,
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Image(
-                            bitmap = out.asImageBitmap(),
-                            contentDescription = null,
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
+                sheet?.let {
+                    Image(
+                        bitmap = it.asImageBitmap(),
+                        contentDescription = null,
+                        contentScale = ContentScale.FillWidth,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
             }
         }
     }
 
-    @Composable
-    private fun ModelRow(label: String, path: String?) {
-        Text(
-            text = if (path != null) "✓ $label" else "✗ $label",
-            style = MaterialTheme.typography.bodySmall,
-            color = if (path != null) {
-                MaterialTheme.colorScheme.onSurface
-            } else {
-                MaterialTheme.colorScheme.error
-            },
+    /** 兩套配方各需要的模型。檔名關鍵字要分得出 fp32 與 int8，所以比對得精確。 */
+    private class Models(
+        val detNcnn: String?,
+        val detOnnx: String?,
+        val yolo32: String?,
+        val yolo8: String?,
+        val cseg: String?,
+    ) {
+        val rows: List<Pair<String, String?>> = listOf(
+            "dbnet .param (NCNN fp16, baseline)" to detNcnn,
+            "dbnet .onnx (int8)" to detOnnx,
+            "manga_seg_s.onnx (fp32)" to yolo32,
+            "manga_seg_s_int8.onnx" to yolo8,
+            "cartoonseg.onnx (shared, optional)" to cseg,
+        )
+
+        val ready: Boolean get() = detNcnn != null && detOnnx != null && yolo32 != null && yolo8 != null
+
+        fun recipes(): List<NightReadBenchmark.Recipe> {
+            fun mb(vararg p: String?) = p.filterNotNull().sumOf { File(it).length() } / 1048576.0
+            val ncnnBin = detNcnn?.removeSuffix(".param")?.plus(".bin")
+            return listOf(
+                NightReadBenchmark.Recipe(
+                    label = "fp16 + fp32",
+                    detectorNcnn = detNcnn,
+                    detectorOnnx = null,
+                    yoloseg = yolo32!!,
+                    cseg = cseg,
+                    sizeMb = mb(detNcnn, ncnnBin, yolo32, cseg),
+                ),
+                NightReadBenchmark.Recipe(
+                    label = "int8 + int8",
+                    detectorNcnn = null,
+                    detectorOnnx = detOnnx,
+                    yoloseg = yolo8!!,
+                    cseg = cseg,
+                    sizeMb = mb(detOnnx, yolo8, cseg),
+                ),
+            )
+        }
+    }
+
+    private fun resolveModels(dir: File): Models {
+        val files = dir.takeIf { it.isDirectory }?.listFiles().orEmpty()
+        fun find(pred: (String) -> Boolean) = files.firstOrNull { pred(it.name.lowercase()) }?.absolutePath
+        return Models(
+            detNcnn = find { it.contains("dbnet") && it.endsWith(".param") },
+            detOnnx = find { it.contains("dbnet") && it.endsWith(".onnx") },
+            yolo32 = find { it.contains("manga_seg") && it.endsWith(".onnx") && !it.contains("int8") },
+            yolo8 = find { it.contains("manga_seg") && it.endsWith(".onnx") && it.contains("int8") },
+            cseg = find { it.contains("cartoonseg") && it.endsWith(".onnx") && !it.contains("int8") },
         )
     }
 
-    private fun findModel(dir: File, ext: String, vararg keywords: String): String? =
-        dir.takeIf { it.isDirectory }?.listFiles()?.firstOrNull { f ->
-            val n = f.name.lowercase()
-            n.endsWith(ext) && keywords.any { n.contains(it) }
-        }?.absolutePath
+    private companion object {
+        /** 三張代表頁：有框黑白、多泡、無框彩頁（放 debug sourceSet，release build 不含）。 */
+        val PAGES = listOf("ch34_011.jpg", "ch34_014.jpg", "demo05.png")
+    }
 }

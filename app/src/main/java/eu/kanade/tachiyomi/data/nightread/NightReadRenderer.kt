@@ -24,13 +24,21 @@ import kotlin.math.min
  * 每頁會配置數個與頁面同尺寸的緩衝，一次只處理一頁，用完就放掉。
  */
 class NightReadRenderer(
-    detectorModelPath: String,
+    detectorNcnnPath: String? = null,
+    detectorOnnxPath: String? = null,
     yolosegPath: String,
     csegPath: String? = null,
 ) : AutoCloseable {
 
-    private val detector = Detector(detectorModelPath)
+    // 偵測走兩條路：NCNN fp16（產品現況）或 ONNX int8（量化版）。前後處理共用 Detector 的
+    // companion，換的只有前向那一步，A/B 才比得到量化本身。
+    private val detector = detectorNcnnPath?.let { Detector(it) }
+    private val detectorOrt = detectorOnnxPath?.let { DbnetOrt(it) }
     private val charMask = CharMaskOrt(yolosegPath, csegPath)
+
+    init {
+        require(detector != null || detectorOrt != null) { "至少要給一種偵測器" }
+    }
 
     /** 一頁的耗時拆解，給上機測試看瓶頸在哪。 */
     data class Timing(val detectMs: Long, val maskMs: Long, val renderMs: Long) {
@@ -46,7 +54,7 @@ class NightReadRenderer(
         page.getPixels(pixels, 0, w, 0, 0, w, h)
 
         val t0 = System.currentTimeMillis()
-        val detection = detector.detect(page)
+        val detection = detector?.detect(page) ?: detectorOrt!!.detect(page)
         val regions = Grouping.group(detection.lines).map {
             TextRegion(
                 x0 = it.x0.toInt().coerceIn(0, w),
@@ -77,7 +85,8 @@ class NightReadRenderer(
     }
 
     override fun close() {
-        detector.close()
+        detector?.close()
+        detectorOrt?.close()
         charMask.close()
     }
 
