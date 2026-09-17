@@ -428,6 +428,8 @@
     <string name="onboarding_highlights_stats_desc">See how much you have translated and read</string>
     <string name="pref_translation_quickstart">Quickstart guide</string>
     <string name="pref_nightread_test">Night reading (experimental)</string>
+    <string name="pref_translation_nightread">Generate night-reading pages</string>
+    <string name="pref_translation_nightread_summary">Rebuild each page as a dark one right after it is translated, so switching costs nothing later. Needs the character-segmentation model.</string>
     <string name="pref_nightread_test_summary">Rebuild a page as a dark one and time each stage</string>
     <string name="pref_nightread_test_models">Models</string>
     <string name="pref_nightread_test_pick">Pick an image</string>

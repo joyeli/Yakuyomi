@@ -329,6 +329,12 @@ object SettingsTranslationScreen : SearchableSettings {
             subtitle = stringResource(MR.strings.pref_nightread_test_summary),
             onClick = { navigator.push(NightReadTestScreen()) },
         )
+        // 夜讀版產生：接在翻譯之後對成品頁重建（夜讀吃的是貼好譯文的頁，翻譯前算會得到原文）。
+        val nightReadGenerateItem = Preference.PreferenceItem.SwitchPreference(
+            preference = prefs.nightReadGenerate,
+            title = stringResource(MR.strings.pref_translation_nightread),
+            subtitle = stringResource(MR.strings.pref_translation_nightread_summary),
+        )
         val masterItem = Preference.PreferenceItem.SwitchPreference(
             preference = prefs.translationMasterEnabled,
             title = stringResource(MR.strings.pref_translation_master),
@@ -346,6 +352,7 @@ object SettingsTranslationScreen : SearchableSettings {
             quickstartItem,
             masterItem,
             nightReadItem,
+            nightReadGenerateItem,
             Preference.PreferenceItem.SwitchPreference(
                 preference = prefs.showAdvanced,
                 title = stringResource(MR.strings.pref_translation_show_advanced),

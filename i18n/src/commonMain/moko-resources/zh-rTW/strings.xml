@@ -1203,6 +1203,8 @@
     <string name="onboarding_highlights_stats_desc">看你翻了多少、讀了多少</string>
     <string name="pref_translation_quickstart">快速上手導覽</string>
     <string name="pref_nightread_test">夜讀模式（實驗）</string>
+    <string name="pref_translation_nightread">產生夜讀版</string>
+    <string name="pref_translation_nightread_summary">每頁翻譯完成後順便重建成暗色頁，之後切換不必重算。需要人物分割模型。</string>
     <string name="pref_nightread_test_summary">把一頁重建成暗色頁，並列出各階段耗時</string>
     <string name="pref_nightread_test_models">模型</string>
     <string name="pref_nightread_test_pick">選一張圖</string>

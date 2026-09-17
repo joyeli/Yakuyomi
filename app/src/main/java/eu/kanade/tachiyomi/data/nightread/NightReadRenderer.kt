@@ -152,3 +152,33 @@ class NightReadRenderer(
         return Bitmap.createBitmap(out, g.w, g.h, Bitmap.Config.ARGB_8888)
     }
 }
+
+/**
+ * 從 app 私有的 `files/models/` 解析出夜讀需要的模型並建 renderer。
+ *
+ * 偵測器沿用翻譯引擎的 NCNN DBNet，所以夜讀只需要另外備人物分割模型：`manga_seg_s*.onnx`
+ * 是必要的，`cartoonseg.onnx` 可選（加了更準、代價是 228 MB）。缺必要模型就回 null，
+ * 呼叫端據此安靜跳過——夜讀產生是加值功能，不該擋住翻譯。
+ */
+object NightReadModels {
+
+    fun create(context: android.content.Context): NightReadRenderer? {
+        val dir = java.io.File(context.filesDir, "models")
+        val files = dir.takeIf { it.isDirectory }?.listFiles().orEmpty()
+        fun find(pred: (String) -> Boolean) = files.firstOrNull { pred(it.name.lowercase()) }?.absolutePath
+        val det = find { it.contains("dbnet") && it.endsWith(".param") } ?: return null
+        val yolo = find { it.contains("manga_seg") && it.endsWith(".onnx") } ?: return null
+        val cseg = find { it.contains("cartoonseg") && it.endsWith(".onnx") }
+        return runCatching {
+            NightReadRenderer(detectorNcnnPath = det, yolosegPath = yolo, csegPath = cseg)
+        }.getOrNull()
+    }
+
+    /** 模型是否備齊到可以產生夜讀版（給設定頁顯示用，不建 session）。 */
+    fun ready(context: android.content.Context): Boolean {
+        val dir = java.io.File(context.filesDir, "models")
+        val files = dir.takeIf { it.isDirectory }?.listFiles().orEmpty().map { it.name.lowercase() }
+        return files.any { it.contains("dbnet") && it.endsWith(".param") } &&
+            files.any { it.contains("manga_seg") && it.endsWith(".onnx") }
+    }
+}
