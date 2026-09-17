@@ -405,6 +405,7 @@ class ReaderActivity : BaseActivity() {
                 // 已下載章＝頁圖在磁碟（可重繪/可單頁翻）；DownloadPageLoader＝已下載、TranslatingPageLoader＝即時翻（同樣落盤）。
                 val pageOnDisk = page.chapter.pageLoader is DownloadPageLoader ||
                     page.chapter.pageLoader is TranslatingPageLoader
+                val hasNightRead = remember(page.chapter.chapter.id) { viewModel.hasNightReadPages() }
                 ReaderPageActionsDialog(
                     onDismissRequest = onDismissRequest,
                     onSetAsCover = viewModel::setAsCover,
@@ -418,6 +419,13 @@ class ReaderActivity : BaseActivity() {
                     onStartChapterTranslate = viewModel::startChapterTranslate,
                     onStopChapterTranslate = viewModel::stopChapterTranslate,
                     isChapterTranslating = state.liveTranslateProgress != null,
+                    // 夜讀切換：只在已下載章、且這一章真的有夜讀版時才給（否則按了什麼都不會變）。
+                    // 查檔案要 remember 住：這裡是 Composable，不 remember 會每次重組都做一次 I/O。
+                    onToggleNightRead = {
+                        viewModel.toggleNightRead()
+                        onDismissRequest() // 關掉對話框：切換即時生效，也省得按鈕文字要另外追狀態
+                    }.takeIf { pageOnDisk && hasNightRead },
+                    isNightRead = viewModel.isNightReadMode(),
                 )
             }
             is ReaderViewModel.Dialog.ReRenderMethod -> {

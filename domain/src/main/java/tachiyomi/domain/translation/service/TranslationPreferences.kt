@@ -137,6 +137,14 @@ class TranslationPreferences(
      */
     val nightReadGenerate = preferenceStore.getBoolean("pref_translation_nightread", false)
 
+    /**
+     * reader 目前顯示夜讀版還是正常版。
+     *
+     * 只是個顯示開關：兩個版本都是事先算好的圖（[nightReadGenerate] 在翻譯時產生），
+     * 切換只換讀哪個檔，不重算任何東西。沒有夜讀版的頁自動退回正常版。
+     */
+    val nightReadMode = preferenceStore.getBoolean("pref_reader_nightread_mode", false)
+
     /** OCR 逐行並發度（auto=硬體核數 / 2/4/6/8），對應引擎 OcrConfig.concurrency（concurrent 鎖 true）。 */
     val ocrConcurrency = preferenceStore.getString("translation_ocr_concurrency", DEFAULT_OCR_CONCURRENCY)
 

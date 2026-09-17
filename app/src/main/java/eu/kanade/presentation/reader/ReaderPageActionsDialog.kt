@@ -14,6 +14,8 @@ import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Photo
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.DarkMode
+import androidx.compose.material.icons.outlined.LightMode
 import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ListItem
@@ -49,6 +51,11 @@ fun ReaderPageActionsDialog(
     onStopChapterTranslate: (() -> Unit)? = null,
     // 當前章是否正在翻譯佇列（QUEUE/TRANSLATING）：true → 顯示「中止」、false → 顯示「開始」（XOR）。
     isChapterTranslating: Boolean = false,
+    // 切換夜讀／正常顯示。兩個版本都是事先算好的圖，切換只換讀哪個檔、不重算。
+    // 這一章沒有任何頁有夜讀版時，呼叫端傳 null（不顯示此鈕）。
+    onToggleNightRead: (() -> Unit)? = null,
+    // 目前顯示的是夜讀版還是正常版（決定按鈕文字）。
+    isNightRead: Boolean = false,
 ) {
     var showSetCoverDialog by remember { mutableStateOf(false) }
 
@@ -126,6 +133,21 @@ fun ReaderPageActionsDialog(
                             onClick = onStartChapterTranslate,
                         )
                     }
+                }
+                if (onToggleNightRead != null) {
+                    // 夜讀切換：翻譯時已經把暗色版算好存檔，這裡只是換讀哪個檔。
+                    ActionButton(
+                        modifier = Modifier.weight(1f),
+                        title = stringResource(
+                            if (isNightRead) {
+                                MR.strings.reader_nightread_off
+                            } else {
+                                MR.strings.reader_nightread_on
+                            },
+                        ),
+                        icon = if (isNightRead) Icons.Outlined.LightMode else Icons.Outlined.DarkMode,
+                        onClick = onToggleNightRead,
+                    )
                 }
                 if (onReRender != null) {
                     // 換去字法（原「重繪」）：把對話框換成去字法選擇器（共用同一個 dialog state slot）。
