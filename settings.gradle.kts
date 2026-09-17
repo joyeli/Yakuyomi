@@ -28,6 +28,8 @@ dependencyResolutionManagement {
 
 // Yakuyomi：以 composite build 接入翻譯引擎（submodule yakuyomi-engine）→ app 依賴 li.joye.yakuyomi:engine
 includeBuild("yakuyomi-engine")
+// Yakuyomi：夜讀模式（submodule yakuyomi-nightread）→ app 依賴 li.joye.yakuyomi:nightread(-ort)
+includeBuild("yakuyomi-nightread")
 
 enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
