@@ -1351,47 +1351,6 @@ class ReaderViewModel @JvmOverloads constructor(
      * 流程同 [reRenderPage]：先把該頁設 [Page.State.Queue]（轉圈圈當「翻譯中」）+ toast，背景翻完不論成敗都
      * [PageLoader.retryPage] 刷新（成功＝譯圖、失敗＝原圖），再 toast 成敗。線上章不提供此鈕（呼叫端 gate）。
      */
-    /**
-     * 切換夜讀／正常顯示。
-     *
-     * 兩個版本都是翻譯時就算好的圖，切換只是改讀哪個檔：改完偏好後叫當前章每一頁 [ReaderPage.reload]，
-     * 頁面載入器的 stream lambda 會重新判斷、換讀另一個檔。沒有夜讀版的頁自動維持正常版。
-     */
-    fun toggleNightRead() {
-        translationPreferences.nightReadMode.set(!translationPreferences.nightReadMode.get())
-        state.value.viewerChapters?.let { chapters ->
-            listOfNotNull(chapters.prevChapter, chapters.currChapter, chapters.nextChapter)
-                .forEach { ch -> ch.pages?.forEach { it.reload() } }
-        }
-    }
-
-    /** 目前顯示的是夜讀版還是正常版（給頁面動作對話框決定按鈕文字）。 */
-    fun isNightReadMode(): Boolean = translationPreferences.nightReadMode.get()
-
-    /**
-     * 當前章有沒有任何一頁備好夜讀版。沒有就不顯示切換鈕——按了什麼都不會變，那比沒有按鈕更糟。
-     *
-     * 只看 `.yakuyomi/` 子夾裡有沒有 `.night.webp`，不逐頁比對：產生是整章一起跑的，
-     * 有一張就代表這章走過夜讀。
-     */
-    fun hasNightReadPages(): Boolean {
-        val chapter = state.value.viewerChapters?.currChapter ?: return false
-        val manga = manga ?: return false
-        return runCatching {
-            val source = sourceManager.getOrStub(manga.source)
-            val dir = downloadProvider.findChapterDir(
-                chapter.chapter.name,
-                chapter.chapter.scanlator,
-                chapter.chapter.url,
-                manga.title,
-                source,
-            ) ?: return false
-            dir.findFile(".yakuyomi")
-                ?.listFiles()
-                ?.any { it.name?.endsWith(".night.webp") == true } == true
-        }.getOrDefault(false)
-    }
-
     fun translateThisPage() {
         val page = (state.value.dialog as? Dialog.PageActions)?.page ?: return
         closeDialog()

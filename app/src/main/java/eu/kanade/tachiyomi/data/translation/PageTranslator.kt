@@ -20,8 +20,6 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import eu.kanade.tachiyomi.data.nightread.NightReadModels
-import eu.kanade.tachiyomi.data.nightread.NightReadRenderer
 import li.joye.yakuyomi.engine.Inpainter
 import li.joye.yakuyomi.engine.InpainterConfig
 import li.joye.yakuyomi.engine.PageAnalysis
@@ -135,15 +133,6 @@ class PageTranslator(private val context: Context) {
         // 同時也是傳給 [engineService.translatePage] 的去字法：與引擎當前去字法不同時，服務會重建引擎（章與章間換法才重載）。
         val inpaintMethodRaw = method
 
-        // 夜讀版（best-effort、不擋翻譯）：夜讀處理的是**貼好譯文的成品頁**，所以只能接在翻譯之後。
-        // 整章共用一個 renderer——每頁重建要重載模型，那比推論本身還貴。缺模型就是 null，安靜跳過。
-        val nightRead = if (translationPreferences.nightReadGenerate.get()) {
-            NightReadModels.create(context)
-        } else {
-            null
-        }
-        val nightReadLock = Mutex()   // 偵測器與遮罩 session 不保證可併發，逐頁序列化
-
         val total = images.size
         var processed = total - pending.size // resume：已完成頁先計入進度
         onProgress(processed, total)
@@ -184,13 +173,6 @@ class PageTranslator(private val context: Context) {
                                 when (val r = engineService.translatePage(bmp, inpaintMethodRaw)) {
                                     is PageResult.Translated -> {
                                         writeBack(img, r.page) // 各頁寫各自檔、鎖外並發
-                                        // 夜讀版：對剛貼好譯文的成品頁重建，存成 <頁>.night.webp。
-                                        // 之後切換夜讀不必重算，換檔案指標就好。失敗不擋翻譯。
-                                        if (nightRead != null) {
-                                            nightReadLock.withLock {
-                                                saveNightRead(chapterDir, name, r.page, nightRead)
-                                            }
-                                        }
                                         r.page.recycle() // 譯圖已落檔、後面用不到 → 立即回收（跨頁併發下少堆一張 bitmap，降記憶體峰值）
                                         TraceLog.log("page", "$name translated.done")
                                         // 保留重繪素材（best-effort、不擋翻譯）：bmp 為剛解碼的原圖（引擎不 mutate 輸入、回新 bitmap）。鎖外並發。
@@ -271,8 +253,6 @@ class PageTranslator(private val context: Context) {
             val chapterCount = if (translated > 0 && isChapterTranslated(chapterDir)) 1 else 0
             statsStore.record(chapterCount, translated, promptTokens, completionTokens)
         }
-        // 夜讀 renderer 持有 NCNN 與 ORT session，整章用完就放（跨章不重用：翻譯的引擎才需要常駐）
-        runCatching { nightRead?.close() }
         return translated
     }
 
@@ -325,42 +305,6 @@ class PageTranslator(private val context: Context) {
             logcat(LogPriority.WARN, e) { "即時翻譯落地頁失敗 $name" }
             false
         }
-    }
-
-    /**
-     * 把翻譯成品頁重建成夜讀版，存進 `.yakuyomi/<頁>.night.webp`。
-     *
-     * 這一步刻意放在 [writeBack] 之後、`recycle()` 之前——夜讀吃的就是那張剛貼好譯文的圖。
-     * 在翻譯前算會得到原文頁，譯文貼上去就變成黑字壓黑底。
-     *
-     * 整個過程 best-effort：夜讀是加值功能，模型缺了、記憶體不夠、哪一步炸了，都不該影響翻譯。
-     */
-    private fun saveNightRead(
-        chapterDir: UniFile,
-        pageName: String,
-        translated: Bitmap,
-        renderer: NightReadRenderer,
-    ): String? = runCatching {
-        val base = pageName.substringBeforeLast('.')
-        val dir = synchronized(materialsDirLock) {
-            chapterDir.findFile(MATERIALS_DIR) ?: chapterDir.createDirectory(MATERIALS_DIR)
-        } ?: return "夜讀存失敗：無法建立 .yakuyomi 子夾"
-        val fmt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            Bitmap.CompressFormat.WEBP_LOSSY
-        } else {
-            @Suppress("DEPRECATION")
-            Bitmap.CompressFormat.WEBP
-        }
-        val out = renderer.render(translated).bitmap
-        try {
-            compressToFile(dir, "$base.night.webp", out, fmt, 90)
-        } finally {
-            out.recycle()
-        }
-        null
-    }.getOrElse { e ->
-        logcat(LogPriority.WARN, e) { "夜讀版產生失敗 $pageName" }
-        e.message ?: e.javaClass.simpleName
     }
 
     /**

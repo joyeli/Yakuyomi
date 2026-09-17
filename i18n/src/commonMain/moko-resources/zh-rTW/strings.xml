@@ -1202,17 +1202,6 @@
     <string name="onboarding_highlights_stats_title">翻譯＆閱讀統計</string>
     <string name="onboarding_highlights_stats_desc">看你翻了多少、讀了多少</string>
     <string name="pref_translation_quickstart">快速上手導覽</string>
-    <string name="pref_nightread_test">夜讀模式（實驗）</string>
-    <string name="pref_translation_nightread">產生夜讀版</string>
-    <string name="reader_nightread_on">夜讀</string>
-    <string name="reader_nightread_off">正常</string>
-    <string name="pref_translation_nightread_summary">每頁翻譯完成後順便重建成暗色頁，之後切換不必重算。需要人物分割模型。</string>
-    <string name="pref_nightread_test_summary">把一頁重建成暗色頁，並列出各階段耗時</string>
-    <string name="pref_nightread_test_models">模型</string>
-    <string name="pref_nightread_test_pick">選一張圖</string>
-    <string name="pref_nightread_test_import">匯入模型檔</string>
-    <string name="pref_nightread_test_run">執行 A/B 測試</string>
-    <string name="pref_nightread_test_share">分享結果圖</string>
     <string name="pref_translation_quickstart_summary">如何設定與使用翻譯</string>
     <string name="quickstart_what_title">在裝置上跑、自帶金鑰</string>
     <string name="quickstart_what_body">偵測、OCR、去字全在你的手機上完成。只有 OCR 後的文字會送到你選的 LLM 服務商——用你自己的 API key 與端點。你的圖片，以及偵測／OCR／去字這幾步，都不會離開裝置。本 app 不加任何分析／遙測。\n\n雲端翻譯可能產生費用，由你的服務商計費。按下最後的「了解」即表示你了解這點。</string>

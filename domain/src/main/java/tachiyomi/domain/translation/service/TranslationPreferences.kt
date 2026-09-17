@@ -129,22 +129,6 @@ class TranslationPreferences(
     /** 保留重繪素材：翻完每頁另存遮罩 + 文字區 + 原圖，日後可換去字方法低成本重繪（免重跑 OCR/翻譯）；約多一倍儲存。 */
     val keepMaterials = preferenceStore.getBoolean("pref_translation_keep_materials", false)
 
-    /**
-     * 翻譯每一頁時順便產生夜讀版，存成 `<頁>.night.webp`。
-     *
-     * 夜讀處理的是**貼好譯文的成品頁**，所以只能接在翻譯之後。產生好之後切換夜讀不必重算，
-     * 換檔案指標就好。預設關：它要多帶一到兩顆人物分割模型，並非每個人都用得到。
-     */
-    val nightReadGenerate = preferenceStore.getBoolean("pref_translation_nightread", false)
-
-    /**
-     * reader 目前顯示夜讀版還是正常版。
-     *
-     * 只是個顯示開關：兩個版本都是事先算好的圖（[nightReadGenerate] 在翻譯時產生），
-     * 切換只換讀哪個檔，不重算任何東西。沒有夜讀版的頁自動退回正常版。
-     */
-    val nightReadMode = preferenceStore.getBoolean("pref_reader_nightread_mode", false)
-
     /** OCR 逐行並發度（auto=硬體核數 / 2/4/6/8），對應引擎 OcrConfig.concurrency（concurrent 鎖 true）。 */
     val ocrConcurrency = preferenceStore.getString("translation_ocr_concurrency", DEFAULT_OCR_CONCURRENCY)
 

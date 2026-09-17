@@ -1,6 +1,3 @@
 [submodule "yakuyomi-engine"]
 	path = yakuyomi-engine
 	url = https://github.com/joyeli/yakuyomi-engine.git
-[submodule "yakuyomi-nightread"]
-	path = yakuyomi-nightread
-	url = https://github.com/joyeli/yakuyomi-nightread.git

@@ -198,9 +198,6 @@ baselineProfile {
 
 dependencies {
     implementation("li.joye.yakuyomi:engine:0.1.0") // Yakuyomi 翻譯引擎（composite build：includeBuild 替換）
-    implementation("li.joye.yakuyomi:nightread-ort:0.1.0") // Yakuyomi 夜讀模式（含 :nightread 核心）
-    // 夜讀的 int8 偵測器走 ORT（產品路徑是 NCNN fp16；A/B 測試台兩條都要能跑）
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
 
     implementation(projects.i18n)
     implementation(projects.core.archive)

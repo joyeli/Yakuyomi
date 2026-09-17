@@ -427,17 +427,6 @@
     <string name="onboarding_highlights_stats_title">Translation &amp; reading stats</string>
     <string name="onboarding_highlights_stats_desc">See how much you have translated and read</string>
     <string name="pref_translation_quickstart">Quickstart guide</string>
-    <string name="pref_nightread_test">Night reading (experimental)</string>
-    <string name="pref_translation_nightread">Generate night-reading pages</string>
-    <string name="reader_nightread_on">Night reading</string>
-    <string name="reader_nightread_off">Normal</string>
-    <string name="pref_translation_nightread_summary">Rebuild each page as a dark one right after it is translated, so switching costs nothing later. Needs the character-segmentation model.</string>
-    <string name="pref_nightread_test_summary">Rebuild a page as a dark one and time each stage</string>
-    <string name="pref_nightread_test_models">Models</string>
-    <string name="pref_nightread_test_pick">Pick an image</string>
-    <string name="pref_nightread_test_import">Import a model file</string>
-    <string name="pref_nightread_test_run">Run A/B benchmark</string>
-    <string name="pref_nightread_test_share">Share the result sheet</string>
     <string name="pref_translation_quickstart_summary">How to set up and use translation</string>
     <string name="quickstart_what_title">On-device, bring-your-own-key</string>
     <string name="quickstart_what_body">Detection, OCR and text removal all run on your phone. Only the OCR\'d text goes to the LLM provider you pick — using your own API key and endpoint. Your images, and the detection / OCR / erase steps, never leave the device. There is no analytics or telemetry.\n\nCloud translation may cost money, billed by your provider. Tapping Got it at the end means you understand this.</string>
