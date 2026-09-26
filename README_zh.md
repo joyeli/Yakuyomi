@@ -13,7 +13,7 @@
 
 </div>
 
-Yakuyomi 是 [mihon](https://github.com/mihonapp/mihon) 的 fork，邊下載 / 邊讀邊把漫畫翻譯掉——預設日翻繁中，語言對可任意設定。文字的**偵測、OCR、去字都在裝置上跑**（NCNN + ONNX Runtime），只有**翻譯**這步呼叫雲端 LLM。翻譯引擎是另一個 repo [yakuyomi-engine](https://github.com/joyeli/yakuyomi-engine)，在這裡以 submodule 引入。
+Yakuyomi 是 [mihon](https://github.com/mihonapp/mihon) 的 fork，邊下載 / 邊讀邊把漫畫翻譯掉——預設日翻繁中，語言對可任意設定。文字的**偵測、OCR、去字都在裝置上跑**（三顆模型全走 NCNN、純 CPU），只有**翻譯**這步呼叫雲端 LLM。翻譯引擎是另一個 repo [yakuyomi-engine](https://github.com/joyeli/yakuyomi-engine)，在這裡以 submodule 引入。
 
 <div align="center">
 <img src="./.github/assets/showcase.png" alt="Box-fill vs Yakuyomi 去字" width="100%"/>
@@ -27,11 +27,11 @@ Yakuyomi 是 [mihon](https://github.com/mihonapp/mihon) 的 fork，邊下載 / �
 
 **翻譯**
 - **真去字重建，不是疊字** — 其他翻譯 fork 是在文字上蓋一塊色塊、或把新字疊上去；Yakuyomi 是把原文**擦掉、重建畫面**（AOT-GAN 去字），再把譯文排回氣泡裡。
-- **裝置端 pipeline（NCNN + int8）** — 偵測（DBNet 模型）、去字跑 **NCNN** 行動核心，OCR 跑 **int8 量化**模型（比 fp32 快 ~3.6×、96.7% 一致）。從 ONNX Runtime 換過來後，模型集從 **~470 MB 縮到 ~200 MB**，而 DBNet 偵測器比它取代的舊偵測器多讀對 ~1.6–2.5× 的文字。Snapdragon 8 Gen 3 上，偵測 + OCR 跑 6 張代表頁（161 個文字框）約 **10.3 秒**、讀回 **99.4%** 的文字。純 CPU（GPU/NPU 試過、對這些模型沒幫助）。只有 LLM 翻譯那步離開裝置，圖片永遠不出手機。
+- **裝置端 pipeline（全 NCNN、純 CPU）** — 偵測（DBNet）、OCR（48px CTC）、去字（AOT-GAN）三顆模型全跑 **NCNN** 行動核心，引擎已完全不依賴 ONNX Runtime，光這點 APK 就少了約 70 MB。OCR 是**混合精度**版——backbone fp16、transformer 與字元預測頭 fp32——Snapdragon 8 Gen 3 上 9 頁 242 行與 fp32 參考 **241 行相同**（唯一不同的那行是參考讀錯；242 行全部讀出、無空讀），比它取代的 int8 模型**快 ~23%**（同一批頁 11.3 秒 vs 14.6 秒、約 1.25 秒/頁）；偵測平均約 0.79 秒/頁，DBNet 偵測器比它取代的舊偵測器多讀對 ~1.6–2.5× 的文字。純 CPU（GPU/NPU 試過、對這些模型沒幫助）。只有 LLM 翻譯那步離開裝置，圖片永遠不出手機。
 - **跨頁流水線（~2× 快）** — 多頁併發翻：某頁在等雲端 LLM 時，下一頁的裝置端偵測 / OCR / 去字已經在跑。淺併發下撞到網路上限——即時 / 快速去字翻譯約**加倍**吞吐。
 - **兩種工作流** — 下載時翻（整章背景翻）與邊讀邊翻；只有翻成功才覆蓋該頁，絕不用更糟的東西蓋掉原圖。
 - **自備服務商與金鑰** — 任何 OpenAI 相容 LLM（預設 DeepSeek；OpenAI、Gemini、Groq、Qwen、OpenRouter、自架 Sakura、自訂），金鑰每家一格加密、模型清單即時撈（[服務商說明](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/PROVIDERS_zh.md)）。
-- **自備模型** — 模型集（NCNN 偵測 + 去字成對檔、int8 OCR，約 200 MB）可一鍵下載（含 sha256 驗證），或自己手動放（[模型說明](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/MODELS_zh.md)）。
+- **自備模型** — 模型集（約 250 MB：偵測與去字各一組 NCNN `.param` + `.bin`，OCR 兩份 `.param`——全精度與混合精度——共用一個 `.bin`；混合精度需要支援 fp16 的 ARMv8.2 CPU，引擎不支援時自動退回全精度）可一鍵下載（含 sha256 驗證），或自己手動放（[模型說明](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/MODELS_zh.md)）。既有使用者升級後 app 會提示更新模型。
 - **品質旋鈕** — 兩種去字模式（快速去字 / AI 去字）、直 / 橫排版、約 20 個可調參數。無 telemetry。
 
 <div align="center">
@@ -158,7 +158,7 @@ Yakuyomi 是 [mihon](https://github.com/mihonapp/mihon) 的 fork，邊下載 / �
 ```mermaid
 flowchart TD
     P["漫畫頁 · Manga page"] --> DET
-    DET["① 偵測 Detection · NCNN"] --> OCR["② OCR · int8 ONNX"]
+    DET["① 偵測 Detection · NCNN"] --> OCR["② OCR · NCNN（mixed fp16/fp32）"]
     OCR --> TR["③ 翻譯 Translate · ☁ cloud LLM"]
     OCR --> INP["④ 去字 Text removal · NCNN AOT-GAN"]
     TR --> RND
@@ -236,4 +236,4 @@ Yakuyomi 是真正的 mihon fork：跟著 mihon 的閱讀器走，只加整合�
 - [mihon](https://github.com/mihonapp/mihon) — 本專案 fork 的閱讀器（Apache-2.0）
 - [yakuyomi-engine](https://github.com/joyeli/yakuyomi-engine) — 裝置端翻譯引擎
 - [manga-image-translator](https://github.com/zyddnys/manga-image-translator) — prompt 與行為參考
-- 模型權重 — DBNet 偵測、48px CTC OCR、AOT-GAN 去字 — 來自 [manga-image-translator](https://github.com/zyddnys/manga-image-translator)；裝置端的模型檔是我們自己拿這些權重轉的（偵測與去字轉成 NCNN、OCR 是 int8 量化的 ONNX export）
+- 模型權重 — DBNet 偵測、48px CTC OCR、AOT-GAN 去字 — 來自 [manga-image-translator](https://github.com/zyddnys/manga-image-translator)；裝置端的模型檔是我們自己拿這些權重轉的（三顆都轉成 NCNN，OCR 是 fp16/fp32 混合精度版）

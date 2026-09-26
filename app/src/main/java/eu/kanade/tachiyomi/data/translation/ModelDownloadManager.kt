@@ -84,7 +84,8 @@ class ModelDownloadManager(private val context: Context) {
                             )
                         }
                         is ModelProgress.Done -> {
-                            // 依「檔名」累計（NCNN 一個 role 有 .param+.bin 兩檔，用 role 找會重覆算 .param、漏掉 .bin）。
+                            // 依「檔名」累計（NCNN 一個 role 有 .param+.bin 兩檔、OCR 更是兩份 .param（base + _mixed）
+                            // 共用一份 .bin 共三檔，用 role 找會重覆算 .param、漏掉 .bin）。
                             completed += models.firstOrNull { it.name == p.name }?.size ?: 0
                             update(
                                 State.Running(
@@ -102,6 +103,8 @@ class ModelDownloadManager(private val context: Context) {
                 }
                 // 清掉不在 manifest 內的殘留檔：v1→v2 換了檔名（lama-manga.onnx / comictextdetector.pt.onnx /
                 // ocr_48px_ctc.onnx 等），不清會殘留 ~460MB，且讓「舊版模型」偵測誤判。dir 只放自動下載、刪除安全。
+                // v3→v4 OCR 改 NCNN 混合精度（ocr_48px_ctc.ncnn.param + _mixed.ncnn.param + .ncnn.bin），舊 ocr_int8.onnx
+                // 也是在這一步被清掉——引擎已拔掉 ONNX Runtime、留著只會讓 rolePresent 一直認到「舊檔」。
                 // keep 空（理論上的退化 manifest）就不 prune——絕不因空清單掃掉已下載好的模型。
                 val keep = models.map { it.name }.toSet()
                 if (keep.isNotEmpty()) {

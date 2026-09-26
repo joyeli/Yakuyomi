@@ -1113,7 +1113,7 @@
     <string name="pref_translation_model_status_outdated">⚠️ 偵測到舊版模型，翻譯目前無法使用——v2 引擎需要 NCNN 模型集，請按下方「更新模型」重新下載。</string>
     <string name="pref_translation_download_models">下載模型</string>
     <string name="pref_translation_update_models">更新模型</string>
-    <string name="pref_translation_download_models_idle">從 release 自動下載模型（約 92 MB）+ sha256 驗證</string>
+    <string name="pref_translation_download_models_idle">從 release 自動下載模型（約 250 MB）+ sha256 驗證</string>
     <string name="pref_translation_download_models_done">下載完成</string>
     <string name="pref_translation_download_models_error">失敗：%s（點選重試）</string>
     <string name="pref_translation_target_lang">目標語言</string>
@@ -1367,7 +1367,7 @@
     <string name="engine_status_cold">翻譯引擎：未預載</string>
     <string name="engine_status_models_outdated">⚠️ 模型需更新才能翻譯</string>
     <string name="engine_status_models_missing">⚠️ 尚未下載翻譯模型</string>
-    <string name="engine_unload">卸下預載（釋放 ~100MB）</string>
+    <string name="engine_unload">卸下預載（釋放 ~250MB）</string>
     <string name="engine_preload_action">預載引擎</string>
     <string name="reader_engine_loading">引擎載入中…</string>
     <string name="reader_translating_progress">翻譯中 %1$d/%2$d</string>

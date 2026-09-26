@@ -1479,7 +1479,7 @@
     <string name="pref_translation_model_status_outdated">⚠️ Old-format models detected — translation is off until you update. The v2 engine needs the NCNN model set: tap “Update models” below to re-download.</string>
     <string name="pref_translation_download_models">Download models</string>
     <string name="pref_translation_update_models">Update models</string>
-    <string name="pref_translation_download_models_idle">Auto-download the models (~92 MB) from the release + sha256 verify</string>
+    <string name="pref_translation_download_models_idle">Auto-download the models (~250 MB) from the release + sha256 verify</string>
     <string name="pref_translation_download_models_done">Download complete</string>
     <string name="pref_translation_download_models_error">Failed: %s (tap to retry)</string>
     <string name="pref_translation_target_lang">Target language</string>
@@ -1574,7 +1574,7 @@
     <string name="engine_status_cold">Translation engine: not preloaded</string>
     <string name="engine_status_models_outdated">⚠️ Models need updating to translate</string>
     <string name="engine_status_models_missing">⚠️ Translation models not downloaded</string>
-    <string name="engine_unload">Unload preload (free ~100MB)</string>
+    <string name="engine_unload">Unload preload (free ~250MB)</string>
     <string name="engine_preload_action">Preload engine</string>
     <!-- Yakuyomi: reader live-translate + page actions -->
     <string name="reader_engine_loading">Loading engine…</string>

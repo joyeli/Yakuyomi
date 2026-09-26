@@ -23,8 +23,12 @@ import java.io.File
 /**
  * 共用的「引擎建構參數」組裝（[PageTranslator.translateChapter] 與即時翻譯的 [TranslationEngineService] 共用）。
  *
- * 抽這層的理由：模型解析（modelsDir/findOnnx/ensureLocal）＋ 60 行 [EngineConfig] 是「常調的旋鈕」，
+ * 抽這層的理由：模型解析（modelsDir/resolveNcnnRole/ensureLocal）＋ 60 行 [EngineConfig] 是「常調的旋鈕」，
  * 散成兩份必飄移。集中在此 → 兩條路徑（離線整章翻 / 即時逐頁翻）永遠拿到相同設定，調一處即生效。
+ *
+ * 模型格式（2026-09 起）：**三顆全 NCNN**（ONNX Runtime 已整個從引擎拔掉）——偵測 DBNet / 去字 AOT 各一對 `.param`+`.bin`；
+ * OCR 48px CTC 是**兩份 `.param` 共用一份 `.bin`**（base 全精度 + `_mixed` 混合精度，選用邏輯在引擎，見 [resolveOcrRole]）。
+ * `.onnx` 只剩 [rolePresent] 的寬鬆存在檢查還認得（讓舊 int8 OCR 使用者被判「過時」而非「缺檔」），引擎不再載它。
  *
  * 此物件**不持有任何引擎/模型狀態**——只把 [TranslationPreferences] + 儲存位置 → 純資料（[ModelSetBundle]/[EngineConfig]）。
  * 引擎生命週期、Mutex、close() 由各呼叫端自管。
@@ -34,25 +38,35 @@ object TranslationEngineConfig {
     private const val MODELS_DIR = "models"
     private const val ALPHABET = "models/alphabet-all-v5.txt"
 
+    /**
+     * OCR 角色 base `.param` 的檔名關鍵字（`ocr_48px_ctc.ncnn.param`，manifest models-v4）。
+     * ★ 刻意含 `.ncnn`、不能只寫 `ocr`：同目錄還有 `ocr_48px_ctc_mixed.ncnn.param`（混合精度、共用同一份 `.bin`），
+     * 只用 `ocr` 會兩份都命中、撈到 mixed 時 [resolveNcnnRole]/[ncnnResolvable] 由 `.param` 名推出的
+     * `ocr_48px_ctc_mixed.ncnn.bin` 並不存在 → 誤判缺檔。含 `.ncnn` 後 `_mixed.ncnn` 那份就對不上。
+     */
+    private const val OCR_NCNN_BASE = "ocr_48px_ctc.ncnn"
+
+    /** 引擎 `Ocr.pickParam` 找 mixed param 的後綴（`<name>.ncnn.param` → `<name>_mixed.ncnn.param`）；此處只用來推檔名。 */
+    private const val OCR_MIXED_SUFFIX = "_mixed.ncnn.param"
+
     private val storagePreferences: StoragePreferences = Injekt.get()
 
     /** [resolveModelSet] 的回傳：三顆模型的本機路徑 [ModelSet] + OCR 字元表（CTC 解碼用）。 */
     data class ModelSetBundle(val models: ModelSet, val alphabet: List<String>)
 
-    /** mihon 儲存位置（base）底下的 `models/` 子資料夾，使用者把 3 顆 onnx 放這（BYOM）。 */
+    /**
+     * mihon 儲存位置（base）底下的 `models/` 子資料夾，使用者把 NCNN 模型檔放這（BYOM）：
+     * 偵測/去字各 `.param`+`.bin`、OCR 兩份 `.param`（base + `_mixed`）+ 一份 `.bin`。
+     */
     fun modelsDir(context: Context): UniFile? {
         val base = storagePreferences.baseStorageDirectory.get().takeIf { it.isNotBlank() } ?: return null
         return UniFile.fromUri(context, base.toUri())?.findFile(MODELS_DIR)
     }
 
-    /** 在 [dir] 找出檔名含任一 [keywords]（不分大小寫）且 `.onnx` 結尾的第一個檔。 */
-    fun findOnnx(dir: UniFile, vararg keywords: String): UniFile? =
-        dir.listFiles()?.firstOrNull { f ->
-            val n = f.name?.lowercase() ?: return@firstOrNull false
-            n.endsWith(".onnx") && keywords.any { n.contains(it) }
-        }
-
-    /** 在 [dir] 找檔名含任一 [keywords] 且以 [ext] 結尾的第一個檔（NCNN 用 ".param"、ORT 用 ".onnx"）。 */
+    /**
+     * 在 [dir] 找檔名含任一 [keywords] 且以 [ext] 結尾的第一個檔。
+     * 解析用 ".param"（三顆全 NCNN）；".onnx" 只剩 [rolePresent] 寬鬆存在檢查用來認舊 int8 OCR。
+     */
     fun findModel(dir: UniFile, ext: String, vararg keywords: String): UniFile? =
         dir.listFiles()?.firstOrNull { f ->
             val n = f.name?.lowercase() ?: return@firstOrNull false
@@ -72,16 +86,17 @@ object TranslationEngineConfig {
     private fun presentExt(context: Context, saf: UniFile?, ext: String, vararg keywords: String): Boolean =
         downloadedModel(context, ext, *keywords) != null || (saf != null && findModel(saf, ext, *keywords) != null)
 
-    /** 某角色是否存在（先 NCNN `.param`、再 ORT `.onnx`；自動下載區 或 SAF BYOM 區皆算）。 */
+    /**
+     * 某角色是否**有檔**（寬鬆：NCNN `.param` 或退役的 `.onnx` 都算；自動下載區 或 SAF BYOM 區皆算）。
+     *
+     * ★ 這是全檔唯一還看 `.onnx` 的地方，而且是**刻意保留**的：引擎已不載 ONNX（三顆全 NCNN），但 v3 以前的自動下載會留
+     * `ocr_int8.onnx` 在 `filesDir/models`——若這裡不認它，舊使用者升級後 OCR 角色被判「缺檔」、[hasAllModels]=false →
+     * [modelsOutdated] 永遠不觸發、設定頁只會說「未下載」而非「舊版·請重新下載」。認了它：有檔(loose) 但
+     * [modelsResolvable](strict) 找不到 NCNN base `.param`+`.bin` → 判過時 → 提示更新；下載 v4 後 [ModelDownloadManager]
+     * 的 prune 會把不在 manifest 的 `ocr_int8.onnx` 一併清掉，這條路徑就自然消失。
+     */
     private fun rolePresent(context: Context, saf: UniFile?, vararg keywords: String): Boolean =
         presentExt(context, saf, ".param", *keywords) || presentExt(context, saf, ".onnx", *keywords)
-
-    /** 解析 ORT `.onnx` 角色 → 本機路徑：自動下載區直接用、否則 SAF + [ensureLocal] 複製。缺＝null。 */
-    private fun resolveOnnxRole(context: Context, saf: UniFile?, vararg keywords: String): String? {
-        downloadedModel(context, ".onnx", *keywords)?.let { return it.absolutePath }
-        val u = saf?.let { findModel(it, ".onnx", *keywords) } ?: return null
-        return ensureLocal(context, u)
-    }
 
     /** 解析 NCNN 角色 → 本機 `.param` 路徑，並確保同名 `.bin` 也在本機（引擎由 .param 推 .bin）。缺 .param 或 .bin＝null。 */
     private fun resolveNcnnRole(context: Context, saf: UniFile?, vararg keywords: String): String? {
@@ -109,25 +124,51 @@ object TranslationEngineConfig {
     }
 
     /**
-     * 模型是否**真的能被引擎載入**（strict，「可用」的單一真理來源）：偵測/去字要 NCNN `.param`＋同名 `.bin`、OCR 要 `.onnx`。
+     * 解析 OCR 角色 → 本機 **base** `.param` 路徑（缺 base `.param` 或 `.bin`＝null）。
+     *
+     * OCR 跟偵測/去字不同：**兩份 `.param` 共用一份 `.bin`**——base（`ocr_48px_ctc.ncnn.param`，全精度）＋
+     * `ocr_48px_ctc_mixed.ncnn.param`（backbone fp16、transformer/char_pred fp32；真機小假名讀對率＝fp32、OCR 時間比舊 int8
+     * 快 ~23%）。引擎 [li.joye.yakuyomi.engine.Ocr] 只收 **base** 路徑，會自己在**同目錄**找 `<name>_mixed.ncnn.param`，
+     * 且只在 fp16 storage 開＋CPU 有 asimdhp 時才用它（否則 mixed 裡的 Cast 層會把 fp32 讀成垃圾）；找不到或條件不符
+     * 一律退回 base、不會壞。所以 mixed 對「模型齊不齊」是**選配**，這裡不驗它存在、只確保「若有就在 base 旁」：
+     * - 自動下載區：v4 三檔本就同落 `filesDir/models`，base 從那裡解析到就免處理。
+     * - SAF BYOM：[resolveNcnnRole] 只把 base+`.bin` 複製到 `filesDir`，mixed 得在此順手 [ensureLocal] 到同一目錄，
+     *   否則引擎在本機找不到、永遠跑全精度（能用但慢、使用者不會察覺）。
+     * mixed 檔名不用關鍵字撈，而是照引擎 `Ocr.pickParam` 的推法從 base 名推（去 `.ncnn.param` 加 [OCR_MIXED_SUFFIX]），
+     * 複製到的必是引擎會找的那個檔。
+     */
+    private fun resolveOcrRole(context: Context, saf: UniFile?): String? {
+        val base = resolveNcnnRole(context, saf, OCR_NCNN_BASE) ?: return null
+        // base 落在自動下載區 → mixed（若有下載）已在同目錄；只有 SAF 來源（ensureLocal 落 filesDir 根）才要把 mixed 搬過去。
+        if (File(base).parentFile?.absolutePath == downloadedDir(context).absolutePath || saf == null) return base
+        val mixedName = File(base).name.removeSuffix(".ncnn.param").removeSuffix(".param") + OCR_MIXED_SUFFIX
+        saf.findFile(mixedName)?.let { ensureLocal(context, it) }
+        return base
+    }
+
+    /**
+     * 模型是否**真的能被引擎載入**（strict，「可用」的單一真理來源）：三顆都要 NCNN `.param`＋同名 `.bin`
+     * （OCR 只驗 base `ocr_48px_ctc.ncnn.*`；`_mixed` 選配、引擎自動退回，見 [resolveOcrRole]）。
      * 與 [resolveModelSet] 的解析要求逐條對齊，但不做複製副作用。
      *
      * 這是修「舊模型靜默失敗」的核心：[hasAllModels]/[modelPresence] 是**寬鬆存在**（`.onnx`/舊 LaMa 也算「有檔」），
-     * 但 v2 引擎實際只吃 `.param`——舊 v1（ORT 偵測 + LaMa）→ [modelsResolvable]=false → isReady 據此擋下（不啟動翻譯、§11 安全），
-     * 狀態頁據此把「齊全」改判「舊版·請重新下載」。BYOM 放了 `.param` 卻漏 `.bin` 的半套也會被這裡擋下（堵住「顯示齊全卻 build 失敗」）。
+     * 但引擎實際只吃 `.param`——舊 v1（ORT 偵測 + LaMa）或 v3（int8 `.onnx` OCR）→ [modelsResolvable]=false →
+     * isReady 據此擋下（不啟動翻譯、§11 安全），狀態頁據此把「齊全」改判「舊版·請重新下載」。
+     * BYOM 放了 `.param` 卻漏 `.bin` 的半套也會被這裡擋下（堵住「顯示齊全卻 build 失敗」）。
      */
     fun modelsResolvable(context: Context): Boolean {
         val saf = modelsDir(context)
         return ncnnResolvable(context, saf, "dbnet") &&
-            presentExt(context, saf, ".onnx", "ocr") &&
+            ncnnResolvable(context, saf, OCR_NCNN_BASE) &&
             ncnnResolvable(context, saf, "aot")
     }
 
     /**
      * 三個角色是否**各有一個模型檔存在**（寬鬆：`.param` 或 `.onnx`、含退役格式都算）。
-     * ★這只代表「有檔」、**不代表 v2 引擎載得動**——能不能真的翻由 [modelsResolvable]（strict）判、isReady 也吃那個。
+     * ★這只代表「有檔」、**不代表引擎載得動**——能不能真的翻由 [modelsResolvable]（strict）判、isReady 也吃那個。
      * 本函式的用途只剩「湊齊了嗎」＋餵給 [modelsOutdated]（有齊全的舊檔但格式過時 → 提示更新）。
      * 去字認 `aot`（v2）**與** `lama`（退役 v1）→ 舊 LaMa 使用者也算「有去字檔」，過時提示才觸發得了（見 [modelsOutdated]）。
+     * OCR 關鍵字**維持寬鬆的 `ocr`**（不用 [OCR_NCNN_BASE]）：v3 的 `ocr_int8.onnx` 也要算「有檔」，理由同 [rolePresent]。
      */
     fun hasAllModels(context: Context): Boolean {
         val saf = modelsDir(context)
@@ -160,12 +201,14 @@ object TranslationEngineConfig {
 
     /**
      * 模型「齊但過時」＝三個角色**各有檔**（[hasAllModels] 寬鬆為真）**但引擎載不動**（[modelsResolvable] 為假）。
-     * 典型＝升級到引擎 v2 後沿用舊 v1 模型（ORT 偵測 + LaMa `.onnx`，無 NCNN `.param`）——這正是本次「靜默失敗」要救的情境。
+     * 典型＝升級後沿用舊模型：v1（ORT 偵測 + LaMa `.onnx`，無 NCNN `.param`）、或 v3（OCR 仍是 `ocr_int8.onnx`，
+     * 缺 NCNN `ocr_48px_ctc.ncnn.*`）——這正是「靜默失敗」要救的情境。
      *
      * 為何這樣寫（改由可解析性驅動、不再自己重查 `.param`）：舊版把判準綁在「hasAllModels 且缺 `.param`」，
      * 但去字角色以前只認 `aot`、認不到舊 `lama` → hasAllModels 恆 false → 這個旗標對它唯一該救的族群**永遠不觸發**（死碼）。
      * 現在 hasAllModels 補認 `lama`、判準改成「有檔(loose) 但 build 不出來(strict)」，任何「看得到卻用不了」的組合
-     * （v1 LaMa、v1 ONNX 偵測、BYOM 缺 `.bin`）都會被判過時 → 設定頁顯示「舊版·請重新下載」、下載鈕標「更新模型」。
+     * （v1 LaMa、v1 ONNX 偵測、v3 int8 ONNX OCR、BYOM 缺 `.bin`）都會被判過時 → 設定頁顯示「舊版·請重新下載」、
+     * 下載鈕標「更新模型」。
      */
     fun modelsOutdated(context: Context): Boolean = hasAllModels(context) && !modelsResolvable(context)
 
@@ -177,8 +220,9 @@ object TranslationEngineConfig {
      */
     fun resolveModelSet(context: Context): ModelSetBundle? {
         val saf = modelsDir(context)
-        // 引擎已收斂成純 NCNN 偵測 + int8 OCR + NCNN AOT 去字（ORT 偵測/去字備援與 LaMa 皆退役移除）。
-        val ocr = resolveOnnxRole(context, saf, "ocr") ?: return null
+        // 三顆全 NCNN（ONNX Runtime 已整個拔掉）：DBNet 偵測 + 48px CTC OCR（混合精度，base param 給引擎、mixed 由它自選）
+        // + AOT 去字。
+        val ocr = resolveOcrRole(context, saf) ?: return null
         val detNcnn = resolveNcnnRole(context, saf, "dbnet") ?: return null
         val aotNcnn = resolveNcnnRole(context, saf, "aot") ?: return null
         val alphabet = context.assets.open(ALPHABET).bufferedReader().use { it.readLines() }

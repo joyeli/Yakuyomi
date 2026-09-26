@@ -13,7 +13,7 @@ English ｜ [中文](README_zh.md)
 
 </div>
 
-Yakuyomi is a fork of [mihon](https://github.com/mihonapp/mihon) that translates manga as you download or read it — Japanese to Traditional Chinese by default, any language pair configurable. Text **detection, OCR, and removal run on the device** (NCNN + ONNX Runtime); only the **translation** step calls a cloud LLM. The translation engine is a separate repo, [yakuyomi-engine](https://github.com/joyeli/yakuyomi-engine), pulled in here as a submodule.
+Yakuyomi is a fork of [mihon](https://github.com/mihonapp/mihon) that translates manga as you download or read it — Japanese to Traditional Chinese by default, any language pair configurable. Text **detection, OCR, and removal run on the device** (all three models on NCNN, CPU only); only the **translation** step calls a cloud LLM. The translation engine is a separate repo, [yakuyomi-engine](https://github.com/joyeli/yakuyomi-engine), pulled in here as a submodule.
 
 <div align="center">
 <img src="./.github/assets/showcase.png" alt="Box-fill vs Yakuyomi inpainting" width="100%"/>
@@ -27,11 +27,11 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 
 **Translation**
 - **Real inpainting, not overlays** — other translation forks paint a box over the text or stamp new text on top. Yakuyomi *erases* the original and **reconstructs the artwork** (AOT-GAN inpainting) before typesetting the translation back into the bubble.
-- **On-device pipeline (NCNN + int8)** — detection (a DBNet model) and text removal run on **NCNN**'s mobile kernels, OCR on an **int8-quantized** model (~3.6× faster than fp32 at 96.7% parity). Moving off ONNX Runtime shrank the model set from **~470 MB to ~200 MB**, and the DBNet detector reads ~1.6–2.5× more text correctly than the one it replaced. On a Snapdragon 8 Gen 3, detection + OCR over 6 representative pages (161 text boxes) run in **~10.3 s** and read back **99.4%** of the text. Pure CPU (GPU/NPU was tried and doesn't help these models). Only the LLM translation call leaves your device; no image ever leaves the phone.
+- **On-device pipeline (all NCNN, pure CPU)** — detection (DBNet), OCR (48px CTC) and text removal (AOT-GAN) all run on **NCNN**'s mobile kernels; the engine no longer depends on ONNX Runtime at all, which alone takes ~70 MB off the APK. OCR is a **mixed-precision** build — fp16 backbone, fp32 transformer + character head — that on a Snapdragon 8 Gen 3 agrees with an fp32 reference on **241 of 242 lines** across 9 pages (the one line they disagree on, the reference got wrong; no line comes back empty) and runs **~23% faster** than the int8 model it replaces (11.3 s vs 14.6 s over those pages, ~1.25 s/page). Detection averages ~0.79 s/page, and the DBNet detector reads ~1.6–2.5× more text correctly than the one it replaced. Pure CPU (GPU/NPU was tried and doesn't help these models). Only the LLM translation call leaves your device; no image ever leaves the phone.
 - **Cross-page pipeline (~2× faster)** — pages translate concurrently: while one page waits on the cloud LLM, the next page's on-device detection / OCR / removal is already running. At a shallow depth this reaches the network-bound ceiling — roughly **double** the throughput of live / fast-removal translation.
 - **Two workflows** — translate-on-download (whole chapters in the background) and live translation while you read. A page is overwritten only when its translation succeeds; nothing is ever replaced with something worse.
 - **Your provider, your key** — any OpenAI-compatible LLM (DeepSeek by default; OpenAI, Gemini, Groq, Qwen, OpenRouter, self-hosted Sakura, custom), per-provider encrypted keys, live model list ([providers doc](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/PROVIDERS.md)).
-- **Your models** — the model set (NCNN detector + inpaint pairs, int8 OCR, ~200 MB) downloads in one tap with sha256 verification, or you supply them manually ([models doc](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/MODELS.md)).
+- **Your models** — the model set (~250 MB: NCNN `.param` + `.bin` pairs for detection and inpainting, plus two OCR `.param` files — full precision and mixed precision — sharing one `.bin`; the mixed build needs an ARMv8.2 CPU with fp16, and the engine falls back to full precision otherwise) downloads in one tap with sha256 verification, or you supply them manually ([models doc](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/MODELS.md)). If you're upgrading, the app prompts you to update the models.
 - **Quality knobs** — two text-removal modes (fast flat-fill / AI inpainting), vertical/horizontal typesetting, ~20 tunable parameters. No telemetry.
 
 <div align="center">
@@ -158,7 +158,7 @@ Four of the five stages run on the device; only translation leaves it. Each stag
 ```mermaid
 flowchart TD
     P["漫畫頁 · Manga page"] --> DET
-    DET["① 偵測 Detection · NCNN"] --> OCR["② OCR · int8 ONNX"]
+    DET["① 偵測 Detection · NCNN"] --> OCR["② OCR · NCNN（mixed fp16/fp32）"]
     OCR --> TR["③ 翻譯 Translate · ☁ cloud LLM"]
     OCR --> INP["④ 去字 Text removal · NCNN AOT-GAN"]
     TR --> RND
@@ -236,4 +236,4 @@ The developers of this application do not have any affiliation with the content 
 - [mihon](https://github.com/mihonapp/mihon) — the reader this forks (Apache-2.0)
 - [yakuyomi-engine](https://github.com/joyeli/yakuyomi-engine) — the on-device translation engine
 - [manga-image-translator](https://github.com/zyddnys/manga-image-translator) — prompt and behaviour reference
-- model weights — DBNet detection, 48px CTC OCR, and AOT-GAN inpaint — from [manga-image-translator](https://github.com/zyddnys/manga-image-translator); the on-device files are our own builds of those weights (NCNN conversions for detection and inpaint, an int8-quantized ONNX export for OCR)
+- model weights — DBNet detection, 48px CTC OCR, and AOT-GAN inpaint — from [manga-image-translator](https://github.com/zyddnys/manga-image-translator); the on-device files are our own builds of those weights (NCNN conversions of all three; the OCR one is a mixed-precision fp16/fp32 build)

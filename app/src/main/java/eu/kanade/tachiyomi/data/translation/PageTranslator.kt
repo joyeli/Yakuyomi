@@ -39,7 +39,8 @@ import uy.kohesive.injekt.api.get
 /**
  * M4 步驟 3a/3b：在 mihon 內翻譯一個章節的頁圖（就地覆蓋）。
  *
- * 模型（BYOM）：放在 **mihon「儲存位置」底下的 `models/` 子資料夾**（3 個 *.onnx）——
+ * 模型（BYOM）：放在 **mihon「儲存位置」底下的 `models/` 子資料夾**（三顆 NCNN 模型：.param+.bin；OCR 兩份 .param
+ *   共用一份 .bin）——
  *   跟下載/翻譯後的檔案同一個地方（使用者把儲存位置設成 OneDrive，模型/下載/譯檔就全在雲端）。
  *   走 SAF 讀取、串流複製到 filesDir 後以路徑 off-heap 載入（[ensureLocal]）。
  * key（BYOK）+ 語言對：從設定頁（[TranslationPreferences]）讀；key 空白時 fallback build-time key。
@@ -73,7 +74,10 @@ class PageTranslator(private val context: Context) {
             if (translationPreferences.provider.get() == "deepseek") BuildConfig.DEEPSEEK_API_KEY else ""
         }
 
-    /** mihon 儲存位置（base）底下的 `models/` 子資料夾，使用者把 3 顆 onnx 放這。委派共用 [TranslationEngineConfig]。 */
+    /**
+     * mihon 儲存位置（base）底下的 `models/` 子資料夾，使用者把三顆 NCNN 模型（.param+.bin；OCR 兩份 .param 共用一份 .bin）
+     * 放這。委派共用 [TranslationEngineConfig]。
+     */
     private fun modelsDir(): UniFile? = TranslationEngineConfig.modelsDir(context)
 
     /** 翻譯開關開 + key 有設 + 模型 3 顆齊，才翻得了（給下載 hook 判斷）。模型檢查委派 [TranslationEngineConfig]。 */
