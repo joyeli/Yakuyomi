@@ -3,15 +3,9 @@ package eu.kanade.tachiyomi.data.translation
 import android.content.Context
 import androidx.core.net.toUri
 import com.hippo.unifile.UniFile
-import li.joye.yakuyomi.engine.DetectorConfig
 import li.joye.yakuyomi.engine.EngineConfig
-import li.joye.yakuyomi.engine.InpainterConfig
 import li.joye.yakuyomi.engine.LlmProviders
 import li.joye.yakuyomi.engine.ModelSet
-import li.joye.yakuyomi.engine.OcrConfig
-import li.joye.yakuyomi.engine.RenderConfig
-import li.joye.yakuyomi.engine.TextOrientation
-import li.joye.yakuyomi.engine.TranslatorConfig
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.domain.storage.service.StoragePreferences
 import tachiyomi.domain.translation.service.TranslationPreferences
@@ -237,12 +231,8 @@ object TranslationEngineConfig {
      */
     fun resolveInpaintModel(context: Context): String? = resolveNcnnRole(context, modelsDir(context), "aot")
 
-    /**
-     * 去字方法字串（[TranslationPreferences.inpaintMethod] / 即時翻的 [TranslationPreferences.liveInpaintMethod] 原始值）
-     * → 引擎 method。兩門別：`boxfill`（快速去字·平塗）／其餘＝`aot`（AI 去字·NCNN AOT-GAN 整頁 768·預設）。
-     * 集中於此一處映射、下載/即時/重繪共用。
-     */
-    fun mapInpaintMethod(methodRaw: String): String = if (methodRaw == "boxfill") "boxfill" else "aot"
+    /** 去字方法字串 → 引擎 method（boxfill／aot）；實作在 [EngineConfigMapping.mapInpaintMethod]（純映射，下載/即時/重繪共用）。 */
+    fun mapInpaintMethod(methodRaw: String): String = EngineConfigMapping.mapInpaintMethod(methodRaw)
 
     /**
      * 去字法品質排名（高＝品質好）。用於「改去字法後升級重繪」（[TranslationManager.reRenderAllUpgradable]）的
@@ -256,100 +246,14 @@ object TranslationEngineConfig {
     }
 
     /**
-     * 用 [prefs] 組出完整 [EngineConfig]（偵測/OCR/翻譯/去字/排版）。
+     * 用 [prefs] 組出完整 [EngineConfig]（偵測/OCR/翻譯/去字/排版）；實作在 [EngineConfigMapping.buildEngineConfig]
+     * （純映射，重繪的去字／排版設定也從那裡拿同一份）。
      *
-     * @param methodRaw 去字方法原始字串（[TranslationPreferences.inpaintMethod] 或即時翻的 [TranslationPreferences.liveInpaintMethod]）。
-     *                  此處只決定去字 method/wholeImage，其餘參數一律照 [prefs]。
-     *
-     * 與舊 [PageTranslator.translateChapter] 內聯的 cfg 區塊**逐欄相同**（行為保持）：緒數裝置相依、
-     * 進階數值 parse + clamp、改目標語言時清掉內建 few-shot。
+     * @param methodRaw 去字方法原始字串（[TranslationPreferences.inpaintMethod] 或即時翻的
+     *   [TranslationPreferences.liveInpaintMethod]）。
      */
-    fun buildEngineConfig(prefs: TranslationPreferences, methodRaw: String): EngineConfig {
-        // 供應商：解析預設表 → 聊天端點 + 模型（per-provider，見引擎 LlmProviders / 設定頁）。
-        // 全 OpenAI 相容（含 Gemini 的 compat 端點）⇒ LlmTranslator 不變，只是換 apiBase/model。
-        val preset = LlmProviders.byId(prefs.provider.get())
-        val chatUrl = LlmProviders.chatUrlOf(preset, prefs.apiBase.get())
-        // 語言對（預設日→繁中）。改目標語言就清掉引擎內建的日→繁中 few-shot，免得範例語言跟新目標衝突、把輸出帶偏。
-        val target = prefs.targetLangName.get()
-        // LLM 取樣溫度（存字串、parse + clamp 到 0.0–1.0；預設 0.3）。
-        val temperature = prefs.temperature.get().toDoubleOrNull()?.coerceIn(0.0, 1.0) ?: 0.3
-        var translatorCfg = TranslatorConfig(
-            provider = preset.id,
-            model = prefs.model.get().ifBlank { preset.defaultModel },
-            // base 空（自架/自訂未填）→ isReady 已擋；萬一漏 → LlmTranslator 拋例外標 Failed（不靜默）。
-            apiBase = chatUrl,
-            toLangName = target,
-            fromLangName = prefs.sourceLangName.get(),
-            temperature = temperature,
-            // 思考模式（預設關）：欄位形狀 per-provider，由引擎 LlmProviders.requestParams 映射。
-            thinking = prefs.thinking.get(),
-        )
-        if (target != TranslationPreferences.DEFAULT_TARGET_LANG) {
-            translatorCfg = translatorCfg.copy(sampleSource = "", sampleTarget = "")
-        }
-
-        // 排版方向
-        val orient = when (prefs.orientation.get()) {
-            "vertical" -> TextOrientation.VERTICAL
-            "horizontal" -> TextOrientation.HORIZONTAL
-            else -> TextOrientation.AUTO
-        }
-
-        // 去字方法（boxfill / aot）
-        val method = mapInpaintMethod(methodRaw)
-
-        // OCR 逐行並發度：auto=核數 / 2/4/6/8（concurrent 鎖 true）。真機 8.9s→4.8s。
-        val cores = Runtime.getRuntime().availableProcessors()
-        val ocrConcurrency = when (val v = prefs.ocrConcurrency.get()) {
-            "auto" -> cores
-            else -> (v.toIntOrNull() ?: cores).coerceIn(1, 32)
-        }
-
-        // 進階數值：存字串、此處 parse + clamp 到值域（超界夾回，不擋存）。
-        fun pf(s: String, lo: Float, hi: Float, d: Float) = s.toFloatOrNull()?.coerceIn(lo, hi) ?: d
-        fun pi(s: String, lo: Int, hi: Int, d: Int) = s.toIntOrNull()?.coerceIn(lo, hi) ?: d
-
-        return EngineConfig(
-            detector = DetectorConfig(
-                segThreshold = pf(prefs.segThreshold.get(), 0f, 1f, 0.12f),
-                // 進階辨識：偵測輸入銳利化（預設關）+ DBNet 辨識尺寸（768–1536，clamp）。
-                detectUnsharp = prefs.detectUnsharp.get(),
-                dbnetInputSize = prefs.dbnetSize.get().coerceIn(768, 1536),
-            ),
-            ocr = OcrConfig(
-                minProb = pf(prefs.minProb.get(), 0f, 1f, 0.5f),
-                // 跳過狀聲詞 SFX：開→給內建門檻 24（1–50 中段，不讓使用者調數字）、關→0。
-                ignoreBubble = if (prefs.ignoreSfx.get()) 24 else 0,
-                // 進階辨識：OCR 裁切外擴（0–12，clamp）+ 內插法（bicubic/bilinear）+ strip 銳化（預設開）。
-                stripPad = prefs.stripPad.get().coerceIn(0, 12),
-                useBicubic = prefs.useBicubic.get() == "bicubic",
-                ocrUnsharp = prefs.ocrUnsharp.get(),
-                concurrent = true,
-                concurrency = ocrConcurrency,
-            ),
-            translator = translatorCfg,
-            inpainter = InpainterConfig(
-                method = method,
-                bboxPad = pi(prefs.bboxPad.get(), 0, 64, 16),
-                // 進階去字：整頁去字解析度（三檔 512/768/1024，clamp 保險）+ 遮罩膨脹（8–40，存 Int→Float）。
-                tileSize = prefs.tileSize.get().coerceIn(512, 1024),
-                maskDilate = prefs.maskDilate.get().coerceIn(8, 40).toFloat(),
-            ),
-            render = RenderConfig(
-                orientation = orient,
-                fontBorder = prefs.fontBorder.get(),
-                colorMode = if (prefs.colorMode.get() == "mono") "mono" else "auto",
-                artStrokeRatio = pf(prefs.artStrokeRatio.get(), 0f, 0.5f, 0.16f),
-                fontSizeMax = pi(prefs.fontSizeMax.get(), 20, 120, 60),
-                fontSizeMin = pi(prefs.fontSizeMin.get(), 6, 40, 9),
-                colTrim = pi(prefs.colTrim.get(), 0, 10, 3),
-                rowTrim = pi(prefs.rowTrim.get(), 0, 10, 3),
-                fontScale = pf(prefs.fontScale.get(), 0.3f, 1.5f, 0.85f),
-                // 進階排版：縱中橫（直排短 ASCII 串水平並排，預設開）。
-                tateChuYoko = prefs.tateChuYoko.get(),
-            ),
-        )
-    }
+    fun buildEngineConfig(prefs: TranslationPreferences, methodRaw: String): EngineConfig =
+        EngineConfigMapping.buildEngineConfig(prefs, methodRaw)
 
     /** SAF 模型串流複製到 filesDir（64KB、不佔 JVM heap），回傳路徑；已存在且同大小則跳過。 */
     fun ensureLocal(context: Context, doc: UniFile): String {

@@ -230,55 +230,34 @@ class TranslationEngineService(private val context: Context) {
 
     /**
      * 影響引擎建構的設定 + 去字法的簽章。值變了＝要重建引擎（設定/去字法即時生效）。
-     * 去字法（[methodRaw]）納入 → 章與章間換去字法會重建；其餘語言/緒數/OCR/排版等改了也重建。
+     * 去字法（[methodRaw] 映射後的引擎 method，見 [signatureMethod]）納入 → 章與章間換去字法會重建；其餘語言/緒數/OCR/排版等
+     * 改了也重建。
      *
      * **維護鐵則：本清單必須涵蓋 [TranslationEngineConfig.buildEngineConfig] 讀到的每一個 pref**
-     * （＋ [apiKey]，它不在 buildEngineConfig 裡、是另外傳給 `Yakuyomi.create`）。
+     * （＋ [apiKey]，它不在 buildEngineConfig 裡、是另外傳給 `Yakuyomi.create`）；
+     * pref 那部分在 [EngineConfigMapping.signatureFields]。
      * 漏一個＝改了那個設定卻沿用 warm 引擎、舊值繼續生效（曾漏 provider/model/apiBase/temperature →
      * 使用者在設定換 model 後請求仍打舊 model、持續 HTTP 400；改 API key 反而生效，只因 key 有在簽章裡）。
-     * 日後在 buildEngineConfig 加讀任何 pref，**同時**在此加一行；順序刻意對齊 buildEngineConfig 的分區。
+     * 日後在 buildEngineConfig 加讀任何 pref，**同時**在 [EngineConfigMapping.signatureFields] 加一行
+     * （EngineConfigMappingTest 會擋）。
      */
-    private fun configSignature(methodRaw: String): String {
-        val p = translationPreferences
-        return listOf(
-            methodRaw, // 去字法納入簽章：換去字法 → 重建引擎
-            // —— LLM（TranslatorConfig）：換 provider/model/apiBase/temperature 都要重建才會套用 ——
-            apiKey(), // 不經 buildEngineConfig，另外直接餵 Yakuyomi.create
-            p.provider.get(),
-            p.model.get(),
-            p.apiBase.get(),
-            p.temperature.get(),
-            p.thinking.get().toString(), // 思考模式（per-provider 參數映射）→ 換了要重建才會套用
-            p.targetLangName.get(), // 也決定要不要清掉引擎內建 few-shot
-            p.sourceLangName.get(),
-            // —— 偵測（DetectorConfig）——
-            p.segThreshold.get(),
-            p.detectUnsharp.get().toString(),
-            p.dbnetSize.get().toString(),
-            // —— OCR（OcrConfig）——
-            p.minProb.get(),
-            p.ignoreSfx.get().toString(),
-            p.stripPad.get().toString(),
-            p.useBicubic.get(),
-            p.ocrUnsharp.get().toString(),
-            p.ocrConcurrency.get(),
-            // —— 去字（InpainterConfig）——
-            p.bboxPad.get(),
-            p.tileSize.get().toString(),
-            p.maskDilate.get().toString(),
-            // —— 排版（RenderConfig）——
-            p.orientation.get(),
-            p.fontBorder.get().toString(),
-            p.colorMode.get(),
-            p.artStrokeRatio.get(),
-            p.fontSizeMax.get(),
-            p.fontSizeMin.get(),
-            p.colTrim.get(),
-            p.rowTrim.get(),
-            p.fontScale.get(),
-            p.tateChuYoko.get().toString(),
-        ).joinToString("\u0000") // 以 NUL 分隔避免相鄰欄位串接後碰撞（語言名/key 可能含空白）
-    }
+    private fun configSignature(methodRaw: String): String =
+        // NUL 分隔避免相鄰欄位串接後碰撞
+        (listOf(signatureMethod(methodRaw), apiKey()) + settingsFields()).joinToString("\u0000")
+
+    /**
+     * 簽章裡的去字法用映射後的引擎 method（boxfill／aot），不用原始字串：引擎只看映射後的值，auto_whole 與舊版的
+     * auto_tile／auto_aot 建出來是同一個引擎。用原始字串的話，舊使用者的即時翻去字法還是 auto_tile、一般去字法已遷移成
+     * auto_whole，reader「翻譯這頁」與即時翻整章交替時每次都整顆引擎重建（約 100 MB 加暖機）。
+     */
+    private fun signatureMethod(methodRaw: String): String = EngineConfigMapping.mapInpaintMethod(methodRaw)
+
+    /**
+     * [configSignature] 去字法與 API key 以外的欄位（API key 不經 buildEngineConfig，另外直接餵 Yakuyomi.create）。
+     * 清單本身在 [EngineConfigMapping.signatureFields]，與 buildEngineConfig 同檔，
+     * 有反射測試守著「buildEngineConfig 讀到的 pref 都在簽章裡」。
+     */
+    private fun settingsFields(): List<String> = EngineConfigMapping.signatureFields(translationPreferences)
 
     /** 釋放引擎的原生資源（3 顆 ONNX session）。僅在 [mutex] 下呼叫。 */
     private fun closeEngine() {
