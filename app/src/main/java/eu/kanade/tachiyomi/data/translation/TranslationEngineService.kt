@@ -2,7 +2,6 @@ package eu.kanade.tachiyomi.data.translation
 
 import android.content.Context
 import android.graphics.Bitmap
-import eu.kanade.tachiyomi.BuildConfig
 import eu.kanade.tachiyomi.crash.TraceLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -85,12 +84,8 @@ class TranslationEngineService(private val context: Context) {
     private val _warm = MutableStateFlow(false)
     val warm: StateFlow<Boolean> = _warm.asStateFlow()
 
-    /** key：優先設定頁（BYOK）；空白時 fallback build-time key（與 [PageTranslator] 同規則）。 */
-    private fun apiKey(): String =
-        translationPreferences.activeApiKey().ifBlank {
-            // baked key 只是 DeepSeek 的冒煙測試後備；換 provider 後不套用（免拿 DeepSeek key 去打別家）。
-            if (translationPreferences.provider.get() == "deepseek") BuildConfig.DEEPSEEK_API_KEY else ""
-        }
+    /** key：設定頁（BYOK，Keystore 加密），與 [PageTranslator] 同規則；沒有 build 時寫進 APK 的後備 key。 */
+    private fun apiKey(): String = translationPreferences.activeApiKey()
 
     /**
      * 引擎是否就緒：key 有設 + 3 顆模型齊。給 [ChapterLoader] 決定要不要包 [TranslatingPageLoader]。

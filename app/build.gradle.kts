@@ -22,12 +22,6 @@ if (Config.includeTelemetry) {
     }
 }
 
-// Yakuyomi M4（冒煙測試）：build 時從 api-keys.properties（gitignored）讀 DeepSeek key。正式版走設定頁 + Keystore。
-val yakuyomiApiKeys = Properties().apply {
-    val f = rootProject.file("api-keys.properties")
-    if (f.exists()) f.inputStream().use { load(it) }
-}
-
 // Release 簽章：從 gitignored keystore.properties 讀（金鑰檔與密碼不進 repo）。
 // 缺檔時 release 退回 debug 簽章 → CI / 沒金鑰的人仍能建（只是出 debug-signed APK）。
 val yakuyomiKeystore = Properties().apply {
@@ -55,7 +49,6 @@ android {
         buildConfigField("String", "BUILD_TIME", "\"${getBuildTime(useLatestCommitTime = false)}\"")
         buildConfigField("boolean", "TELEMETRY_INCLUDED", "${Config.includeTelemetry}")
         buildConfigField("boolean", "UPDATER_ENABLED", "${Config.enableUpdater}")
-        buildConfigField("String", "DEEPSEEK_API_KEY", "\"${yakuyomiApiKeys.getProperty("DEEPSEEK_API_KEY", "")}\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

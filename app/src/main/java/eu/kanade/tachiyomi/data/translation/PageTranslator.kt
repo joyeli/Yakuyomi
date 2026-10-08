@@ -8,7 +8,6 @@ import android.os.Build
 import android.os.SystemClock
 import android.util.Base64
 import com.hippo.unifile.UniFile
-import eu.kanade.tachiyomi.BuildConfig
 import eu.kanade.tachiyomi.crash.TraceLog
 import eu.kanade.tachiyomi.data.nightread.NetKind
 import eu.kanade.tachiyomi.data.nightread.NightConcurrency
@@ -79,12 +78,8 @@ class PageTranslator(private val context: Context) {
     /** 翻譯統計（每日章/頁/token 計數）。[translateChapter] 章翻完時 record。 */
     private val statsStore: TranslationStatsStore = Injekt.get()
 
-    /** key：優先設定頁（BYOK）；空白時 fallback build-time key（冒煙測試）。 */
-    private fun apiKey(): String =
-        translationPreferences.activeApiKey().ifBlank {
-            // baked key 只是 DeepSeek 的冒煙測試後備；換 provider 後不套用（免拿 DeepSeek key 去打別家）。
-            if (translationPreferences.provider.get() == "deepseek") BuildConfig.DEEPSEEK_API_KEY else ""
-        }
+    /** key：設定頁（BYOK，Keystore 加密）。不再有 build 時寫進 APK 的後備 key（曾把開發者的 key 帶進發佈的 APK）。 */
+    private fun apiKey(): String = translationPreferences.activeApiKey()
 
     /**
      * mihon 儲存位置（base）底下的 `models/` 子資料夾，使用者把三顆 NCNN 模型（.param+.bin；OCR 兩份 .param 共用一份 .bin）
