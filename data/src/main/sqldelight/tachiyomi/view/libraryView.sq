@@ -36,6 +36,55 @@ LEFT JOIN (
 ON MC.manga_id = M._id
 WHERE M.favorite = 1;
 
+-- Yakuyomi: library reads the expanded view body instead of `SELECT * FROM libraryView`, with the two
+-- favorite filters added inside the aggregate subqueries. libraryView groups every chapter and every
+-- category membership in the database and only the outer WHERE drops the entries outside the library, so
+-- each manga that was merely browsed (opened, or batch-fetched with its chapter list) is paid for on every
+-- library read. Filtering the subqueries to the same favorites the outer query keeps (served by
+-- library_favorite_index) returns identical rows and columns. Desktop SQLite 3.50.1, 300 library manga:
+-- 150k non-library manga / 780k chapters 159 ms -> 8.7 ms; 30k non-library manga / 1.8M chapters 358 ms -> 9.2 ms.
+-- Trade-off: the chapters are now reached with one index lookup per library manga instead of one pass over
+-- the whole index, so a large library with almost nothing browsed-only reads 4-8% slower (5,000 library manga
+-- x 200 chapters 126 -> 135 ms, 15,000 x 80 167 -> 181 ms); upstream accepted the same cost.
+-- Same logic as upstream mihon 93cc07511 (PR #3805, "view - library"), written against the current schema
+-- because the view itself must not change here (no migration).
+-- Merge resolution: take upstream (its library: selects from the fixed libraryView).
 library:
-SELECT *
-FROM libraryView;
+SELECT
+    M.*,
+    coalesce(C.total, 0) AS totalCount,
+    coalesce(C.readCount, 0) AS readCount,
+    coalesce(C.latestUpload, 0) AS latestUpload,
+    coalesce(C.fetchedAt, 0) AS chapterFetchedAt,
+    coalesce(C.lastRead, 0) AS lastRead,
+    coalesce(C.bookmarkCount, 0) AS bookmarkCount,
+    coalesce(MC.categories, '0') AS categories
+FROM mangas M
+LEFT JOIN (
+    SELECT
+        chapters.manga_id,
+        count(*) AS total,
+        sum(read) AS readCount,
+        coalesce(max(chapters.date_upload), 0) AS latestUpload,
+        coalesce(max(history.last_read), 0) AS lastRead,
+        coalesce(max(chapters.date_fetch), 0) AS fetchedAt,
+        sum(chapters.bookmark) AS bookmarkCount
+    FROM chapters
+    LEFT JOIN excluded_scanlators
+    ON chapters.manga_id = excluded_scanlators.manga_id
+    AND chapters.scanlator = excluded_scanlators.scanlator
+    LEFT JOIN history
+    ON chapters._id = history.chapter_id
+    WHERE excluded_scanlators.scanlator IS NULL
+    AND chapters.manga_id IN (SELECT _id FROM mangas WHERE favorite = 1)
+    GROUP BY chapters.manga_id
+) AS C
+ON M._id = C.manga_id
+LEFT JOIN (
+    SELECT manga_id, group_concat(category_id) AS categories
+    FROM mangas_categories
+    WHERE manga_id IN (SELECT _id FROM mangas WHERE favorite = 1)
+    GROUP BY manga_id
+) AS MC
+ON MC.manga_id = M._id
+WHERE M.favorite = 1;

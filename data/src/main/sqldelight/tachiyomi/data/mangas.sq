@@ -70,11 +70,19 @@ FROM mangas
 WHERE _id = :id;
 
 -- TODO: this should ideally never really have more than 1 result
+-- Yakuyomi: `+source` (unary plus) keeps SQLite from using idx_mangas_source for this lookup. Without
+-- ANALYZE statistics the planner rates idx_mangas_source and mangas_url_index the same and picks the source
+-- index, which walks every manga of that source (all browsed-but-not-in-library rows included) for one url;
+-- with only the url index usable it reads the few rows sharing that url. Same rows: source is bound as an
+-- integer, and the unary plus only drops the column's affinity, which an integer-to-integer comparison never
+-- uses. Desktop SQLite 3.50.1, 150k manga with 122k in one source: 4.4 ms -> 3.2 us per lookup. Upstream fixed
+-- it with UNIQUE(source_id, remote_url) in its schema rewrite (93cc07511, issue #4017).
+-- Merge resolution: take upstream.
 getMangaByUrlAndSource:
 SELECT *
 FROM mangas
 WHERE url = :url
-AND source = :source
+AND +source = :source
 LIMIT 1;
 
 getFavorites:
@@ -254,6 +262,11 @@ UPDATE mangas SET
     memo = coalesce(:memo, memo)
 WHERE _id = :mangaId;
 
+-- Yakuyomi: the three `source = :source AND url = :url` lookups below read `+source` so SQLite uses
+-- mangas_url_index instead of idx_mangas_source (which walks every manga of the source; see
+-- getMangaByUrlAndSource). Browsing runs this once per listed entry. Same rows and same writes: source is bound
+-- as an integer, so dropping the column affinity changes no comparison.
+-- Merge resolution: take upstream (UNIQUE(source_id, remote_url) in 93cc07511).
 insertNetworkManga {
     -- Insert the manga if it doesn't exist already
     INSERT INTO mangas(
@@ -265,7 +278,7 @@ insertNetworkManga {
         :source, :url, :artist, :author, :description, :genre, :title, :status, :thumbnailUrl, :favorite,
         :lastUpdate, :nextUpdate, :initialized, :viewerFlags, :chapterFlags, :coverLastModified, :dateAdded,
         :updateStrategy, :calculateInterval, 0, :version, :memo
-    WHERE NOT EXISTS(SELECT 0 FROM mangas WHERE source = :source AND url = :url);
+    WHERE NOT EXISTS(SELECT 0 FROM mangas WHERE +source = :source AND url = :url);
 
     -- Update the relevant details if applicable and not favorite
     UPDATE mangas
@@ -280,14 +293,14 @@ insertNetworkManga {
         update_strategy = CASE WHEN :updateDetails THEN :updateStrategy ELSE update_strategy END,
         initialized = :updateDetails,
         memo = :memo
-    WHERE source = :source
+    WHERE +source = :source
     AND url = :url
     AND favorite = 0;
 
     -- Finally return the manga
     SELECT *
     FROM mangas
-    WHERE source = :source
+    WHERE +source = :source
     AND url = :url
     LIMIT 1;
 }

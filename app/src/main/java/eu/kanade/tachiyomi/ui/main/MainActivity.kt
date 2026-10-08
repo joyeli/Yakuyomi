@@ -80,6 +80,7 @@ import eu.kanade.presentation.util.AssistContentScreen
 import eu.kanade.presentation.util.DefaultNavigatorScreenTransition
 import eu.kanade.tachiyomi.crash.CrashActivity
 import eu.kanade.tachiyomi.crash.NativeCrashReporter
+import eu.kanade.tachiyomi.crash.StartupTrace
 import eu.kanade.tachiyomi.data.cache.ChapterCache
 import eu.kanade.tachiyomi.data.download.DownloadCache
 import eu.kanade.tachiyomi.data.notification.NotificationReceiver
@@ -153,6 +154,7 @@ class MainActivity : BaseActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val isLaunch = savedInstanceState == null
+        StartupTrace.onActivityCreated(this, hasSavedState = !isLaunch) // Yakuyomi：診斷紀錄開著才記
 
         // Prevent splash screen showing up on configuration changes
         val splashScreen = if (isLaunch) installSplashScreen() else null

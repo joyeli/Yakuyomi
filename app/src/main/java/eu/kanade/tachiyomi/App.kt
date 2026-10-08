@@ -30,6 +30,7 @@ import eu.kanade.domain.ui.model.setAppCompatDelegateThemeMode
 import eu.kanade.tachiyomi.core.security.PrivacyPreferences
 import eu.kanade.tachiyomi.crash.CrashActivity
 import eu.kanade.tachiyomi.crash.GlobalExceptionHandler
+import eu.kanade.tachiyomi.crash.StartupTrace
 import eu.kanade.tachiyomi.crash.TraceLog
 import eu.kanade.tachiyomi.data.coil.BufferedSourceFetcher
 import eu.kanade.tachiyomi.data.coil.MangaCoverFetcher
@@ -110,6 +111,7 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         // 抓的是 logcat / 內建 crash log 都抓不到的原生（SIGSEGV/abort）與 OOM（lowmemorykiller SIGKILL）crash。
         if (Injekt.get<TranslationPreferences>().diagnosticLog.get()) {
             TraceLog.init(applicationContext)
+            StartupTrace.onAppCreated() // Yakuyomi：書庫轉圈調查的啟動點（只在診斷開著時）
         }
 
         setupNotificationChannels()

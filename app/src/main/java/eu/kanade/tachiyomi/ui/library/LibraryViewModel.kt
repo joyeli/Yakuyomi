@@ -13,6 +13,7 @@ import eu.kanade.domain.chapter.interactor.SetReadStatus
 import eu.kanade.domain.manga.interactor.UpdateManga
 import eu.kanade.presentation.library.components.LibraryToolbarTitle
 import eu.kanade.presentation.manga.DownloadAction
+import eu.kanade.tachiyomi.crash.StartupTrace
 import eu.kanade.tachiyomi.data.cache.CoverCache
 import eu.kanade.tachiyomi.data.download.DownloadCache
 import eu.kanade.tachiyomi.data.download.DownloadManager
@@ -100,6 +101,10 @@ class LibraryViewModel(
     private val trackerManager: TrackerManager = Injekt.get(),
 ) : StateViewModel<LibraryViewModel.State>(State()) {
 
+    // Yakuyomi：書庫載入時間點（診斷紀錄開著才有；關著是 null，下面的 ?. 都跳過）。要寫在 init 之前：
+    // init 開的協程會呼叫 getFavoritesFlow()，那時這個欄位必須已經有值。
+    private val loadTrace = StartupTrace.libraryViewModelCreated()
+
     init {
         mutableState.update { state ->
             state.copy(activeCategoryIndex = libraryPreferences.lastUsedCategory.get())
@@ -158,6 +163,7 @@ class LibraryViewModel(
                             groupedFavorites = it,
                         )
                     }
+                    loadTrace?.onSpinnerEnd(state.value.libraryData.favorites.size)
                 }
         }
 
@@ -440,7 +446,7 @@ class LibraryViewModel(
 
     private fun getFavoritesFlow(): Flow<List<LibraryItem>> {
         return combine(
-            getLibraryManga.subscribe(),
+            getLibraryManga.subscribe().let { loadTrace?.firstResult(it) ?: it },
             getLibraryItemPreferencesFlow(),
             downloadCache.changes,
             translationCache.changes,
