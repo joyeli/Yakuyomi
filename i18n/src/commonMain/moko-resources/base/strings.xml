@@ -1546,11 +1546,10 @@
     <string name="pref_translation_temperature_desc">LLM sampling temperature; 0.0–1.0. Lower (toward 0) is more consistent and literal; higher (toward 1) is more flexible but can drift from the original. Most people don\'t need to change it</string>
     <string name="pref_translation_thinking">Thinking mode</string>
     <string name="pref_translation_thinking_summary">Let the model think before it answers. Off by default: most newer models think by default, but line-by-line manga translation gains very little from it while getting noticeably slower and using several times the tokens (so it costs more). Only turn it on if translation quality is clearly falling short. Not every provider can turn it off completely (OpenAI\'s o-series can only be dialled to its lowest setting; Gemini 3 and Groq\'s GPT-OSS can only be reduced).</string>
-    <string name="pref_translation_group_diagnostics">Diagnostics (advanced)</string>
     <string name="pref_translation_diagnostic_log">Diagnostic log</string>
-    <string name="pref_translation_diagnostic_log_summary">Record each translation-engine stage to a private file, to catch native or out-of-memory crashes that logcat and the built-in crash log miss. Affects performance — only turn on when you need to diagnose.</string>
+    <string name="pref_translation_diagnostic_log_summary">Record each translation and night-read stage (with per-page timings) to a private file, to catch native or out-of-memory crashes that logcat and the built-in crash log miss. API keys are never recorded. Affects performance — only turn on when you need to diagnose.</string>
     <string name="pref_translation_share_diagnostic_log">Share diagnostic log</string>
-    <string name="pref_translation_share_diagnostic_log_summary">Send the recorded log so the crash can be investigated</string>
+    <string name="pref_translation_share_diagnostic_log_summary">Send the recorded log (previous and current launch), plus the system crash dump from the latest native crash if one happened in the last 7 days, so problems can be investigated</string>
     <string name="pref_translation_diagnostic_log_empty">No diagnostic log yet</string>
     <string name="model_role_detect">Detect</string>
     <string name="model_role_ocr">OCR</string>

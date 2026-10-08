@@ -1,7 +1,5 @@
 package eu.kanade.presentation.more.settings.screen
 
-import android.annotation.SuppressLint
-import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.provider.Settings
 import android.webkit.WebStorage
@@ -21,7 +19,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
-import androidx.core.net.toUri
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import eu.kanade.domain.base.BasePreferences
@@ -29,6 +26,7 @@ import eu.kanade.domain.extension.interactor.TrustExtension
 import eu.kanade.presentation.more.settings.Preference
 import eu.kanade.presentation.more.settings.screen.advanced.ClearDatabaseScreen
 import eu.kanade.presentation.more.settings.screen.debug.DebugInfoScreen
+import eu.kanade.tachiyomi.crash.TraceLog
 import eu.kanade.tachiyomi.data.download.DownloadCache
 import eu.kanade.tachiyomi.data.library.MetadataUpdateJob
 import eu.kanade.tachiyomi.network.NetworkHelper
@@ -50,7 +48,7 @@ import eu.kanade.tachiyomi.util.CrashLogUtil
 import eu.kanade.tachiyomi.util.system.GLUtil
 import eu.kanade.tachiyomi.util.system.isReleaseBuildType
 import eu.kanade.tachiyomi.util.system.isShizukuInstalled
-import eu.kanade.tachiyomi.util.system.powerManager
+import eu.kanade.tachiyomi.util.system.requestIgnoreBatteryOptimizations
 import eu.kanade.tachiyomi.util.system.setDefaultSettings
 import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.coroutines.launch
@@ -62,6 +60,7 @@ import tachiyomi.core.common.util.system.ImageUtil
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.library.service.LibraryPreferences
 import tachiyomi.domain.manga.interactor.ResetViewerFlags
+import tachiyomi.domain.translation.service.TranslationPreferences
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.collectAsState
@@ -84,6 +83,7 @@ object SettingsAdvancedScreen : SearchableSettings {
         val basePreferences = remember { Injekt.get<BasePreferences>() }
         val networkPreferences = remember { Injekt.get<NetworkPreferences>() }
         val libraryPreferences = remember { Injekt.get<LibraryPreferences>() }
+        val translationPreferences = remember { Injekt.get<TranslationPreferences>() }
 
         return listOf(
             Preference.PreferenceItem.TextPreference(
@@ -102,6 +102,26 @@ object SettingsAdvancedScreen : SearchableSettings {
                 onValueChanged = {
                     context.toast(MR.strings.requires_app_restart)
                     true
+                },
+            ),
+            // Yakuyomi：診斷紀錄（翻譯＋夜讀各階段寫進私有檔）。原本在翻譯設定裡，翻譯關掉就看不到 → 移到這裡。
+            // 執行時切換：開→TraceLog.init（接引擎 hook + 寫檔）、關→TraceLog.stop（斷 hook + 清 buffer），不必重啟 app。
+            Preference.PreferenceItem.SwitchPreference(
+                preference = translationPreferences.diagnosticLog,
+                title = stringResource(MR.strings.pref_translation_diagnostic_log),
+                subtitle = stringResource(MR.strings.pref_translation_diagnostic_log_summary),
+                onValueChanged = { enabled ->
+                    if (enabled) TraceLog.init(context) else TraceLog.stop()
+                    true
+                },
+            ),
+            Preference.PreferenceItem.TextPreference(
+                title = stringResource(MR.strings.pref_translation_share_diagnostic_log),
+                subtitle = stringResource(MR.strings.pref_translation_share_diagnostic_log_summary),
+                onClick = {
+                    if (!TraceLog.shareLog(context)) {
+                        context.toast(MR.strings.pref_translation_diagnostic_log_empty)
+                    }
                 },
             ),
             Preference.PreferenceItem.TextPreference(
@@ -141,24 +161,8 @@ object SettingsAdvancedScreen : SearchableSettings {
                 Preference.PreferenceItem.TextPreference(
                     title = stringResource(MR.strings.pref_disable_battery_optimization),
                     subtitle = stringResource(MR.strings.pref_disable_battery_optimization_summary),
-                    onClick = {
-                        val packageName: String = context.packageName
-                        if (!context.powerManager.isIgnoringBatteryOptimizations(packageName)) {
-                            try {
-                                @SuppressLint("BatteryLife")
-                                val intent = Intent().apply {
-                                    action = Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
-                                    data = "package:$packageName".toUri()
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
-                                context.startActivity(intent)
-                            } catch (e: ActivityNotFoundException) {
-                                context.toast(MR.strings.battery_optimization_setting_activity_not_found)
-                            }
-                        } else {
-                            context.toast(MR.strings.battery_optimization_disabled)
-                        }
-                    },
+                    // Yakuyomi：抽成共用（設定 › 夜讀 也用），見 util/system/BatteryOptimization.kt
+                    onClick = { context.requestIgnoreBatteryOptimizations() },
                 ),
                 Preference.PreferenceItem.TextPreference(
                     title = "Don't kill my app!",

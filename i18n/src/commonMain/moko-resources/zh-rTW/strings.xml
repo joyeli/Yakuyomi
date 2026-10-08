@@ -1180,11 +1180,10 @@
     <string name="pref_translation_temperature_desc">LLM 取樣溫度；0.0–1.0。低（往 0）＝更一致、更貼字直譯；高（往 1）＝更靈活但可能偏離原意。多數人不用動</string>
     <string name="pref_translation_thinking">思考模式</string>
     <string name="pref_translation_thinking_summary">讓模型先思考再回答。預設關閉：多數新模型預設會思考，但逐行翻譯漫畫從中得到的好處很小，卻會明顯變慢、token 用量數倍（更貴）。譯文品質明顯不足時再開。並非每家都能完全關閉（OpenAI o 系列只能降到最低，Gemini 3 系與 Groq GPT-OSS 只能調低）。</string>
-    <string name="pref_translation_group_diagnostics">診斷（進階）</string>
     <string name="pref_translation_diagnostic_log">診斷紀錄</string>
-    <string name="pref_translation_diagnostic_log_summary">把翻譯引擎各階段記錄到私有檔案，用來抓 logcat 與內建 crash log 都抓不到的原生或記憶體不足（OOM）閃退。會影響效能，只在需要診斷時開啟。</string>
+    <string name="pref_translation_diagnostic_log_summary">把翻譯與夜讀各階段（含每頁耗時）記錄到私有檔案，用來抓 logcat 與內建 crash log 都抓不到的原生或記憶體不足（OOM）閃退。紀錄裡不會有 API 金鑰。會影響效能，只在需要診斷時開啟。</string>
     <string name="pref_translation_share_diagnostic_log">分享診斷紀錄</string>
-    <string name="pref_translation_share_diagnostic_log_summary">把記錄下來的紀錄傳出去，方便追查閃退原因</string>
+    <string name="pref_translation_share_diagnostic_log_summary">把記錄下來的紀錄（上一次與這一次啟動）傳出去，方便追查問題；最近 7 天內若發生過原生閃退，系統留下的閃退傾印檔（最新一份）也會一併附上</string>
     <string name="pref_translation_diagnostic_log_empty">尚無診斷紀錄</string>
     <string name="pref_category_translation">翻譯</string>
     <string name="pref_translation_summary">AI 翻譯：偵測 / OCR / 去字在裝置上，翻譯走雲端 LLM</string>

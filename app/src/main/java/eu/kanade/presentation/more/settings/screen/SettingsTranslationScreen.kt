@@ -30,7 +30,6 @@ import eu.kanade.domain.source.interactor.GetSourcesWithFavoriteCount
 import eu.kanade.presentation.category.visualName
 import eu.kanade.presentation.more.settings.Preference
 import eu.kanade.presentation.more.settings.widget.TriStateListDialog
-import eu.kanade.tachiyomi.crash.TraceLog
 import eu.kanade.tachiyomi.data.translation.ModelDownloadManager
 import eu.kanade.tachiyomi.data.translation.TranslationEngineConfig
 import eu.kanade.tachiyomi.data.translation.TranslationEngineService
@@ -813,7 +812,7 @@ object SettingsTranslationScreen : SearchableSettings {
                     // 推論緒數選單已移除：NCNN 偵測/去字的緒數改由引擎原生設定（big.LITTLE 大核甜蜜點），非使用者可調。
                 ).toImmutableList(),
             ),
-            // —— 隱私（點開看完整宣告；移到診斷上面）——
+            // —— 隱私（點開看完整宣告）——
             Preference.PreferenceGroup(
                 title = stringResource(MR.strings.pref_translation_privacy),
                 preferenceItems = listOfNotNull<Item>(
@@ -823,35 +822,7 @@ object SettingsTranslationScreen : SearchableSettings {
                     ),
                 ).toImmutableList(),
             ),
-            // —— 診斷（進階）——（抓 logcat / 內建 crash log 都抓不到的原生/OOM crash；預設關、影響效能，只需要時開）
-            Preference.PreferenceGroup(
-                title = stringResource(MR.strings.pref_translation_group_diagnostics),
-                preferenceItems = listOfNotNull<Item>(
-                    // 執行時切換：開→TraceLog.init（接引擎 hook + 寫檔）、關→TraceLog.stop（斷 hook + 清 buffer），不必重啟 app。
-                    Preference.PreferenceItem.SwitchPreference(
-                        preference = prefs.diagnosticLog,
-                        title = stringResource(MR.strings.pref_translation_diagnostic_log),
-                        subtitle = stringResource(MR.strings.pref_translation_diagnostic_log_summary),
-                        titleBadge = advBadge,
-                        onValueChanged = { enabled ->
-                            if (enabled) TraceLog.init(context) else TraceLog.stop()
-                            true
-                        },
-                    ).takeIf { showAdvanced },
-                    Preference.PreferenceItem.TextPreference(
-                        title = stringResource(MR.strings.pref_translation_share_diagnostic_log),
-                        subtitle = stringResource(MR.strings.pref_translation_share_diagnostic_log_summary),
-                        titleBadge = advBadge,
-                        onClick = {
-                            if (!TraceLog.shareLog(context)) {
-                                context.toast(
-                                    context.ctxStringResource(MR.strings.pref_translation_diagnostic_log_empty),
-                                )
-                            }
-                        },
-                    ).takeIf { showAdvanced },
-                ).toImmutableList(),
-            ),
+            // 診斷紀錄已移到 設定 › 進階（翻譯關掉也要看得到；夜讀也寫進同一份紀錄）。
         ).filter { it !is Preference.PreferenceGroup || it.preferenceItems.isNotEmpty() }
     }
 

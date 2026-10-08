@@ -196,7 +196,8 @@ class TranslationEngineService(private val context: Context) {
             return current
         }
         // inFlight==0（或還沒建過）→ 安全關舊重建（釋放舊 native session 才不疊加 ~100MB）。
-        TraceLog.log("svc", "ensureEngine.rebuild sig=$signature hadEngine=${current != null}")
+        // ★ 診斷紀錄是給使用者分享的：簽章含 API key，只能記遮蔽版（0.16.8–0.22.0 曾整串明文寫進紀錄）
+        TraceLog.log("svc", "ensureEngine.rebuild sig=${signatureForLog(methodRaw)} hadEngine=${current != null}")
         closeEngine()
 
         // 真正建構（載入 ~100MB）期間 → loading=true，給 reader 指示器顯示「引擎載入中…」。finally 確保任何出口都歸位。
@@ -244,6 +245,15 @@ class TranslationEngineService(private val context: Context) {
     private fun configSignature(methodRaw: String): String =
         // NUL 分隔避免相鄰欄位串接後碰撞
         (listOf(signatureMethod(methodRaw), apiKey()) + settingsFields()).joinToString("\u0000")
+
+    /**
+     * 給診斷紀錄看的簽章：欄位同 [configSignature]，但 API key 只記「有／無」——紀錄會被使用者分享出去，
+     * 金鑰絕不能落進去。
+     */
+    private fun signatureForLog(methodRaw: String): String {
+        val key = if (apiKey().isBlank()) "<no-key>" else "<key-redacted>"
+        return (listOf(signatureMethod(methodRaw), key) + settingsFields()).joinToString(" ")
+    }
 
     /**
      * 簽章裡的去字法用映射後的引擎 method（boxfill／aot），不用原始字串：引擎只看映射後的值，auto_whole 與舊版的
