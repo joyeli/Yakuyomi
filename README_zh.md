@@ -13,7 +13,7 @@
 
 </div>
 
-Yakuyomi 是 [mihon](https://github.com/mihonapp/mihon) 的 fork，邊下載 / 邊讀邊把漫畫翻譯掉——預設日翻繁中，語言對可任意設定。文字的**偵測、OCR、去字都在裝置上跑**（三顆模型全走 NCNN、純 CPU），只有**翻譯**這步呼叫雲端 LLM。翻譯引擎是另一個 repo [yakuyomi-engine](https://github.com/joyeli/yakuyomi-engine)，在這裡以 submodule 引入。
+Yakuyomi 是 [mihon](https://github.com/mihonapp/mihon) 的 fork，邊下載 / 邊讀邊把漫畫翻譯掉——預設日翻繁中，語言對可任意設定。文字的**偵測、OCR、去字都在裝置上跑**（三顆模型全走 NCNN、純 CPU），只有**翻譯**這步呼叫雲端 LLM。另有把頁面本身變暗的**夜讀模式**，同樣在裝置上做。引擎是另一個 repo [yakuyomi-engine](https://github.com/joyeli/yakuyomi-engine)，在這裡以 submodule 引入。
 
 <div align="center">
 <img src="./.github/assets/showcase.png" alt="Box-fill vs Yakuyomi 去字" width="100%"/>
@@ -31,7 +31,7 @@ Yakuyomi 是 [mihon](https://github.com/mihonapp/mihon) 的 fork，邊下載 / �
 - **跨頁流水線（~2× 快）** — 多頁併發翻：某頁在等雲端 LLM 時，下一頁的裝置端偵測 / OCR / 去字已經在跑。淺併發下撞到網路上限——即時 / 快速去字翻譯約**加倍**吞吐。
 - **兩種工作流** — 下載時翻（整章背景翻）與邊讀邊翻；只有翻成功才覆蓋該頁，絕不用更糟的東西蓋掉原圖。
 - **自備服務商與金鑰** — 任何 OpenAI 相容 LLM（預設 DeepSeek；OpenAI、Gemini、Groq、Qwen、OpenRouter、自架 Sakura、自訂），金鑰每家一格加密、模型清單即時撈（[服務商說明](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/PROVIDERS_zh.md)）。
-- **自備模型** — 模型集（約 250 MB：偵測與去字各一組 NCNN `.param` + `.bin`，OCR 兩份 `.param`——全精度與混合精度——共用一個 `.bin`；混合精度需要支援 fp16 的 ARMv8.2 CPU，引擎不支援時自動退回全精度）可一鍵下載（含 sha256 驗證），或自己手動放（[模型說明](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/MODELS_zh.md)）。既有使用者升級後 app 會提示更新模型。
+- **自備模型** — 翻譯模型集（約 250 MB：偵測與去字各一組 NCNN `.param` + `.bin`，OCR 兩份 `.param`——全精度與混合精度——共用一個 `.bin`；混合精度需要支援 fp16 的 ARMv8.2 CPU，引擎不支援時自動退回全精度）可一鍵下載（含 sha256 驗證），或自己手動放（[模型說明](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/MODELS_zh.md)）。既有使用者升級後 app 會提示更新模型。
 - **品質旋鈕** — 兩種去字模式（快速去字 / AI 去字）、直 / 橫排版、約 20 個可調參數。無 telemetry。
 
 <div align="center">
@@ -40,6 +40,20 @@ Yakuyomi 是 [mihon](https://github.com/mihonapp/mihon) 的 fork，邊下載 / �
 <img src="./.github/assets/yakuyomi-queue-manage.gif" alt="翻譯佇列以漫畫分組：展開章節、搶翻、整本暫停" height="440" hspace="6"/>
 <br>
 <sub><b>邊讀邊翻</b>、<b>一鍵重繪</b>換去字方法，加上<b>以漫畫分組的翻譯佇列</b>——展開章節、搶翻、整本暫停。</sub>
+</div>
+
+**夜讀**
+- **頁面本身變暗，不是濾鏡** — 紙面、分鏡格溝、頁邊與對話框塗黑、字改成亮色，畫面調暗而不是反相。人物受保護：裝置上的人物分割模型先把人物找出來，不讓塗黑碰到。夜讀版是另存在章節資料夾裡的一份副本，原圖完全不動。翻過與沒翻的漫畫都能用，也不需要 LLM 金鑰。
+- **兩檔** — 「標準」塗黑格溝、頁邊、對話框與大而簡單的白；「更多」再加上較小的素面背景，以裡面有沒有畫東西判斷：空的天空、素面漸層塗黑，牆、窗、景物留著。放射狀集中線塗黑線與線之間、線本身留亮，閃光留亮。兩檔都不碰繁複的畫面與人物。兩檔一次產生，切換即時。
+- **閱讀器懸浮鈕** — 開著夜讀時，畫面上有一顆半透明小按鈕：點一下切日常／夜讀，夜讀時再多兩顆訊號格按鈕選「標準」或「更多」。長按按鈕看說明；按鈕可放在畫面左側或右側。
+- **背景產生** — 開「自動產生夜讀版」後，章節下載完就產生夜讀版（要翻譯的漫畫在翻完之後）。夜讀工作跟翻譯共用「**佇列**」分頁，兩類各自暫停。也可以點章節列的月亮、多選章節，或在閱讀器長按選單選「為這一話產生夜讀版」。線上閱讀的章會先問一聲，下載後再產生夜讀版。
+- **設定 › 夜讀** — 總開關（「其他」分頁也有）、哪些分類與來源自動產生、略過彩色頁、亮度一鍵套用（標準／柔和／更柔和）或分項滑桿、一次處理幾頁、螢幕關閉時繼續處理的說明（電池最佳化），以及夜讀版佔用空間，可「清除已讀話的夜讀版」／「清除全部夜讀版」。夜讀規則更新後，有舊版頁的章會標出來，「重新產生舊版夜讀頁」一鍵重做。
+- **模型** — 在 設定 › 夜讀 下載夜讀模型：人物分割兩顆，約 **147 MB**；文字偵測器與翻譯共用。這兩顆**不是** GPL-3.0，僅供研究／非商業用途散布——見 [LICENSE-YAKUYOMI.md](LICENSE-YAKUYOMI.md)。夜讀只支援下載成圖片資料夾的章，不支援 CBZ 壓縮檔。
+
+<div align="center">
+<img src="./.github/assets/yakuyomi-nightread.gif" alt="夜讀：同一頁在原圖與夜讀版之間切換——紙面、格溝、對話框變黑，字是亮的，畫面調暗" height="440" hspace="6"/>
+<br>
+<sub><b>夜讀</b>——頁面本身變暗：紙面、格溝、對話框變黑，字照樣清楚，人物只是調暗。</sub>
 </div>
 
 **擷取**
@@ -114,7 +128,7 @@ Yakuyomi 是 [mihon](https://github.com/mihonapp/mihon) 的 fork，邊下載 / �
 
 **搜尋**
 - **浮動搜尋** — 可選的底部單手搜尋膠囊，閒置時縮成小球；長壓小球彈出快捷選單（篩選放最就手），不必先展開。
-- **已存搜尋與進階語法** — 把搜尋存起來日後重用；`,` = AND、`-` = 排除，並有 `genre:` / `author:` / `artist:` 前綴做精準書庫查詢。
+- **已存搜尋與進階語法** — 把搜尋存起來日後重用。書庫搜尋裡空白或 `,` = AND、`||` = OR、`-` = 排除、`()` 可分組；前綴有 `genre:` / `author:` / `artist:` / `source:` / `notes:`，值含空白要加引號（`genre:"school life"`），還可用 `unread>0` 這類比較。
 - **精簡導覽列** — 可選僅圖示、更緊緻的底部導覽列。
 
 <div align="center">
@@ -217,11 +231,11 @@ cd Yakuyomi
 ./gradlew :app:assembleDebug
 ```
 
-引擎透過 Gradle composite build（`includeBuild`）接進來。編譯不需要模型權重或 API 金鑰——模型在 app 內下載、LLM 金鑰在 app 內輸入。
+引擎透過 Gradle composite build（`includeBuild`）接進來。它要編原生碼，需要裝 NDK `28.2.13676358` 與 CMake `3.22.1`。引擎這個 build 和它裡面巢狀的夜讀函式庫 build 各自找 Android SDK、讀不到本 repo 的 `local.properties`：請設 `ANDROID_HOME`，或在 `yakuyomi-engine/` 和 `yakuyomi-engine/yakuyomi-nightread/` 各放一份寫了 `sdk.dir=...` 的 `local.properties`。編譯不需要模型權重或 API 金鑰——模型在 app 內下載、LLM 金鑰在 app 內輸入。
 
 ## 與 mihon 的關係
 
-Yakuyomi 是真正的 mihon fork：跟著 mihon 的閱讀器走，只加整合層——下載 / 翻譯 hook、翻譯設定、模型管理、品牌。裝置端 ML 隔離在引擎 submodule 裡，所以閱讀器維持 mihon 的樣子、引擎也能自己單獨測。
+Yakuyomi 是真正的 mihon fork：跟著 mihon 的閱讀器走，只加整合層——下載 / 翻譯 hook、翻譯與夜讀設定、模型管理、品牌。裝置端 ML 隔離在引擎 submodule 裡（翻譯與夜讀在那裡是分開的模組，夜讀不必帶翻譯引擎），所以閱讀器維持 mihon 的樣子、引擎也能自己單獨測。
 
 ## 免責聲明
 
@@ -229,11 +243,12 @@ Yakuyomi 是真正的 mihon fork：跟著 mihon 的閱讀器走，只加整合�
 
 ## 授權
 
-**GPL-3.0** — 見 [LICENSE-YAKUYOMI.md](LICENSE-YAKUYOMI.md)。Yakuyomi 把 mihon（Apache-2.0，見 [LICENSE](LICENSE)）與翻譯引擎結合；引擎移植了 manga-image-translator 的 prompt / 參數 schema / 分組、並用 GPL-3.0 模型權重，故組合後的 app 為 GPL-3.0。mihon 的 Apache-2.0 授權與歸屬予以保留。
+**GPL-3.0** — 見 [LICENSE-YAKUYOMI.md](LICENSE-YAKUYOMI.md)。Yakuyomi 把 mihon（Apache-2.0，見 [LICENSE](LICENSE)）與翻譯引擎結合；引擎移植了 manga-image-translator 的 prompt / 參數 schema / 分組、並用 GPL-3.0 模型權重，故組合後的 app 為 GPL-3.0。mihon 的 Apache-2.0 授權與歸屬予以保留。選配的夜讀人物分割模型權重不是 GPL-3.0：僅供研究／非商業用途散布，出處歸屬與條件見 [LICENSE-YAKUYOMI.md](LICENSE-YAKUYOMI.md)。
 
 ## 致謝
 
 - [mihon](https://github.com/mihonapp/mihon) — 本專案 fork 的閱讀器（Apache-2.0）
-- [yakuyomi-engine](https://github.com/joyeli/yakuyomi-engine) — 裝置端翻譯引擎
+- [yakuyomi-engine](https://github.com/joyeli/yakuyomi-engine) — 裝置端翻譯與夜讀引擎
 - [manga-image-translator](https://github.com/zyddnys/manga-image-translator) — prompt 與行為參考
 - 模型權重 — DBNet 偵測、48px CTC OCR、AOT-GAN 去字 — 來自 [manga-image-translator](https://github.com/zyddnys/manga-image-translator)；裝置端的模型檔是我們自己拿這些權重轉的（三顆都轉成 NCNN，OCR 是 fp16/fp32 混合精度版）
+- 夜讀人物分割 — [manga-page-element-segmentation](https://huggingface.co/anonimkaq4/manga-page-element-segmentation)（YOLO11-seg）與 [CartoonSegmentation](https://github.com/CartoonSegmentation/CartoonSegmentation)；裝置端的模型檔是我們轉的 NCNN 版（出處歸屬與條件見 [LICENSE-YAKUYOMI.md](LICENSE-YAKUYOMI.md)）

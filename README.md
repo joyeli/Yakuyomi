@@ -13,7 +13,7 @@ English ｜ [中文](README_zh.md)
 
 </div>
 
-Yakuyomi is a fork of [mihon](https://github.com/mihonapp/mihon) that translates manga as you download or read it — Japanese to Traditional Chinese by default, any language pair configurable. Text **detection, OCR, and removal run on the device** (all three models on NCNN, CPU only); only the **translation** step calls a cloud LLM. The translation engine is a separate repo, [yakuyomi-engine](https://github.com/joyeli/yakuyomi-engine), pulled in here as a submodule.
+Yakuyomi is a fork of [mihon](https://github.com/mihonapp/mihon) that translates manga as you download or read it — Japanese to Traditional Chinese by default, any language pair configurable. Text **detection, OCR, and removal run on the device** (all three models on NCNN, CPU only); only the **translation** step calls a cloud LLM. It also has a **night-reading mode** that darkens the pages themselves, on the device too. The engine is a separate repo, [yakuyomi-engine](https://github.com/joyeli/yakuyomi-engine), pulled in here as a submodule.
 
 <div align="center">
 <img src="./.github/assets/showcase.png" alt="Box-fill vs Yakuyomi inpainting" width="100%"/>
@@ -31,7 +31,7 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 - **Cross-page pipeline (~2× faster)** — pages translate concurrently: while one page waits on the cloud LLM, the next page's on-device detection / OCR / removal is already running. At a shallow depth this reaches the network-bound ceiling — roughly **double** the throughput of live / fast-removal translation.
 - **Two workflows** — translate-on-download (whole chapters in the background) and live translation while you read. A page is overwritten only when its translation succeeds; nothing is ever replaced with something worse.
 - **Your provider, your key** — any OpenAI-compatible LLM (DeepSeek by default; OpenAI, Gemini, Groq, Qwen, OpenRouter, self-hosted Sakura, custom), per-provider encrypted keys, live model list ([providers doc](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/PROVIDERS.md)).
-- **Your models** — the model set (~250 MB: NCNN `.param` + `.bin` pairs for detection and inpainting, plus two OCR `.param` files — full precision and mixed precision — sharing one `.bin`; the mixed build needs an ARMv8.2 CPU with fp16, and the engine falls back to full precision otherwise) downloads in one tap with sha256 verification, or you supply them manually ([models doc](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/MODELS.md)). If you're upgrading, the app prompts you to update the models.
+- **Your models** — the translation model set (~250 MB: NCNN `.param` + `.bin` pairs for detection and inpainting, plus two OCR `.param` files — full precision and mixed precision — sharing one `.bin`; the mixed build needs an ARMv8.2 CPU with fp16, and the engine falls back to full precision otherwise) downloads in one tap with sha256 verification, or you supply them manually ([models doc](https://github.com/joyeli/yakuyomi-engine/blob/main/docs/MODELS.md)). If you're upgrading, the app prompts you to update the models.
 - **Quality knobs** — two text-removal modes (fast flat-fill / AI inpainting), vertical/horizontal typesetting, ~20 tunable parameters. No telemetry.
 
 <div align="center">
@@ -40,6 +40,20 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 <img src="./.github/assets/yakuyomi-queue-manage.gif" alt="Translation queue grouped by manga: expand chapters, jump a title to the front, pause it" height="440" hspace="6"/>
 <br>
 <sub><b>Live translation as you read</b>, <b>one-tap re-render</b> of the text-removal method, and a <b>per-manga translation queue</b> — expand chapters, jump a title to the front, pause it.</sub>
+</div>
+
+**Night reading**
+- **The page itself goes dark, not a color filter** — paper, panel gutters, page margins and speech bubbles are painted black with the text drawn light, and the artwork is dimmed rather than inverted. Characters are protected: an on-device character-segmentation model finds them and keeps them out of the fill. Each night page is a separate copy saved in the chapter folder; the original page is never touched. It works on translated and untranslated manga alike and needs no LLM key.
+- **Two levels** — *Standard* blacks out gutters, margins, bubbles and large, simple white areas. *More* also takes smaller plain backgrounds, judged by whether anything is drawn in them: an empty sky or a plain gradient goes black, while walls, windows and scenery stay. Radiating focus lines are blacked between the lines with the lines kept light, and sparkles stay light. Busy artwork and characters are kept out of the fill at both levels. Both levels are generated in one pass, so switching between them is instant.
+- **Floating switch in the reader** — with night reading on, a small translucent button sits over the page: tap it to switch between day and night, and in night mode two signal-bar buttons pick *Standard* or *More*. Long-press a button for a hint; the button can sit on either side of the screen.
+- **Generated in the background** — turn on *Auto-generate night pages* and chapters get night versions after they download (after translation, for manga you translate). Night jobs share the **Queue** tab with translation, and each kind has its own pause. You can also tap the moon on a chapter row, select several chapters, or pick *Generate night pages for this chapter* from the reader's long-press menu. For a chapter you're reading online, Yakuyomi asks first, downloads it, then generates the night version.
+- **Settings › Night reading** — the master switch (also on the More tab), which categories and sources get night pages automatically, skip color pages, brightness presets (Standard / Soft / Softer) or individual sliders, how many pages to process at once, a note on keeping work going with the screen off (battery optimization), and the space night pages use, with *clear read chapters* / *clear all*. When the night-reading rules improve, chapters with older pages are marked, and *Regenerate outdated night pages* redoes them in one tap.
+- **Models** — download the night models in Settings › Night reading: two character-segmentation models, about **147 MB**; the text detector is shared with translation. These two are **not** GPL-3.0 and are redistributed for research / non-commercial use only — see [LICENSE-YAKUYOMI.md](LICENSE-YAKUYOMI.md). Night pages work for chapters downloaded as image folders, not CBZ archives.
+
+<div align="center">
+<img src="./.github/assets/yakuyomi-nightread.gif" alt="Night reading: the same page switching between the original and its night version — black paper, gutters and bubbles, light text, dimmed artwork" height="440" hspace="6"/>
+<br>
+<sub><b>Night reading</b> — the page itself turns dark: paper, gutters and bubbles go black, text stays readable, characters are only dimmed.</sub>
 </div>
 
 **Capture**
@@ -114,7 +128,7 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 
 **Search**
 - **Floating search** — an optional one-handed search pill at the bottom that collapses to a ball when idle; long-press the ball for a quick menu (with filter nearest your thumb), no need to expand the bar first.
-- **Saved searches & advanced syntax** — save a search to recall later; `,` = AND, `-` = exclude, and `genre:` / `author:` / `artist:` prefixes for precise library queries.
+- **Saved searches & advanced syntax** — save a search to recall later. In the library, a space or `,` = AND, `||` = OR, `-` = exclude, `()` groups; `genre:` / `author:` / `artist:` / `source:` / `notes:` prefixes, quotes for values with spaces (`genre:"school life"`), and comparisons like `unread>0`.
 - **Compact navigation bar** — an icons-only, tighter bottom bar option.
 
 <div align="center">
@@ -217,11 +231,11 @@ cd Yakuyomi
 ./gradlew :app:assembleDebug
 ```
 
-The engine is wired in via a Gradle composite build (`includeBuild`). No model weights or API keys are needed to build — you download the models and enter your LLM key inside the app.
+The engine is wired in via a Gradle composite build (`includeBuild`). It compiles native code, so install NDK `28.2.13676358` and CMake `3.22.1`. The engine build and the night-reading library nested in it each look for the Android SDK on their own and don't read this repo's `local.properties`: set `ANDROID_HOME`, or put a `local.properties` with `sdk.dir=...` in both `yakuyomi-engine/` and `yakuyomi-engine/yakuyomi-nightread/`. No model weights or API keys are needed to build — you download the models and enter your LLM key inside the app.
 
 ## Relation to mihon
 
-Yakuyomi is a real mihon fork: it tracks mihon's reader and adds only the integration layer — a download/translate hook, translation settings, model management, and branding. The on-device ML is isolated in the engine submodule, so the reader stays mihon-shaped and the engine can be tested on its own.
+Yakuyomi is a real mihon fork: it tracks mihon's reader and adds only the integration layer — a download/translate hook, translation and night-reading settings, model management, and branding. The on-device ML is isolated in the engine submodule (translation and night reading are separate modules there, so night reading doesn't need the translation engine), so the reader stays mihon-shaped and the engine can be tested on its own.
 
 ## Disclaimer
 
@@ -229,11 +243,12 @@ The developers of this application do not have any affiliation with the content 
 
 ## License
 
-**GPL-3.0** — see [LICENSE-YAKUYOMI.md](LICENSE-YAKUYOMI.md). Yakuyomi combines mihon (Apache-2.0, see [LICENSE](LICENSE)) with the translation engine, which ports manga-image-translator's prompt, parameter schema, and grouping, and uses GPL-3.0 model weights; the combined app is therefore GPL-3.0. mihon's Apache-2.0 license and attribution are retained.
+**GPL-3.0** — see [LICENSE-YAKUYOMI.md](LICENSE-YAKUYOMI.md). Yakuyomi combines mihon (Apache-2.0, see [LICENSE](LICENSE)) with the translation engine, which ports manga-image-translator's prompt, parameter schema, and grouping, and uses GPL-3.0 model weights; the combined app is therefore GPL-3.0. mihon's Apache-2.0 license and attribution are retained. The optional night-reading character-segmentation weights are not GPL-3.0: they are redistributed for research / non-commercial use only, with the attribution and terms listed in [LICENSE-YAKUYOMI.md](LICENSE-YAKUYOMI.md).
 
 ## Credits
 
 - [mihon](https://github.com/mihonapp/mihon) — the reader this forks (Apache-2.0)
-- [yakuyomi-engine](https://github.com/joyeli/yakuyomi-engine) — the on-device translation engine
+- [yakuyomi-engine](https://github.com/joyeli/yakuyomi-engine) — the on-device translation and night-reading engine
 - [manga-image-translator](https://github.com/zyddnys/manga-image-translator) — prompt and behaviour reference
 - model weights — DBNet detection, 48px CTC OCR, and AOT-GAN inpaint — from [manga-image-translator](https://github.com/zyddnys/manga-image-translator); the on-device files are our own builds of those weights (NCNN conversions of all three; the OCR one is a mixed-precision fp16/fp32 build)
+- night-reading character segmentation — [manga-page-element-segmentation](https://huggingface.co/anonimkaq4/manga-page-element-segmentation) (YOLO11-seg) and [CartoonSegmentation](https://github.com/CartoonSegmentation/CartoonSegmentation); the on-device files are our NCNN conversions (attribution and terms in [LICENSE-YAKUYOMI.md](LICENSE-YAKUYOMI.md))
