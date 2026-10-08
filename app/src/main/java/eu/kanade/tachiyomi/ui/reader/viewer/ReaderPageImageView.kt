@@ -23,6 +23,7 @@ import coil3.asDrawable
 import coil3.dispose
 import coil3.imageLoader
 import coil3.request.CachePolicy
+import coil3.request.Disposable
 import coil3.request.ImageRequest
 import coil3.request.crossfade
 import coil3.size.Precision
@@ -68,6 +69,15 @@ open class ReaderPageImageView @JvmOverloads constructor(
 
     private var config: Config? = null
 
+    /**
+     * Yakuyomi：這次換圖載好時要還原的縮放（[setImage] 的 restore）。onReady 用掉就清空；換圖還沒載好又再換圖時，
+     * [captureState] 回傳它（畫面還停在換圖前那一刻的縮放）。
+     */
+    private var pendingRestore: ZoomState? = null
+
+    /** Yakuyomi：Coil 的進行中請求（條漫解碼、動圖）。下次 [setImage] 前取消，免得較早發出的解碼較晚完成、蓋掉新圖。 */
+    private var coilRequest: Disposable? = null
+
     var onImageLoaded: (() -> Unit)? = null
     var onImageLoadError: ((Throwable?) -> Unit)? = null
     var onScaleChanged: ((newScale: Float) -> Unit)? = null
@@ -108,8 +118,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
                 setOnImageEventListener(
                     object : SubsamplingScaleImageView.DefaultOnImageEventListener() {
                         override fun onReady() {
-                            setupZoom(config)
-                            landscapeZoom(forward)
+                            readyZoom(config, forward, landscape = true)
                             this@ReaderPageImageView.onImageLoaded()
                         }
 
@@ -147,29 +156,68 @@ open class ReaderPageImageView @JvmOverloads constructor(
         }
     }
 
-    fun setImage(drawable: Drawable, config: Config) {
+    /**
+     * Yakuyomi：同一頁換圖（切日常／夜讀、換夜讀檔位、譯圖換上）前的縮放狀態。[scale] 與中心點是**來源圖座標**，
+     * 連同當時的來源尺寸一起存：新圖尺寸不同（夜讀頁超過 3.5 MPx 會縮）時按比例換算，畫面上的大小與位置不變。
+     */
+    data class ZoomState(
+        val scale: Float,
+        val centerX: Float,
+        val centerY: Float,
+        val sWidth: Int,
+        val sHeight: Int,
+    )
+
+    /**
+     * Yakuyomi：目前畫面的縮放狀態，給 holder 在重新解碼同一頁前呼叫、換圖時傳給 [setImage] 的 restore。
+     * 還沒載好的圖（第一次載入）→ null；上一次換圖還沒載好 → 沿用它要還原的狀態。動圖不支援 → null。
+     */
+    fun captureState(): ZoomState? {
+        val view = pageView as? SubsamplingScaleImageView ?: return null
+        if (!view.isReady) return pendingRestore
+        val c = view.center ?: return null
+        if (view.sWidth <= 0 || view.sHeight <= 0) return null
+        return ZoomState(view.scale, c.x, c.y, view.sWidth, view.sHeight)
+    }
+
+    /** [restore]（Yakuyomi）：換圖載好後還原這個縮放，而不是回到初始縮放（見 [captureState]）。 */
+    fun setImage(drawable: Drawable, config: Config, restore: ZoomState? = null) {
         this.config = config
+        cancelCoilRequest()
         if (drawable is Animatable) {
+            pendingRestore = null
             prepareAnimatedImageView()
             setAnimatedImage(drawable, config)
         } else {
             prepareNonAnimatedImageView()
+            pendingRestore = restore
             setNonAnimatedImage(drawable, config)
         }
     }
 
-    fun setImage(source: BufferedSource, isAnimated: Boolean, config: Config) {
+    /** [restore]（Yakuyomi）：換圖載好後還原這個縮放，而不是回到初始縮放（見 [captureState]）。 */
+    fun setImage(source: BufferedSource, isAnimated: Boolean, config: Config, restore: ZoomState? = null) {
         this.config = config
+        cancelCoilRequest()
         if (isAnimated) {
+            pendingRestore = null
             prepareAnimatedImageView()
             setAnimatedImage(source, config)
         } else {
             prepareNonAnimatedImageView()
+            pendingRestore = restore
             setNonAnimatedImage(source, config)
         }
     }
 
+    private fun cancelCoilRequest() {
+        coilRequest?.dispose()
+        coilRequest = null
+    }
+
     fun recycle() = pageView?.let {
+        cancelCoilRequest()
+        pendingRestore = null
         when (it) {
             is SubsamplingScaleImageView -> it.recycle()
             is AppCompatImageView -> it.dispose()
@@ -260,6 +308,33 @@ open class ReaderPageImageView @JvmOverloads constructor(
         addView(pageView, MATCH_PARENT, MATCH_PARENT)
     }
 
+    /**
+     * Yakuyomi：onReady 共用。有待還原的縮放（[pendingRestore]）就還原、**跳過**起始位置與橫圖自動放大；否則照原本的
+     * 初始縮放（[setupZoom]，[landscape] 時再 [landscapeZoom]）。
+     */
+    private fun SubsamplingScaleImageView.readyZoom(config: Config?, forward: Boolean, landscape: Boolean) {
+        val restore = pendingRestore
+        pendingRestore = null
+        if (restore != null && restoreZoom(restore)) return
+        setupZoom(config)
+        if (landscape) landscapeZoom(forward)
+    }
+
+    /**
+     * Yakuyomi：還原 [state]。5 倍上限與雙擊倍率以**最小縮放**（適配畫面）為基準算——[setupZoom] 用的 `scale` 在還原時
+     * 已是放大後的值，拿它算上限會越換越大。新圖尺寸不同時 scale 乘上「舊寬／新寬」、中心點乘上「新寬／舊寬」。
+     */
+    private fun SubsamplingScaleImageView.restoreZoom(state: ZoomState): Boolean {
+        if (sWidth <= 0 || sHeight <= 0 || state.sWidth <= 0 || state.sHeight <= 0) return false
+        maxScale = minScale * MAX_ZOOM_SCALE
+        setDoubleTapZoomScale(minScale * 2)
+        val kx = sWidth.toFloat() / state.sWidth
+        val ky = sHeight.toFloat() / state.sHeight
+        val scale = (state.scale / kx).coerceIn(minScale, maxScale)
+        setScaleAndCenter(scale, PointF(state.centerX * kx, state.centerY * ky))
+        return true
+    }
+
     private fun SubsamplingScaleImageView.setupZoom(config: Config?) {
         // 5x zoom
         maxScale = scale * MAX_ZOOM_SCALE
@@ -284,8 +359,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
         setOnImageEventListener(
             object : SubsamplingScaleImageView.DefaultOnImageEventListener() {
                 override fun onReady() {
-                    setupZoom(config)
-                    if (isVisibleOnScreen()) landscapeZoom(true)
+                    readyZoom(config, forward = true, landscape = isVisibleOnScreen())
                     this@ReaderPageImageView.onImageLoaded()
                 }
 
@@ -330,7 +404,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
                     .customDecoder(true)
                     .crossfade(false)
                     .build()
-                    .let(context.imageLoader::enqueue)
+                    .let { coilRequest = context.imageLoader.enqueue(it) }
             }
             else -> {
                 throw IllegalArgumentException("Not implemented for class ${data::class.simpleName}")
@@ -405,7 +479,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
             )
             .crossfade(false)
             .build()
-        context.imageLoader.enqueue(request)
+        coilRequest = context.imageLoader.enqueue(request)
     }
 
     private fun Int.getSystemScaledDuration(): Int {

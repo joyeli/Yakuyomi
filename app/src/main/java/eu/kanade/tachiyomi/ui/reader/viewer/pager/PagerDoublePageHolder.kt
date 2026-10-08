@@ -119,6 +119,8 @@ class PagerDoublePageHolder(
 
         val firstStreamFn = first.stream ?: return
         val secondStreamFn = second?.stream
+        // 同一組頁重新解碼（切日常／夜讀、換夜讀檔位、譯圖換上）：保住目前的縮放與位置（第一次載入＝null）。
+        val restore = captureState()
 
         val config = Config(
             zoomDuration = viewer.config.doubleTapAnimDuration,
@@ -160,7 +162,7 @@ class PagerDoublePageHolder(
                 }
                 val (source, isAnimated, background) = loaded
                 withUIContext {
-                    setImage(source, isAnimated, soloConfig)
+                    setImage(source, isAnimated, soloConfig, restore)
                     if (!isAnimated) pageBackground = background
                     removeErrorLayout()
                 }
@@ -193,11 +195,11 @@ class PagerDoublePageHolder(
                         detectedFull = true
                         // 回報重配：true＝本 holder 會被 recreate（不顯示）；false＝沒拆成 → fallback 顯示併圖、不留白。
                         if (!viewer.onFullPagesDetected(wides)) {
-                            setImage(BitmapDrawable(resources, fallbackBitmap), fillConfig)
+                            setImage(BitmapDrawable(resources, fallbackBitmap), fillConfig, restore)
                             removeErrorLayout()
                         }
                     } else {
-                        setImage(BitmapDrawable(resources, fallbackBitmap), fillConfig)
+                        setImage(BitmapDrawable(resources, fallbackBitmap), fillConfig, restore)
                         removeErrorLayout()
                     }
                 }

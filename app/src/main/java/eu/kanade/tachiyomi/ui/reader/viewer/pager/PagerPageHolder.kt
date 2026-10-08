@@ -102,7 +102,12 @@ class PagerPageHolder(
             // statusFlow 的**同一個** collectLatest（combine）：reload 一變就以當前 state（Ready）重發 → collectLatest
             // **取消上一個 setImage**（含綁定當下還在跑的原圖 decode）再跑新的 → 最新（譯圖）必勝；
             // 也不會被 status 同值（Ready→Ready）conflate。修「檔已翻好但畫面卡原文」（兩個獨立 setImage 競爭、慢的原圖 decode 最後完成而勝出；尤其載入競態 / 第一頁）。
-            combine(page.statusFlow, page.reloadFlow) { state, _ -> state }.collectLatest { state ->
+            // 雙頁分割的後半頁（InsertPage）不在章節的頁清單裡、沒人呼叫它的 reload()：連 parent 的 reloadFlow 一起聽，
+            // 切日常／夜讀、換檔位時後半頁才會跟著重畫（stream 本來就是 parent 的）。
+            val reloads = (page as? InsertPage)?.let { insert ->
+                combine(page.reloadFlow, insert.parent.reloadFlow) { a, b -> a to b }
+            } ?: page.reloadFlow
+            combine(page.statusFlow, reloads) { state, _ -> state }.collectLatest { state ->
                 when (state) {
                     Page.State.Queue -> setQueued()
                     Page.State.LoadPage -> setLoading()
@@ -153,6 +158,8 @@ class PagerPageHolder(
         progressIndicator?.setProgress(0)
 
         val streamFn = page.stream ?: return
+        // 同一頁重新解碼（切日常／夜讀、換夜讀檔位、譯圖換上）：保住目前的縮放與位置（第一次載入＝null、照初始縮放）。
+        val restore = captureState()
 
         try {
             val (source, isAnimated, background) = withIOContext {
@@ -181,6 +188,7 @@ class PagerPageHolder(
                         zoomStartPosition = viewer.config.imageZoomType,
                         landscapeZoom = viewer.config.landscapeZoom,
                     ),
+                    restore,
                 )
                 if (!isAnimated) {
                     pageBackground = background
