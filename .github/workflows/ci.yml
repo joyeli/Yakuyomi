@@ -26,8 +26,13 @@ jobs:
           distribution: temurin
           java-version: "21"
 
+      # packages 要明寫：這個 action 預設會跑 `sdkmanager tools`，新版 cmdline-tools 已經沒有 `tools` 這個套件
+      # （Failed to find package 'tools' → exit 1，後面的步驟全部跳過；2026-09-17 起 CI 因此一直紅）。
+      # NDK／CMake 由 AGP 依 ndkVersion（app 與引擎的 inference-core 都釘 28.2.13676358）自動下載，授權在這一步接受。
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
