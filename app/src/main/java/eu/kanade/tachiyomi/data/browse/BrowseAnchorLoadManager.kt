@@ -19,6 +19,7 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import mihon.domain.manga.model.toDomainManga
+import tachiyomi.core.common.i18n.pluralStringResource
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.domain.manga.interactor.NetworkToLocalManga
 import tachiyomi.domain.source.service.SourceManager
@@ -298,9 +299,9 @@ class BrowseAnchorLoadManager(private val context: Context) {
             setContentTitle(context.stringResource(MR.strings.browse_anchor_load_complete_title))
             setContentText(
                 when {
-                    found -> context.stringResource(MR.strings.browse_anchor_load_complete_found, loaded)
-                    done -> context.stringResource(MR.strings.browse_anchor_load_complete_end, loaded)
-                    else -> context.stringResource(MR.strings.browse_anchor_load_paused, loaded)
+                    found -> context.pluralStringResource(MR.plurals.browse_anchor_load_complete_found, loaded, loaded)
+                    done -> context.pluralStringResource(MR.plurals.browse_anchor_load_complete_end, loaded, loaded)
+                    else -> context.pluralStringResource(MR.plurals.browse_anchor_load_paused, loaded, loaded)
                 },
             )
             setSmallIcon(android.R.drawable.stat_sys_download_done)

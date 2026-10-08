@@ -99,9 +99,11 @@ import tachiyomi.domain.source.model.StubSource
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.components.material.padding
+import tachiyomi.presentation.core.i18n.pluralStringResource
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.screens.LoadingScreen
 import tachiyomi.source.local.LocalSource
+import tachiyomi.core.common.i18n.pluralStringResource as contextPluralStringResource
 import tachiyomi.core.common.i18n.stringResource as contextStringResource
 import tachiyomi.presentation.core.util.collectAsState as prefCollectAsState
 
@@ -198,8 +200,9 @@ data class BrowseSourceScreen(
         val bgJobRunning = fetchState.running || autoLoading
         val bgJobProgress = when {
             fetchState.running -> "${fetchState.done}/${fetchState.total}"
-            autoLoading -> context.contextStringResource(
-                MR.strings.browse_anchor_load_progress,
+            autoLoading -> context.contextPluralStringResource(
+                MR.plurals.browse_anchor_load_progress,
+                anchorLoadState.page,
                 anchorLoadState.page,
                 anchorLoadState.loaded,
             )
@@ -290,7 +293,7 @@ data class BrowseSourceScreen(
             viewModel.saveSnapshot(urls)
             scope.launchIO {
                 snackbarHostState.showSnackbar(
-                    context.contextStringResource(MR.strings.snapshot_saved, urls.size),
+                    context.contextPluralStringResource(MR.plurals.snapshot_saved, urls.size, urls.size),
                 )
             }
         }
@@ -301,9 +304,21 @@ data class BrowseSourceScreen(
             if (r.sourceId == sourceId) {
                 context.toast(
                     when {
-                        r.found -> context.contextStringResource(MR.strings.browse_anchor_load_complete_found, r.loaded)
-                        r.done -> context.contextStringResource(MR.strings.browse_anchor_load_complete_end, r.loaded)
-                        else -> context.contextStringResource(MR.strings.browse_anchor_load_paused, r.loaded)
+                        r.found -> context.contextPluralStringResource(
+                            MR.plurals.browse_anchor_load_complete_found,
+                            r.loaded,
+                            r.loaded,
+                        )
+                        r.done -> context.contextPluralStringResource(
+                            MR.plurals.browse_anchor_load_complete_end,
+                            r.loaded,
+                            r.loaded,
+                        )
+                        else -> context.contextPluralStringResource(
+                            MR.plurals.browse_anchor_load_paused,
+                            r.loaded,
+                            r.loaded,
+                        )
                     },
                 )
             }
@@ -686,8 +701,9 @@ data class BrowseSourceScreen(
                             SmallExtendedFloatingActionButton(
                                 text = {
                                     Text(
-                                        text = stringResource(
-                                            MR.strings.browse_anchor_load_progress,
+                                        text = pluralStringResource(
+                                            MR.plurals.browse_anchor_load_progress,
+                                            anchorLoadState.page,
                                             anchorLoadState.page,
                                             anchorLoadState.loaded,
                                         ),

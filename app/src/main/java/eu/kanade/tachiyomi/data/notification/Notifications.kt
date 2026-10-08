@@ -156,7 +156,7 @@ object Notifications {
                     setShowBadge(false)
                 },
                 buildNotificationChannel(CHANNEL_BROWSE_FETCH, IMPORTANCE_LOW) {
-                    setName(context.stringResource(MR.strings.channel_progress))
+                    setName(context.stringResource(MR.strings.channel_browse_fetch))
                     setGroup(GROUP_DOWNLOADER)
                     setShowBadge(false)
                 },

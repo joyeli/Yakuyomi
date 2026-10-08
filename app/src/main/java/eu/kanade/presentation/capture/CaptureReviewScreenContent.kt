@@ -65,6 +65,7 @@ import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.Badge
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.components.material.padding
+import tachiyomi.presentation.core.i18n.pluralStringResource
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.screens.LoadingScreen
 
@@ -115,7 +116,15 @@ fun CaptureReviewScreenContent(
         AlertDialog(
             onDismissRequest = { showDeleteDialog = false },
             title = { Text(stringResource(MR.strings.capture_review_delete_selected, state.selected.size)) },
-            text = { Text(stringResource(MR.strings.capture_review_delete_confirm, state.selected.size)) },
+            text = {
+                Text(
+                    pluralStringResource(
+                        MR.plurals.capture_review_delete_confirm,
+                        state.selected.size,
+                        state.selected.size,
+                    ),
+                )
+            },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -138,7 +147,11 @@ fun CaptureReviewScreenContent(
         AlertDialog(
             onDismissRequest = { showDiscardDialog = false },
             title = { Text(stringResource(MR.strings.capture_review_discard)) },
-            text = { Text(stringResource(MR.strings.capture_review_discard_confirm, sessionPageCount)) },
+            text = {
+                Text(
+                    pluralStringResource(MR.plurals.capture_review_discard_confirm, sessionPageCount, sessionPageCount),
+                )
+            },
             confirmButton = {
                 TextButton(
                     onClick = {

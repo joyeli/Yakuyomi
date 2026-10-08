@@ -2077,7 +2077,10 @@ fun CaptureScreenContent(
                                             )
                                             Spacer(modifier = Modifier.weight(1f))
                                             Text(
-                                                text = "$tapDelayDraft ms",
+                                                text = stringResource(
+                                                    MR.strings.capture_tap_delay_value,
+                                                    tapDelayDraft,
+                                                ),
                                                 style = MaterialTheme.typography.bodyMedium,
                                             )
                                         }

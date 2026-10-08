@@ -119,4 +119,38 @@
         <item quantity="one">%1$d update failed</item>
         <item quantity="other">%1$d updates failed</item>
     </plurals>
+
+    <!-- Yakuyomi: counts (were plain strings; English needs one/other) -->
+    <plurals name="snapshot_saved">
+        <item quantity="one">Snapshot saved (%1$d entry)</item>
+        <item quantity="other">Snapshot saved (%1$d entries)</item>
+    </plurals>
+    <plurals name="browse_anchor_load_progress">
+        <item quantity="one">%1$d page · %2$d</item>
+        <item quantity="other">%1$d pages · %2$d</item>
+    </plurals>
+    <plurals name="browse_fetch_complete_ok">
+        <item quantity="one">Fetched %1$d title</item>
+        <item quantity="other">Fetched %1$d titles</item>
+    </plurals>
+    <plurals name="browse_anchor_load_complete_found">
+        <item quantity="one">Reached the anchor — %1$d title saved as a snapshot</item>
+        <item quantity="other">Reached the anchor — %1$d titles saved as a snapshot</item>
+    </plurals>
+    <plurals name="browse_anchor_load_complete_end">
+        <item quantity="one">%1$d title saved as a snapshot</item>
+        <item quantity="other">%1$d titles saved as a snapshot</item>
+    </plurals>
+    <plurals name="browse_anchor_load_paused">
+        <item quantity="one">Stopped after repeated failures (source may be blocking) — %1$d title loaded so far. Tap Continue to retry.</item>
+        <item quantity="other">Stopped after repeated failures (source may be blocking) — %1$d titles loaded so far. Tap Continue to retry.</item>
+    </plurals>
+    <plurals name="capture_review_discard_confirm">
+        <item quantity="one">Discard the %1$d page from this capture? This cannot be undone.</item>
+        <item quantity="other">Discard the %1$d pages from this capture? This cannot be undone.</item>
+    </plurals>
+    <plurals name="capture_review_delete_confirm">
+        <item quantity="one">Delete the %1$d selected page? This cannot be undone.</item>
+        <item quantity="other">Delete the %1$d selected pages? This cannot be undone.</item>
+    </plurals>
 </resources>

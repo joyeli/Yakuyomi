@@ -44,6 +44,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import li.joye.yakuyomi.engine.LlmModels
+import li.joye.yakuyomi.engine.LlmProvider
 import li.joye.yakuyomi.engine.LlmProviders
 import tachiyomi.domain.category.interactor.GetCategories
 import tachiyomi.domain.download.service.DownloadPreferences
@@ -57,6 +58,19 @@ import tachiyomi.core.common.i18n.stringResource as ctxStringResource
 import tachiyomi.core.common.preference.Preference as PreferenceData
 
 private typealias Item = Preference.PreferenceItem<out Any, out Any>
+
+/**
+ * 供應商在介面上的名字。引擎的 [LlmProvider.displayName] 有三家是寫死的中文（通義千問／Sakura 自架／自訂），
+ * 英文介面會冒出中文，所以這三家走 MR 字串；其餘是品牌名，照引擎的寫法。
+ */
+@ReadOnlyComposable
+@Composable
+private fun providerLabel(provider: LlmProvider): String = when (provider.id) {
+    "qwen" -> stringResource(MR.strings.pref_translation_provider_qwen)
+    "sakura" -> stringResource(MR.strings.pref_translation_provider_sakura)
+    "custom" -> stringResource(MR.strings.pref_translation_provider_custom)
+    else -> provider.displayName
+}
 
 /** 「改設定後更新已翻章」對話框種類：UPGRADE＝改去字方法(升級重繪)、LAYOUT＝改排版(各章用原去字法重繪、只套新排版)。 */
 private enum class RenderUpdateKind { UPGRADE, LAYOUT }
@@ -108,9 +122,9 @@ object SettingsTranslationScreen : SearchableSettings {
         val providerId by prefs.provider.collectAsState()
         val providerPreset = remember(providerId) { LlmProviders.byId(providerId) }
         val modelVal by prefs.model.collectAsState()
-        val providerEntries = remember {
-            LlmProviders.ALL.associate { it.id to it.displayName }.toImmutableMap()
-        }
+        // 顯示名走 [providerLabel]（引擎的 displayName 有幾家是寫死的中文）。
+        val providerEntries = LlmProviders.ALL.associate { it.id to providerLabel(it) }.toImmutableMap()
+        val providerName = providerLabel(providerPreset)
         var modelPicker by remember { mutableStateOf<List<String>?>(null) }
         var fetchingModels by remember { mutableStateOf(false) }
 
@@ -506,7 +520,7 @@ object SettingsTranslationScreen : SearchableSettings {
                         title = stringResource(MR.strings.pref_translation_api_key),
                         subtitle = stringResource(
                             MR.strings.pref_translation_api_key_summary,
-                            providerPreset.displayName,
+                            providerName,
                         ),
                     ),
                     Preference.PreferenceItem.EditTextPreference(

@@ -72,4 +72,28 @@
     <plurals name="translation_queue_summary">
         <item quantity="other">%1$s 待翻</item>
     </plurals>
+    <plurals name="snapshot_saved">
+        <item quantity="other">已儲存快照（%1$d 本）</item>
+    </plurals>
+    <plurals name="browse_anchor_load_progress">
+        <item quantity="other">%1$d 頁 · %2$d 本</item>
+    </plurals>
+    <plurals name="browse_fetch_complete_ok">
+        <item quantity="other">已擷取 %1$d 本</item>
+    </plurals>
+    <plurals name="browse_anchor_load_complete_found">
+        <item quantity="other">已到錨點 — %1$d 本存成快照</item>
+    </plurals>
+    <plurals name="browse_anchor_load_complete_end">
+        <item quantity="other">%1$d 本存成快照</item>
+    </plurals>
+    <plurals name="browse_anchor_load_paused">
+        <item quantity="other">連續失敗已停止（來源可能封鎖中）— 目前已載入 %1$d 本。點「繼續」重試。</item>
+    </plurals>
+    <plurals name="capture_review_discard_confirm">
+        <item quantity="other">放棄這次截的 %1$d 頁？此動作無法復原。</item>
+    </plurals>
+    <plurals name="capture_review_delete_confirm">
+        <item quantity="other">刪除選取的 %1$d 頁？此動作無法復原。</item>
+    </plurals>
 </resources>

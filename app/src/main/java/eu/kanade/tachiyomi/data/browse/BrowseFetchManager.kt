@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import mihon.domain.source.interactor.UpdateMangaFromRemote
+import tachiyomi.core.common.i18n.pluralStringResource
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.preference.getAndSet
 import tachiyomi.domain.manga.model.Manga
@@ -137,7 +138,7 @@ class BrowseFetchManager(private val context: Context) {
                 if (failedCount > 0) {
                     context.stringResource(MR.strings.browse_fetch_complete_failed, failedCount, total)
                 } else {
-                    context.stringResource(MR.strings.browse_fetch_complete_ok, total)
+                    context.pluralStringResource(MR.plurals.browse_fetch_complete_ok, total, total)
                 },
             )
             setSmallIcon(android.R.drawable.stat_sys_download_done)

@@ -55,12 +55,9 @@
     <string name="action_clear_snapshot">Clear snapshot</string>
     <string name="snapshot_overwrite_confirm">A snapshot already exists for this source. Overwrite it?</string>
     <string name="snapshot_clear_confirm">Clear the saved snapshot for this source?</string>
-    <string name="snapshot_saved">Snapshot saved (%1$d entries)</string>
     <string name="listing_snapshot">Snapshot</string>
     <string name="browse_snapshot_bar_title">Snapshot · %1$d</string>
     <string name="browse_fetching">Fetching %1$d/%2$d</string>
-    <string name="browse_anchor_load_progress">%1$d pages · %2$d</string>
-    <string name="save_snapshot_after_load_confirm">Loaded %1$d entries. Save them as a snapshot so you can review offline next time?</string>
     <string name="action_browse_filter_favorite">In your library</string>
     <string name="action_browse_filter_read">Started reading</string>
     <string name="action_browse_filter_fetched">Details fetched</string>
@@ -69,7 +66,6 @@
     <string name="browse_fetch_running_title">Fetching details</string>
     <string name="browse_fetch_complete_title">Fetch complete</string>
     <string name="browse_fetch_complete_failed">%1$d of %2$d failed</string>
-    <string name="browse_fetch_complete_ok">Fetched %1$d titles</string>
     <string name="browse_fetch_busy">A fetch is already running in the background</string>
     <string name="browse_anchor_load_started">Background loading started — it runs a few pages at a time; check the notification for progress</string>
     <string name="action_scroll_to_anchor">Jump to anchor</string>
@@ -78,9 +74,6 @@
     <string name="browse_anchor_load_running_title">Loading to anchor</string>
     <string name="browse_anchor_load_running_text">%1$s · page %2$d · %3$d loaded</string>
     <string name="browse_anchor_load_complete_title">Auto-load complete</string>
-    <string name="browse_anchor_load_complete_found">Reached the anchor — %1$d titles saved as a snapshot</string>
-    <string name="browse_anchor_load_complete_end">%1$d titles saved as a snapshot</string>
-    <string name="browse_anchor_load_paused">Stopped after repeated failures (source may be blocking) — %1$d titles loaded so far. Tap Continue to retry.</string>
     <string name="label_minutes">%1$d min</string>
     <string name="pref_category_browse_anchor_load">Auto-load to anchor</string>
     <string name="pref_browse_anchor_chunk_pages">Pages per batch</string>
@@ -150,7 +143,7 @@
     <string name="action_mark_as_read">Mark as read</string>
     <string name="action_mark_as_unread">Mark as unread</string>
     <string name="action_mark_previous_as_read">Mark previous as read</string>
-    <string name="action_translate">翻譯</string>
+    <string name="action_translate">Translate</string>
     <string name="action_download">Download</string>
     <string name="action_bookmark">Bookmark chapter</string>
     <string name="action_remove_bookmark">Unbookmark chapter</string>
@@ -272,7 +265,6 @@
     <string name="capture_recapture_action">Replace page %1$d</string>
     <string name="capture_recapture_saved">Replaced page %1$d</string>
     <string name="capture_review_discard">Discard this capture</string>
-    <string name="capture_review_discard_confirm">Discard the %1$d pages from this capture? This cannot be undone.</string>
     <string name="capture_review_cancel">Cancel capture</string>
     <string name="capture_insert_before">Insert before this page</string>
     <string name="capture_insert_after">Insert after this page</string>
@@ -341,7 +333,8 @@
     <string name="capture_tap_point_hint">Drag the marker onto this site\'s next-page button (%1$d%% across · %2$d%% down)</string>
     <string name="capture_tap_point_clear">Clear position</string>
     <string name="capture_tap_delay">Tap delay</string>
-    <string name="capture_tap_delay_summary">Too short taps before the page finishes loading; too long wastes time</string>
+    <string name="capture_tap_delay_value">%1$d ms</string>
+    <string name="capture_tap_delay_summary">Too short and it may tap before the page has loaded; too long wastes time</string>
     <string name="capture_tap_delay_shorter">Shorter</string>
     <string name="capture_tap_delay_longer">Longer</string>
     <string name="capture_target_pages">Pages</string>
@@ -364,7 +357,6 @@
     <string name="capture_save_error_chapter_dir">Could not find or create the chapter folder</string>
     <string name="capture_save_error_write">Could not write the page file</string>
     <string name="capture_review_save_failed">Could not save this chapter, try again</string>
-    <string name="capture_review_delete_confirm">Delete the %1$d selected pages? This cannot be undone.</string>
     <string name="capture_bookmark_remove">Remove favorite</string>
     <string name="capture_bookmark_remove_confirm">Remove “%1$s” from favorites?</string>
     <string name="action_start_downloading_now">Start downloading now</string>
@@ -415,7 +407,7 @@
     <string name="pref_translation_summary">AI translation: on-device detection/OCR/text-removal + cloud LLM</string>
     <!-- Translation onboarding / quickstart -->
     <string name="onboarding_translation_heading">Translate manga as you read</string>
-    <string name="onboarding_translation_description">Yakuyomi can detect, OCR, erase and re-typeset speech bubbles for you. Everything except the translation itself runs on this device — your images never leave it. Only the recognised text is sent to the cloud LLM you choose (your own API key — this can cost money).\n\nTranslation is off by default. Set it up now, or any time under Settings → Translation.</string>
+    <string name="onboarding_translation_description">Yakuyomi can detect, OCR, erase and re-typeset speech bubbles for you. Everything except the translation itself runs on this device — your images never leave it. Only the recognized text is sent to the cloud LLM you choose (your own API key — this can cost money).\n\nTranslation is off by default. Set it up now, or any time under Settings → Translation.</string>
     <string name="onboarding_translation_action">Open translation setup</string>
     <string name="onboarding_highlights_heading">What makes Yakuyomi different</string>
     <string name="onboarding_highlights_search_title">One-hand floating search</string>
@@ -471,7 +463,7 @@
     <string name="enhancements_guide_lb_collapse_title">Single-list collapsible categories</string>
     <string name="enhancements_guide_lb_collapse_desc">Show the whole library as one scrolling list with sticky, tap-to-collapse category headers.</string>
     <string name="enhancements_guide_lb_covertheme_title">Cover-based theme</string>
-    <string name="enhancements_guide_lb_covertheme_desc">Optionally tint a manga\'s detail screen with colours pulled from its cover.</string>
+    <string name="enhancements_guide_lb_covertheme_desc">Optionally tint a manga\'s detail screen with colors pulled from its cover.</string>
     <string name="enhancements_guide_lb_badge_title">Translated badge &amp; filter</string>
     <string name="enhancements_guide_lb_badge_desc">A cover badge counts translated chapters; filter the library by translation state.</string>
     <string name="enhancements_guide_lb_stats_title">Reading &amp; translation statistics</string>
@@ -509,20 +501,20 @@
     <string name="pref_translation_orientation_vertical">Vertical (vertical-first)</string>
     <string name="pref_translation_orientation_horizontal">Horizontal (horizontal-first)</string>
     <string name="pref_translation_inpaint_method">Text removal method</string>
-    <string name="pref_translation_inpaint_boxfill">Fast (box-fill · colour block over art)</string>
+    <string name="pref_translation_inpaint_boxfill">Fast (box-fill · color block over art)</string>
     <string name="pref_translation_inpaint_auto_whole">AI removal (AOT rebuild · high quality)</string>
     <string name="pref_translation_inpaint_auto_tile">AI removal (per-panel)</string>
     <string name="pref_translation_source_lang_subtitle">A prompt hint; leave blank to let the LLM infer. The actual source is decided by the OCR model (BYOM).</string>
-    <string name="pref_translation_lang_japanese">日本語</string>
-    <string name="pref_translation_lang_trad_chinese">繁體中文（台灣）</string>
-    <string name="pref_translation_lang_simp_chinese">简体中文</string>
+    <string name="pref_translation_lang_japanese">Japanese</string>
+    <string name="pref_translation_lang_trad_chinese">Traditional Chinese (Taiwan)</string>
+    <string name="pref_translation_lang_simp_chinese">Simplified Chinese</string>
     <string name="pref_translation_lang_english">English</string>
-    <string name="pref_translation_lang_korean">한국어</string>
-    <string name="pref_translation_lang_spanish">Español</string>
-    <string name="pref_translation_lang_french">Français</string>
-    <string name="pref_translation_lang_german">Deutsch</string>
-    <string name="pref_translation_lang_portuguese">Português</string>
-    <string name="pref_translation_lang_russian">Русский</string>
+    <string name="pref_translation_lang_korean">Korean</string>
+    <string name="pref_translation_lang_spanish">Spanish</string>
+    <string name="pref_translation_lang_french">French</string>
+    <string name="pref_translation_lang_german">German</string>
+    <string name="pref_translation_lang_portuguese">Portuguese</string>
+    <string name="pref_translation_lang_russian">Russian</string>
     <string name="pref_translation_lang_auto_detect">Auto-detect</string>
     <string name="pref_category_tracking">Tracking</string>
     <string name="pref_category_advanced">Advanced</string>
@@ -894,6 +886,7 @@
     <string name="pref_browse_default_to_latest_summary">Open sources directly on their Latest list and hide the Latest button in the source list</string>
     <string name="pref_browse_load_interval">Minimum page-load interval</string>
     <string name="pref_browse_load_interval_summary">Throttle browsing pagination to avoid hammering the source (helps when filters hide most results)</string>
+    <string name="pref_browse_load_interval_seconds">%1$d s</string>
 
       <!-- Data and storage section -->
     <string name="pref_storage_location">Storage location</string>
@@ -1457,6 +1450,9 @@
     <string name="pref_translation_remove_after_read_summary">%s (synced with download settings)</string>
     <string name="pref_translation_provider">LLM provider</string>
     <string name="pref_translation_provider_summary">%s · keys kept per provider</string>
+    <string name="pref_translation_provider_qwen">Qwen (Tongyi Qianwen)</string>
+    <string name="pref_translation_provider_sakura">Sakura (self-hosted)</string>
+    <string name="pref_translation_provider_custom">Custom (OpenAI-compatible)</string>
     <string name="pref_translation_api_base">API base</string>
     <string name="pref_translation_api_base_summary">Self-hosted / custom endpoint, e.g. http://192.168.1.5:8080/v1</string>
     <string name="pref_translation_api_key">API key (BYOK)</string>
@@ -1493,7 +1489,7 @@
     <string name="pref_translation_thread_count">%d threads</string>
     <string name="pref_translation_keep_materials">Keep re-render materials</string>
     <string name="pref_translation_keep_materials_summary">Saves the original + mask + text regions per page so you can re-render with another removal method later (no re-OCR/translate); roughly doubles storage</string>
-    <string name="pref_translation_color_mode">Text colour</string>
+    <string name="pref_translation_color_mode">Text color</string>
     <string name="pref_translation_color_auto">Auto (black/white by background)</string>
     <string name="pref_translation_color_mono">Always black with a white outline</string>
     <string name="pref_translation_font_border">Text outline</string>
@@ -1520,7 +1516,7 @@
     <string name="pref_translation_min_prob">OCR confidence threshold</string>
     <string name="pref_translation_min_prob_desc">0–1. Lines below this are dropped; too low keeps noise/garbage, too high drops text</string>
     <string name="pref_translation_ignore_sfx">Skip sound effects (SFX)</string>
-    <string name="pref_translation_ignore_sfx_summary">Skips coloured / decorative sound effects and leaves them untranslated (keeps the original flavour). It only skips translating them — they stay on the page, they aren\'t erased.</string>
+    <string name="pref_translation_ignore_sfx_summary">Skips colored / decorative sound effects and leaves them untranslated (keeps the original flavor). It only skips translating them — they stay on the page, they aren\'t erased.</string>
     <!-- Yakuyomi: advanced badge + advanced recognition params (OCR crop / detector) -->
     <string name="pref_advanced_badge">Advanced</string>
     <string name="pref_translation_strip_pad">OCR crop padding px</string>
@@ -1545,15 +1541,15 @@
     <string name="pref_translation_temperature">LLM temperature</string>
     <string name="pref_translation_temperature_desc">LLM sampling temperature; 0.0–1.0. Lower (toward 0) is more consistent and literal; higher (toward 1) is more flexible but can drift from the original. Most people don\'t need to change it</string>
     <string name="pref_translation_thinking">Thinking mode</string>
-    <string name="pref_translation_thinking_summary">Let the model think before it answers. Off by default: most newer models think by default, but line-by-line manga translation gains very little from it while getting noticeably slower and using several times the tokens (so it costs more). Only turn it on if translation quality is clearly falling short. Not every provider can turn it off completely (OpenAI\'s o-series can only be dialled to its lowest setting; Gemini 3 and Groq\'s GPT-OSS can only be reduced).</string>
+    <string name="pref_translation_thinking_summary">Let the model think before it answers. Off by default: most newer models think by default, but line-by-line manga translation gains very little from it while getting noticeably slower and using several times the tokens (so it costs more). Only turn it on if translation quality is clearly falling short. Not every provider can turn it off completely (OpenAI\'s o-series can only be dialed to its lowest setting; Gemini 3 and Groq\'s GPT-OSS can only be reduced).</string>
     <string name="pref_translation_diagnostic_log">Diagnostic log</string>
     <string name="pref_translation_diagnostic_log_summary">Record each translation and night-read stage (with per-page timings) to a private file, to catch native or out-of-memory crashes that logcat and the built-in crash log miss. API keys are never recorded. Affects performance — only turn on when you need to diagnose.</string>
     <string name="pref_translation_share_diagnostic_log">Share diagnostic log</string>
     <string name="pref_translation_share_diagnostic_log_summary">Send the recorded log (previous and current launch), plus the system crash dump from the latest native crash if one happened in the last 7 days, so problems can be investigated</string>
     <string name="pref_translation_diagnostic_log_empty">No diagnostic log yet</string>
-    <string name="model_role_detect">Detect</string>
+    <string name="model_role_detect">Detector</string>
     <string name="model_role_ocr">OCR</string>
-    <string name="model_role_inpaint">Remove</string>
+    <string name="model_role_inpaint">Text removal</string>
     <!-- Yakuyomi: model auto-download (manager + notifications) -->
     <string name="model_dl_preparing">Preparing…</string>
     <string name="model_dl_downloading">Downloading %s</string>
@@ -1564,6 +1560,8 @@
     <string name="model_dl_notif_done">Models downloaded</string>
     <string name="model_dl_notif_done_text">All 3 models are ready</string>
     <string name="model_dl_notif_failed">Model download failed</string>
+    <!-- Yakuyomi: notification channel names (Downloader group) -->
+    <string name="channel_browse_fetch">Browse fetching</string>
     <!-- Yakuyomi: engine status + preload -->
     <string name="engine_unavailable">Engine unavailable (missing models/key or build failed)</string>
     <string name="translate_exception">Translation exception</string>

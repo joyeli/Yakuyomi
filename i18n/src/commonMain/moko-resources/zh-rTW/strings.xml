@@ -315,7 +315,6 @@
     <string name="capture_recapture_action">取代第 %1$d 頁</string>
     <string name="capture_recapture_saved">已取代第 %1$d 頁</string>
     <string name="capture_review_discard">放棄這次截圖</string>
-    <string name="capture_review_discard_confirm">放棄這次截的 %1$d 頁？此動作無法復原。</string>
     <string name="capture_review_cancel">取消擷取</string>
     <string name="capture_insert_before">在此頁前插入</string>
     <string name="capture_insert_after">在此頁後插入</string>
@@ -384,6 +383,7 @@
     <string name="capture_tap_point_hint">把標記拖到本站「下一頁」按鈕上（橫 %1$d%% · 縱 %2$d%%）</string>
     <string name="capture_tap_point_clear">清除位置</string>
     <string name="capture_tap_delay">點擊延遲</string>
+    <string name="capture_tap_delay_value">%1$d 毫秒</string>
     <string name="capture_tap_delay_summary">太短會在頁面還沒載完就點、太長浪費時間</string>
     <string name="capture_tap_delay_shorter">縮短</string>
     <string name="capture_tap_delay_longer">延長</string>
@@ -407,7 +407,6 @@
     <string name="capture_save_error_chapter_dir">找不到（或建不了）章節資料夾</string>
     <string name="capture_save_error_write">頁面寫入失敗</string>
     <string name="capture_review_save_failed">儲存失敗，請再試一次</string>
-    <string name="capture_review_delete_confirm">刪除選取的 %1$d 頁？此動作無法復原。</string>
     <string name="capture_bookmark_remove">移除最愛</string>
     <string name="capture_bookmark_remove_confirm">把「%1$s」從我的最愛移除？</string>
     <string name="pref_category_library">書櫃</string>
@@ -816,7 +815,7 @@
     <string name="label_translated_chapters">已翻章數</string>
     <string name="label_translated_pages">已翻頁數</string>
     <string name="label_tokens_used">Token 用量</string>
-    <string name="label_token_breakdown">Prompt %1$s · Completion %2$s</string>
+    <string name="label_token_breakdown">輸入 %1$s · 輸出 %2$s</string>
     <string name="label_stats_period_today">今天</string>
     <string name="label_stats_period_week">近 7 天</string>
     <string name="label_stats_period_month">近 30 天</string>
@@ -842,6 +841,7 @@
     <string name="pref_browse_default_to_latest_summary">點來源直接進「最新」清單，並隱藏來源列表上的「最新」按鈕</string>
     <string name="pref_browse_load_interval">翻頁最小間隔</string>
     <string name="pref_browse_load_interval_summary">節流瀏覽翻頁速度，避免狂打來源（篩選濾掉大量結果時特別有用）</string>
+    <string name="pref_browse_load_interval_seconds">%1$d 秒</string>
     <string name="action_copy_to_clipboard">複製</string>
     <string name="action_update_category">更新類別</string>
     <string name="split_tall_images">分割過高的圖片</string>
@@ -1091,6 +1091,9 @@
     <string name="pref_translation_remove_after_read_summary">%s（與下載設定連動）</string>
     <string name="pref_translation_provider">LLM 供應商</string>
     <string name="pref_translation_provider_summary">%s · 切換保留各家金鑰</string>
+    <string name="pref_translation_provider_qwen">通義千問 Qwen</string>
+    <string name="pref_translation_provider_sakura">Sakura（自架）</string>
+    <string name="pref_translation_provider_custom">自訂（OpenAI 相容）</string>
     <string name="pref_translation_api_base">API base</string>
     <string name="pref_translation_api_base_summary">自架 / 自訂端點，例 http://192.168.1.5:8080/v1</string>
     <string name="pref_translation_api_key">API key (BYOK)</string>
@@ -1299,12 +1302,9 @@
     <string name="action_clear_snapshot">清除快照</string>
     <string name="snapshot_overwrite_confirm">這個來源已有快照，要覆蓋嗎？</string>
     <string name="snapshot_clear_confirm">清除這個來源已儲存的快照？</string>
-    <string name="snapshot_saved">已儲存快照（%1$d 本）</string>
     <string name="listing_snapshot">快照</string>
     <string name="browse_snapshot_bar_title">快照 · %1$d 本</string>
     <string name="browse_fetching">擷取中 %1$d/%2$d</string>
-    <string name="browse_anchor_load_progress">%1$d 頁 · %2$d 本</string>
-    <string name="save_snapshot_after_load_confirm">已載入 %1$d 本。要存成快照，下次離線重看嗎？</string>
     <string name="action_browse_filter_favorite">已收藏</string>
     <string name="action_browse_filter_read">已開卷</string>
     <string name="action_browse_filter_fetched">已擷取詳情</string>
@@ -1313,7 +1313,6 @@
     <string name="browse_fetch_running_title">擷取詳情中</string>
     <string name="browse_fetch_complete_title">擷取完成</string>
     <string name="browse_fetch_complete_failed">%2$d 本中 %1$d 本失敗</string>
-    <string name="browse_fetch_complete_ok">已擷取 %1$d 本</string>
     <string name="browse_fetch_busy">已有擷取在背景執行，請先中止</string>
     <string name="browse_anchor_load_started">背景載入已開始 — 會一次抓幾頁慢慢跑，進度看通知</string>
     <string name="action_scroll_to_anchor">滑到錨點</string>
@@ -1322,9 +1321,6 @@
     <string name="browse_anchor_load_running_title">載入到錨點中</string>
     <string name="browse_anchor_load_running_text">%1$s · 第 %2$d 頁 · 已載 %3$d 本</string>
     <string name="browse_anchor_load_complete_title">自動載入完成</string>
-    <string name="browse_anchor_load_complete_found">已到錨點 — %1$d 本存成快照</string>
-    <string name="browse_anchor_load_complete_end">%1$d 本存成快照</string>
-    <string name="browse_anchor_load_paused">連續失敗已停止（來源可能封鎖中）— 目前已載入 %1$d 本。點「繼續」重試。</string>
     <string name="label_minutes">%1$d 分鐘</string>
     <string name="pref_category_browse_anchor_load">自動載入到錨點</string>
     <string name="pref_browse_anchor_chunk_pages">每批頁數</string>
@@ -1346,7 +1342,7 @@
     <string name="pref_translation_inpaint_auto_tile">AI 去字（逐格）</string>
     <string name="pref_translation_source_lang_subtitle">Prompt 標註；留空＝讓 LLM 自行判斷。實際來源由 OCR 模型決定（BYOM）。</string>
     <string name="pref_translation_lang_auto_detect">自動偵測</string>
-    <string name="model_role_detect">偵測</string>
+    <string name="model_role_detect">偵測器</string>
     <string name="model_role_ocr">OCR</string>
     <string name="model_role_inpaint">去字</string>
     <string name="model_dl_preparing">準備中…</string>
@@ -1358,6 +1354,7 @@
     <string name="model_dl_notif_done">模型下載完成</string>
     <string name="model_dl_notif_done_text">3 顆模型已就緒</string>
     <string name="model_dl_notif_failed">模型下載失敗</string>
+    <string name="channel_browse_fetch">探索背景擷取</string>
     <string name="engine_unavailable">引擎不可用（缺模型/缺 key 或建構失敗）</string>
     <string name="translate_exception">翻譯例外</string>
     <string name="engine_preload_desc">翻譯引擎</string>
