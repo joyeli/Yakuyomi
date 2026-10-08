@@ -23,6 +23,13 @@ Before you start, please note that the ability to use following technologies is 
 
 - [Android Studio](https://developer.android.com/studio)
 - Emulator or phone with developer options enabled to test changes.
+- JDK 17+, NDK `28.2.13676358` and CMake `3.22.1` — the engine is a git submodule with native code; see [Building](README.md#building) for the recursive clone and SDK setup.
+
+## Where changes go
+
+- On-device translation engine (detection, OCR, text removal, typesetting, LLM calls) and the Android glue for night reading: [joyeli/yakuyomi-engine](https://github.com/joyeli/yakuyomi-engine).
+- Night-reading rendering rules: [joyeli/yakuyomi-nightread](https://github.com/joyeli/yakuyomi-nightread).
+- Everything else — the app, settings, queue, UI strings: this repo.
 
 ## Getting help
 
