@@ -168,7 +168,8 @@ class TranslationEngineService(private val context: Context) {
      * 預暖機：先把引擎建好（不翻任何頁），讓第一章/第一頁瞬間就緒。best-effort，建不起來只記 log、不丟例外。
      * 由即時翻譯開關打開時呼叫（見 [SettingsTranslationScreen]）；不呼叫也無妨——首次 [translatePage] 會 lazy 建。
      *
-     * @param methodRaw 預暖用的去字法（預設＝目前全域去字偏好）；之後 [translatePage] 帶不同去字法仍會按簽章重建。
+     * @param methodRaw 預暖用的去字法（預設＝目前全域去字偏好；為即時翻譯預暖走 [warmUpAsync] 的 forLive，用即時翻譯的去字法）；
+     * 之後 [translatePage] 帶不同去字法仍會按簽章重建。
      */
     suspend fun warmUp(methodRaw: String = translationPreferences.inpaintMethod.get()) = mutex.withLock {
         ensureEngine(methodRaw)
@@ -298,9 +299,21 @@ class TranslationEngineService(private val context: Context) {
         }
     }
 
-    /** [warmUp] 的 fire-and-forget 版（背景 IO、不阻塞呼叫端）：給 UI 即時翻開關用，避免在主執行緒上載 ~100MB → ANR/crash。 */
-    fun warmUpAsync() {
-        scope.launch { runCatching { warmUp() } }
+    /**
+     * [warmUp] 的 fire-and-forget 版（背景 IO、不阻塞呼叫端）：給 UI 即時翻開關用，避免在主執行緒上載 ~100MB → ANR/crash。
+     *
+     * [forLive]＝為即時翻譯預暖（預設：即時翻譯開著就是）：用即時翻譯的去字法（[TranslationPreferences.liveInpaintMethod]）
+     * 建——即時翻譯的頁帶這個去字法進來，用全域去字法建的話兩者設得不同時第一頁就整個重建、預暖白做（2026-10-07 審查）。
+     * 否則用全域去字法（佇列的下載／手動翻）。去字法在呼叫當下讀：即時翻譯開關的 onValueChanged 在偏好寫入**之前**跑，那裡要明講
+     * `forLive = true`。
+     */
+    fun warmUpAsync(forLive: Boolean = translationPreferences.liveTranslate.get()) {
+        val method = if (forLive) {
+            translationPreferences.liveInpaintMethod.get()
+        } else {
+            translationPreferences.inpaintMethod.get()
+        }
+        scope.launch { runCatching { warmUp(method) } }
     }
 
     /** [shutdown] 的 fire-and-forget 版（背景 IO、不阻塞呼叫端）：給 UI 即時翻開關用，避免在主執行緒上等鎖/關閉 → ANR/crash。 */

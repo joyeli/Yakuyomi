@@ -83,6 +83,7 @@ import eu.kanade.tachiyomi.crash.NativeCrashReporter
 import eu.kanade.tachiyomi.data.cache.ChapterCache
 import eu.kanade.tachiyomi.data.download.DownloadCache
 import eu.kanade.tachiyomi.data.notification.NotificationReceiver
+import eu.kanade.tachiyomi.data.translation.StartupEnginePrewarm
 import eu.kanade.tachiyomi.data.updater.AppUpdateChecker
 import eu.kanade.tachiyomi.extension.api.ExtensionApi
 import eu.kanade.tachiyomi.ui.base.activity.BaseActivity
@@ -137,7 +138,12 @@ class MainActivity : BaseActivity() {
     private val getIncognitoState: GetIncognitoState by injectLazy()
 
     // To be checked by splash screen. If true then splash screen will be removed.
+    // Yakuyomi：同一個訊號也告訴 StartupEnginePrewarm「第一個畫面出來了」，翻譯引擎預暖排在它之後
     var ready = false
+        set(value) {
+            field = value
+            if (value) StartupEnginePrewarm.onFirstScreenReady()
+        }
 
     private var navigator: Navigator? = null
 
@@ -287,6 +293,12 @@ class MainActivity : BaseActivity() {
                 chapterCache.clear()
             }
         }
+    }
+
+    override fun onDestroy() {
+        // Yakuyomi：之後再開是新的 MainActivity，預暖要等它自己的第一個畫面（只是退到背景不重設，回來不用再等訊號）
+        StartupEnginePrewarm.onScreenGone()
+        super.onDestroy()
     }
 
     override fun onProvideAssistContent(outContent: AssistContent) {

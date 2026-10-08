@@ -37,6 +37,7 @@ import eu.kanade.tachiyomi.data.coil.MangaCoverKeyer
 import eu.kanade.tachiyomi.data.coil.MangaKeyer
 import eu.kanade.tachiyomi.data.coil.TachiyomiImageDecoder
 import eu.kanade.tachiyomi.data.notification.Notifications
+import eu.kanade.tachiyomi.data.translation.StartupEnginePrewarm
 import eu.kanade.tachiyomi.data.translation.TranslationEngineService
 import eu.kanade.tachiyomi.data.translation.TranslationManager
 import eu.kanade.tachiyomi.di.AppModule
@@ -169,18 +170,16 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         // Updates widget update
         WidgetManager(Injekt.get(), Injekt.get()).apply { init(scope) }
 
-        // 即時翻譯開著且引擎就緒（key + 模型）→ app 一啟動就背景預暖引擎（~100MB ONNX），
-        // 避免進第一章翻第一頁時才現載模型而特別久。fire-and-forget（背景 IO scope、不卡啟動）；
+        // 即時翻譯的引擎預暖**不在這裡做**：背景工作（WorkManager、廣播、前景服務）把行程叫起來時也會跑到這裡，
+        // 以前照樣預暖、白吃約 15 秒 CPU 與 1.3–2 GB 原生記憶體。改成使用者把 app 開到前景、第一個畫面出來後才預暖
+        // （見 StartupEnginePrewarm，由下面的 onStart／onStop 與 MainActivity.ready 推動）；這裡只記一行原因。
         // 釋放仍由原機制管（即時翻關 / onTrimMemory / 佇列空且即時翻關）。
         runCatching {
-            val translationEngineService = Injekt.get<TranslationEngineService>()
             val translationPrefs = Injekt.get<TranslationPreferences>()
-            if (translationPrefs.translationMasterEnabled.get() &&
-                translationPrefs.liveTranslate.get() &&
-                translationEngineService.isReady()
-            ) {
-                translationEngineService.warmUpAsync()
-            }
+            StartupEnginePrewarm.onProcessStart(
+                masterEnabled = translationPrefs.translationMasterEnabled.get(),
+                liveTranslate = translationPrefs.liveTranslate.get(),
+            )
         }
 
         // 翻譯佇列持久化：app 啟動時還原上次沒翻完的章（行程被殺 / 重開機後自動續傳，對照下載 DownloadStore.restore）。
@@ -254,10 +253,13 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
 
     override fun onStart(owner: LifecycleOwner) {
         SecureActivityDelegate.onApplicationStart()
+        // Yakuyomi：使用者把 app 帶到前景 → 開始等第一個畫面，之後才預暖翻譯引擎（背景行程收不到這個事件）
+        runCatching { StartupEnginePrewarm.onForeground() }
     }
 
     override fun onStop(owner: LifecycleOwner) {
         SecureActivityDelegate.onApplicationStopped()
+        runCatching { StartupEnginePrewarm.onBackground() }
     }
 
     /**

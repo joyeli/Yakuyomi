@@ -187,7 +187,7 @@ object SettingsTranslationScreen : SearchableSettings {
                         onClick = {
                             prefs.privacyAcknowledged.set(true)
                             pending.set(true)
-                            if (pending === prefs.liveTranslate) engineService.warmUpAsync()
+                            if (pending === prefs.liveTranslate) engineService.warmUpAsync(forLive = true)
                             pendingEnableSwitch = null
                         },
                     ) { Text(text = stringResource(MR.strings.action_ok)) }
@@ -370,7 +370,8 @@ object SettingsTranslationScreen : SearchableSettings {
                                     false
                                 }
                                 enabled -> {
-                                    engineService.warmUpAsync()
+                                    // 偏好要等這裡回 true 才寫入：明講為即時翻譯預暖（用即時翻譯的去字法）
+                                    engineService.warmUpAsync(forLive = true)
                                     true
                                 }
                                 else -> {
