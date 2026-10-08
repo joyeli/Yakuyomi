@@ -38,6 +38,12 @@ val yakuyomiKeystore = Properties().apply {
 android {
     namespace = "eu.kanade.tachiyomi"
 
+    // Yakuyomi：mihon 的建置外掛把 ndkVersion 設成 gradle/mihon.versions.toml 的 android-ndk（29.x），
+    // 但我們只裝引擎釘的那版 → AGP 找不到 llvm-strip，原生庫整包不 strip（只印 "Unable to strip..."、build 照樣成功）。
+    // 這裡改成跟 yakuyomi-engine/inference-core/build.gradle.kts 的 ndkVersion 同一版（推論核心要編原生碼，這版一定有裝）。
+    // merge 上游時這行要留著；引擎換 NDK 版本時這行要跟著改。
+    ndkVersion = "28.2.13676358"
+
     defaultConfig {
         applicationId = "li.joye.yakuyomi"
 
@@ -75,6 +81,10 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
 
+            // Yakuyomi：strip 掉的除錯資訊另存成 app/build/outputs/native-debug-symbols/release/native-debug-symbols.zip
+            // （原生 crash 要靠它在電腦上符號化；發版時連同 APK 一起存到 repo 外，build 目錄會被下次建置蓋掉）。
+            ndk { debugSymbolLevel = "FULL" }
+
             // 有 keystore.properties → 用 release 簽章；否則退回 debug（不擋 CI/他人建置）。
             signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
 
@@ -85,8 +95,11 @@ android {
 
         val commonMatchingFallbacks = listOf(release.name)
 
+        // Yakuyomi：下面三種都 initWith(release)，但 AGP 的 initWith 不會把 ndk.debugSymbolLevel 帶過來
+        // （沒設的話非 debuggable 預設只留符號表，查不到 ncnn_jni.cpp 行號），所以各自再設一次。
         create("foss") {
             initWith(release)
+            ndk { debugSymbolLevel = "FULL" }
 
             applicationIdSuffix = ".foss"
 
@@ -94,6 +107,7 @@ android {
         }
         create("preview") {
             initWith(release)
+            ndk { debugSymbolLevel = "FULL" }
 
             applicationIdSuffix = ".debug"
 
@@ -105,6 +119,7 @@ android {
         }
         create("benchmark") {
             initWith(release)
+            ndk { debugSymbolLevel = "FULL" }
 
             versionNameSuffix = "-benchmark"
             applicationIdSuffix = ".benchmark"
@@ -197,7 +212,11 @@ baselineProfile {
 }
 
 dependencies {
-    implementation("li.joye.yakuyomi:engine:0.1.0") // Yakuyomi 翻譯引擎（composite build：includeBuild 替換）
+    // Yakuyomi 引擎三模組（composite build：includeBuild 以 group:name 替換，版號不看）。翻譯與夜讀互不依賴，兩個都要寫；
+    // 共用核心（EngineTrace、NcnnFlavor、Detector、ModelDownloader…）兩者都以 api 帶進來，app 直接用到所以寫明。
+    implementation("li.joye.yakuyomi:engine:0.1.0") // 翻譯（OCR／去字／排版／LLM／Pipeline）
+    implementation("li.joye.yakuyomi:nightread-android:0.1.0") // 夜讀（NightReadRenderer＋人物分割；api 帶 nightread 函式庫）
+    implementation("li.joye.yakuyomi:inference-core:0.1.0") // 共用推論核心（NCNN、DBNet 偵測、分群、模型下載）
 
     implementation(projects.i18n)
     implementation(projects.core.archive)

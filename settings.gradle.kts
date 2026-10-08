@@ -26,7 +26,8 @@ dependencyResolutionManagement {
     }
 }
 
-// Yakuyomi：以 composite build 接入翻譯引擎（submodule yakuyomi-engine）→ app 依賴 li.joye.yakuyomi:engine
+// Yakuyomi：以 composite build 接入引擎 repo（submodule yakuyomi-engine）→ app 依賴 li.joye.yakuyomi:engine（翻譯）、
+// :nightread-android（夜讀）、:inference-core（共用核心）；三者都設了 group，自動替換、不必手寫 dependencySubstitution
 includeBuild("yakuyomi-engine")
 
 enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
