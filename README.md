@@ -53,9 +53,9 @@ Everything below is on top of stock mihon — at a glance, what you get here tha
 - **Models** — download the night models in Settings › Night reading: two character-segmentation models, about **147 MB**; the text detector is shared with translation (about 153 MB more if you haven't downloaded the translation models). These two are **not** GPL-3.0 and are redistributed for research / non-commercial use only — see [LICENSE-YAKUYOMI.md](LICENSE-YAKUYOMI.md). Night pages work for chapters downloaded as image folders, not CBZ archives.
 
 <div align="center">
-<img src="./.github/assets/yakuyomi-nightread.gif" alt="Night reading: the same page switching between the original and its night version — black paper, gutters and bubbles, light text, dimmed artwork" height="440" hspace="6"/>
+<img src="./.github/assets/yakuyomi-nightread.gif" alt="Night reading: the floating button switches the page from day to night (Standard), then to More, then back to day" height="440" hspace="6"/>
 <br>
-<sub><b>Night reading</b> — the page itself turns dark: paper, gutters and bubbles go black, text stays readable, characters are only dimmed.</sub>
+<sub><b>Night reading</b> — the page itself turns dark: paper, gutters and bubbles go black, text stays readable, characters are only dimmed. The floating button switches day / night and <i>Standard</i> / <i>More</i>.</sub>
 </div>
 
 **Capture**

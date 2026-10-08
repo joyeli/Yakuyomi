@@ -53,9 +53,9 @@ Yakuyomi 是 [mihon](https://github.com/mihonapp/mihon) 的 fork，邊下載 / �
 - **模型** — 在 設定 › 夜讀 下載夜讀模型：人物分割兩顆，約 **147 MB**；文字偵測器與翻譯共用（還沒下載翻譯模型的話，會另外帶上約 153 MB 的偵測器）。這兩顆**不是** GPL-3.0，僅供研究／非商業用途散布——見 [LICENSE-YAKUYOMI.md](LICENSE-YAKUYOMI.md)。夜讀只支援下載成圖片資料夾的章，不支援 CBZ 壓縮檔。
 
 <div align="center">
-<img src="./.github/assets/yakuyomi-nightread.gif" alt="夜讀：同一頁在原圖與夜讀版之間切換——紙面、格溝、對話框變黑，字是亮的，畫面調暗" height="440" hspace="6"/>
+<img src="./.github/assets/yakuyomi-nightread.gif" alt="夜讀：用懸浮鈕把頁面從日間切到夜讀「標準」，再切到「更多」，最後回到日間" height="440" hspace="6"/>
 <br>
-<sub><b>夜讀</b>——頁面本身變暗：紙面、格溝、對話框變黑，字照樣清楚，人物只是調暗。</sub>
+<sub><b>夜讀</b>——頁面本身變暗：紙面、格溝、對話框變黑，字照樣清楚，人物只是調暗。懸浮鈕切換日夜與「標準」／「更多」。</sub>
 </div>
 
 **擷取**
