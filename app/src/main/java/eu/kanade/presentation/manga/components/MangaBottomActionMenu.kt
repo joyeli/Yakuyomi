@@ -27,6 +27,7 @@ import androidx.compose.material.icons.automirrored.outlined.Label
 import androidx.compose.material.icons.outlined.AutoFixHigh
 import androidx.compose.material.icons.outlined.BookmarkAdd
 import androidx.compose.material.icons.outlined.BookmarkRemove
+import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DoneAll
 import androidx.compose.material.icons.outlined.Download
@@ -79,6 +80,8 @@ fun MangaBottomActionMenu(
     onMarkPreviousAsReadClicked: (() -> Unit)? = null,
     onTranslateClicked: (() -> Unit)? = null,
     onReRenderClicked: (() -> Unit)? = null,
+    onNightRenderClicked: (() -> Unit)? = null,
+    nightReadEnabled: Boolean = true, // 夜讀表層開關：關 → 月亮鈕隱藏（即使呼叫端給了 onNightRenderClicked）
     onDownloadClicked: (() -> Unit)? = null,
     onDeleteClicked: (() -> Unit)? = null,
 ) {
@@ -94,7 +97,9 @@ fun MangaBottomActionMenu(
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
         ) {
             val haptic = LocalHapticFeedback.current
-            val confirm = remember { mutableStateListOf(false, false, false, false, false, false, false, false, false) }
+            val confirm = remember {
+                mutableStateListOf(false, false, false, false, false, false, false, false, false, false)
+            }
             var resetJob by remember { mutableStateOf<Job?>(null) }
             val onLongClickItem: (Int) -> Unit = { toConfirmIndex ->
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -176,6 +181,16 @@ fun MangaBottomActionMenu(
                         toConfirm = confirm[8],
                         onLongClick = { onLongClickItem(8) },
                         onClick = onReRenderClicked,
+                    )
+                }
+                if (onNightRenderClicked != null && nightReadEnabled) {
+                    // 夜讀版：把已下載章重繪成「白底變暗、人物原樣」另存夜讀檔（離線、不翻譯）；舊章補做用。
+                    Button(
+                        title = stringResource(MR.strings.action_nightread),
+                        icon = Icons.Outlined.DarkMode,
+                        toConfirm = confirm[9],
+                        onLongClick = { onLongClickItem(9) },
+                        onClick = onNightRenderClicked,
                     )
                 }
                 if (onDownloadClicked != null) {

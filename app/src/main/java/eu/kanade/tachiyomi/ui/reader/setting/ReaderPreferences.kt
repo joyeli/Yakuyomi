@@ -87,6 +87,21 @@ class ReaderPreferences(
 
     val readerTheme: Preference<Int> = preferenceStore.getInt("pref_reader_theme_key", 1)
 
+    /**
+     * Yakuyomi 夜讀模式（純顯示層開關）：開著時，有夜讀版（章節夾 `.yakuyomi/` 裡的夜讀檔，檔名見 `NightPages`；
+     * 由夜讀佇列離線產生）的頁改顯示夜讀版；沒有夜讀版的頁照常顯示原圖（永不擋讀、不顯示比原圖更糟的東西）。
+     * 只被 loader 的 stream lambda 在**每次解碼時**讀取、不改任何檔案 → 切換後對已載入頁 `reload()` 即立即生效。
+     * 預設關（夜讀版本身也是選配、預設不產）。
+     */
+    val nightReadMode: Preference<Boolean> = preferenceStore.getBoolean("yaku_night_read_mode", false)
+
+    /**
+     * Yakuyomi 夜讀懸浮鈕的位置：`<side>` 或 `<side>:<yFrac>`（side＝`L`／`R`，物理左右、不隨閱讀方向翻轉；yFrac＝可移動
+     * 範圍內的垂直比例 0..1，用比例存，旋轉螢幕或折疊機展開後位置仍合理）。預設 `R`＝右緣、使用者拖曳前沒有 yFrac，
+     * 用「距底 96dp」規則。解析／換算見 `NightFabPosition`。
+     */
+    val nightFabPosition: Preference<String> = preferenceStore.getString("yaku_night_fab_position", "R")
+
     val alwaysShowChapterTransition: Preference<Boolean> = preferenceStore.getBoolean(
         "always_show_chapter_transition",
         true,

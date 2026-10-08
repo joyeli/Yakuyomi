@@ -179,6 +179,10 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
             .filterIsInstance(PagerPageHolder::class.java)
             .firstOrNull { it.item == page }
 
+    /** Yakuyomi：畫面上看得到的頁（對開 pair＝兩頁，其餘＝代表頁本身），給夜讀換檔位的「沒有差異」提示用。 */
+    private fun visiblePages(item: Any?, page: ReaderPage): List<ReaderPage> =
+        (item as? PagePair)?.let { listOfNotNull(it.first, it.second) } ?: listOf(page)
+
     /** Yakuyomi：把 adapter item（[ReaderPage] / [PagePair] / 其他）取出代表頁；對開 pair 取較後那頁。 */
     private fun itemToPage(item: Any?): ReaderPage? = when (item) {
         is PagePair -> item.representative
@@ -211,7 +215,7 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
             }
             currentPage = item
             when {
-                page != null -> onReaderPageSelected(page, allowPreload, forward)
+                page != null -> onReaderPageSelected(page, allowPreload, forward, visiblePages(item, page))
                 item is ChapterTransition -> onTransitionSelected(item)
             }
         }
@@ -240,10 +244,15 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * Called when a [ReaderPage] is marked as active. It notifies the
      * activity of the change and requests the preload of the next chapter if this is the last page.
      */
-    private fun onReaderPageSelected(page: ReaderPage, allowPreload: Boolean, forward: Boolean) {
+    private fun onReaderPageSelected(
+        page: ReaderPage,
+        allowPreload: Boolean,
+        forward: Boolean,
+        visible: List<ReaderPage> = listOf(page),
+    ) {
         val pages = page.chapter.pages ?: return
         logcat { "onReaderPageSelected: ${page.number}/${pages.size}" }
-        activity.onPageSelected(page)
+        activity.onPageSelected(page, visible)
 
         // Notify holder of page change
         getPageHolder(page)?.onPageSelected(forward)

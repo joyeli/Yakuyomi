@@ -11,10 +11,13 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.AutoFixHigh
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Photo
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Translate
+import androidx.compose.material.icons.outlined.Update
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
@@ -49,6 +52,15 @@ fun ReaderPageActionsDialog(
     onStopChapterTranslate: (() -> Unit)? = null,
     // 當前章是否正在翻譯佇列（QUEUE/TRANSLATING）：true → 顯示「中止」、false → 顯示「開始」（XOR）。
     isChapterTranslating: Boolean = false,
+    // 日常／夜讀切換與檔位已移到閱讀器的常駐懸浮鈕（ReaderNightFloatingControl），這裡只剩「產生」類動作。
+    /** 「為這一話產生夜讀版」（非翻譯本的夜讀入口）；null＝不顯示（已有夜讀版／已在佇列／夜讀關／不支援）。 */
+    onStartChapterNightRender: (() -> Unit)? = null,
+    /** 這章只有舊版單檔：產生鈕改叫「重新產生夜讀版」（換成可切檔位的兩檔）。 */
+    nightLegacy: Boolean = false,
+    /** 「以目前設定重新產生這一話」（已有可切檔位的夜讀版；改了亮度後用，新鮮的頁也重做）；null＝不顯示。 */
+    onRegenerateChapterNight: (() -> Unit)? = null,
+    /** 「更新夜讀版」（這章有舊規則產生的頁；只重做那些頁）；null＝不顯示。 */
+    onUpdateChapterNight: (() -> Unit)? = null,
 ) {
     var showSetCoverDialog by remember { mutableStateOf(false) }
 
@@ -136,6 +148,49 @@ fun ReaderPageActionsDialog(
                         icon = Icons.Outlined.AutoFixHigh,
                         onClick = onReRender,
                     )
+                }
+            }
+            // 第三列：夜讀（產生／重新產生）。VM 自己關對話框 + toast。
+            val anyNight = onStartChapterNightRender != null || onRegenerateChapterNight != null ||
+                onUpdateChapterNight != null
+            if (anyNight) {
+                Row(
+                    modifier = Modifier.padding(top = MaterialTheme.padding.small),
+                    horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small),
+                ) {
+                    if (onStartChapterNightRender != null) {
+                        // 為這一話產生夜讀版：不經翻譯直接排夜讀佇列（非翻譯本也能用夜讀）。舊版單檔章＝重新產生成兩檔。
+                        ActionButton(
+                            modifier = Modifier.weight(1f),
+                            title = stringResource(
+                                if (nightLegacy) {
+                                    MR.strings.action_nightread_chapter_regen_tiers
+                                } else {
+                                    MR.strings.action_nightread_chapter
+                                },
+                            ),
+                            icon = Icons.Outlined.DarkMode,
+                            onClick = onStartChapterNightRender,
+                        )
+                    }
+                    if (onUpdateChapterNight != null) {
+                        // 更新夜讀版：app 更新改了夜讀規則，只重做這章舊規則產生的頁
+                        ActionButton(
+                            modifier = Modifier.weight(1f),
+                            title = stringResource(MR.strings.action_nightread_chapter_update),
+                            icon = Icons.Outlined.Update,
+                            onClick = onUpdateChapterNight,
+                        )
+                    }
+                    if (onRegenerateChapterNight != null) {
+                        // 以目前設定重新產生這一話：亮度等設定改了之後用（夜讀版已在、只是想套新設定）
+                        ActionButton(
+                            modifier = Modifier.weight(1f),
+                            title = stringResource(MR.strings.action_nightread_chapter_regen_current),
+                            icon = Icons.Outlined.Refresh,
+                            onClick = onRegenerateChapterNight,
+                        )
+                    }
                 }
             }
         }

@@ -31,10 +31,13 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -62,9 +65,11 @@ import eu.kanade.presentation.reader.ReaderPageIndicator
 import eu.kanade.presentation.reader.ReadingModeSelectDialog
 import eu.kanade.presentation.reader.appbars.ReaderAppBars
 import eu.kanade.presentation.reader.components.ChapterNavigatorType
+import eu.kanade.presentation.reader.components.ReaderNightFloatingControl
 import eu.kanade.presentation.reader.settings.ReaderSettingsDialog
 import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.data.coil.TachiyomiImageDecoder
+import eu.kanade.tachiyomi.data.nightread.NightAvailability
 import eu.kanade.tachiyomi.data.notification.NotificationReceiver
 import eu.kanade.tachiyomi.data.notification.Notifications
 import eu.kanade.tachiyomi.databinding.ReaderActivityBinding
@@ -74,7 +79,9 @@ import eu.kanade.tachiyomi.ui.main.MainActivity
 import eu.kanade.tachiyomi.ui.reader.ReaderViewModel.SetAsCoverResult.AddToLibraryFirst
 import eu.kanade.tachiyomi.ui.reader.ReaderViewModel.SetAsCoverResult.Error
 import eu.kanade.tachiyomi.ui.reader.ReaderViewModel.SetAsCoverResult.Success
+import eu.kanade.tachiyomi.ui.reader.loader.DirectoryPageLoader
 import eu.kanade.tachiyomi.ui.reader.loader.DownloadPageLoader
+import eu.kanade.tachiyomi.ui.reader.loader.HttpPageLoader
 import eu.kanade.tachiyomi.ui.reader.loader.TranslatingPageLoader
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
@@ -107,6 +114,7 @@ import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.lang.launchNonCancellable
 import tachiyomi.core.common.util.system.logcat
+import tachiyomi.domain.translation.service.TranslationPreferences
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.util.collectAsState
 import uy.kohesive.injekt.Injekt
@@ -128,6 +136,12 @@ class ReaderActivity : BaseActivity() {
 
     private val readerPreferences = Injekt.get<ReaderPreferences>()
     private val preferences = Injekt.get<BasePreferences>()
+
+    /** 夜讀表層總開關（[TranslationPreferences.nightReadEnabled]）：關時懸浮鈕不組合、長按選單不給夜讀項。 */
+    private val translationPreferences = Injekt.get<TranslationPreferences>()
+
+    /** 夜讀懸浮鈕的「這頁在這一檔沒有差異」提示：每 +1 一次就短暫顯示（Activity 重建歸零、不重播）。 */
+    private var nightNoDifferenceHint by mutableIntStateOf(0)
 
     lateinit var binding: ReaderActivityBinding
 
@@ -271,6 +285,16 @@ class ReaderActivity : BaseActivity() {
                         }
                         toast(stringResource(res))
                     }
+                    ReaderViewModel.Event.ReRenderNoMaterials -> {
+                        // 這頁沒有重繪素材：重繪對話框沒開，說明原因（不是出錯）
+                        toast(stringResource(MR.strings.reader_rerender_no_materials))
+                    }
+                    ReaderViewModel.Event.TranslatePageNoOriginal -> {
+                        toast(stringResource(MR.strings.reader_translate_page_no_original))
+                    }
+                    ReaderViewModel.Event.TranslatePageTooLarge -> {
+                        toast(stringResource(MR.strings.reader_translate_page_too_large))
+                    }
                     ReaderViewModel.Event.TranslatePageStarted -> {
                         // 開始翻譯當頁提示：頁面同時顯示 per-page 轉圈圈；IO 約數秒。
                         toast(stringResource(MR.strings.reader_translating_page))
@@ -286,6 +310,40 @@ class ReaderActivity : BaseActivity() {
                     }
                     ReaderViewModel.Event.ChapterTranslateStarted -> {
                         toast(stringResource(MR.strings.reader_translate_chapter_started))
+                    }
+                    ReaderViewModel.Event.ChapterNightStarted -> {
+                        toast(stringResource(MR.strings.reader_nightread_chapter_started))
+                    }
+                    ReaderViewModel.Event.NightModelsUnavailable -> {
+                        toast(stringResource(MR.strings.nightread_missing_models))
+                    }
+                    ReaderViewModel.Event.NightUnsupported -> {
+                        toast(stringResource(MR.strings.nightread_needs_loose_download))
+                    }
+                    is ReaderViewModel.Event.NightGenerating -> {
+                        // 剛開跑還不知道頁數（total 0）：不顯示「0/0」
+                        toast(
+                            if (event.total > 0) {
+                                stringResource(MR.strings.nightread_generating_progress, event.done, event.total)
+                            } else {
+                                stringResource(MR.strings.nightread_generating)
+                            },
+                        )
+                    }
+                    ReaderViewModel.Event.NightQueued -> {
+                        toast(stringResource(MR.strings.nightread_queued_waiting))
+                    }
+                    ReaderViewModel.Event.NightQueuePaused -> {
+                        toast(stringResource(MR.strings.nightread_queue_paused))
+                    }
+                    ReaderViewModel.Event.NightTierNoDifference -> {
+                        nightNoDifferenceHint++
+                    }
+                    ReaderViewModel.Event.NightDownloadStarted -> {
+                        toast(stringResource(MR.strings.nightread_online_download_started))
+                    }
+                    ReaderViewModel.Event.NightDownloadWaiting -> {
+                        toast(stringResource(MR.strings.nightread_online_download_waiting))
                     }
                     ReaderViewModel.Event.ChapterTranslateStopped -> {
                         toast(stringResource(MR.strings.reader_translate_chapter_stopped))
@@ -310,6 +368,13 @@ class ReaderActivity : BaseActivity() {
     private fun ReaderActivityBinding.setComposeOverlay(): Unit = composeOverlay.setComposeContent {
         val state by viewModel.state.collectAsState()
         val showPageNumber by readerPreferences.showPageNumber.collectAsState()
+        // 夜讀模式即時值（懸浮鈕的日常／夜讀狀態）。
+        val nightReadMode by viewModel.nightReadMode.collectAsState()
+        // 夜讀表層總開關（「其他」頁／設定 › 夜讀）：關＝懸浮鈕不組合、長按選單的夜讀項也不給。
+        val nightReadEnabled by viewModel.nightReadEnabled.collectAsState()
+        val nightTier by viewModel.nightTier.collectAsState()
+        val nightFabPosition by readerPreferences.nightFabPosition.collectAsState()
+        val einkMode by preferences.einkMode.collectAsState()
         val settingsviewModel = remember {
             ReaderSettingsViewModel(
                 readerState = viewModel.state,
@@ -326,6 +391,27 @@ class ReaderActivity : BaseActivity() {
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .navigationBarsPadding(),
+                )
+            }
+
+            // 夜讀懸浮控制：總開關開才組合（關＝畫面上什麼都沒有）；選單開著時淡出、不吃觸控（同頁碼與即時翻指示器，
+            // 也免得疊到上下的 app bar；選單開著時同樣的功能在閱讀設定面板裡）。組合在 [ContentOverlay]（自訂亮度的黑色
+            // 遮罩、色彩濾鏡）**之前**：跟頁面一起被調暗，夜裡不會是一顆比頁面亮的光點（遮罩不吃觸控，點擊不受影響）。
+            if (nightReadEnabled) {
+                ReaderNightFloatingControl(
+                    menuVisible = state.menuVisible,
+                    nightOn = nightReadMode,
+                    tier = nightTier,
+                    availability = state.nightAvailability,
+                    progress = state.nightProgress?.ring,
+                    generating = state.nightProgress != null,
+                    noDifferenceHint = nightNoDifferenceHint,
+                    position = nightFabPosition,
+                    onPositionChange = { readerPreferences.nightFabPosition.set(it) },
+                    onNightModeChange = viewModel::setNightMode,
+                    onTierSelect = viewModel::setNightTier,
+                    onTierUnavailable = viewModel::requestChapterNightRender,
+                    einkMode = einkMode,
                 )
             }
 
@@ -405,6 +491,27 @@ class ReaderActivity : BaseActivity() {
                 // 已下載章＝頁圖在磁碟（可重繪/可單頁翻）；DownloadPageLoader＝已下載、TranslatingPageLoader＝即時翻（同樣落盤）。
                 val pageOnDisk = page.chapter.pageLoader is DownloadPageLoader ||
                     page.chapter.pageLoader is TranslatingPageLoader
+                // 夜讀項（日常／夜讀切換已移到常駐懸浮鈕，這裡不再重複）：先過夜讀表層總開關；再要求頁圖在鬆散資料夾
+                // （已下載／即時翻／本機來源目錄章；壓縮檔章、線上章＝UNSUPPORTED）。
+                val nightCapable = nightReadEnabled &&
+                    (pageOnDisk || page.chapter.pageLoader is DirectoryPageLoader) &&
+                    state.nightAvailability != NightAvailability.UNSUPPORTED
+                // 「為這一話產生夜讀版」（沒有夜讀版）／「重新產生夜讀版」（只有舊版單檔）：不在夜讀佇列時才給。
+                val nightGenerate = nightCapable && state.nightProgress == null &&
+                    (
+                        state.nightAvailability == NightAvailability.NONE ||
+                            state.nightAvailability == NightAvailability.LEGACY
+                        )
+                // 「以目前設定重新產生這一話」（已有可切檔位的夜讀版；改了亮度後用）：強制重做、新鮮的頁也重做。這章已在夜讀佇列（排隊或
+                // 產生中）時不給：再按一次會停掉正在跑的那輪、以新的開跑時間重來，已重做好的頁全部白做。
+                val nightRegenerate = nightCapable && state.nightAvailability == NightAvailability.READY &&
+                    state.nightProgress == null
+                // 「更新夜讀版」（app 更新改了夜讀規則、這章有舊規則產生的頁）：一般排入，產生端只重做舊版頁（不強制）。
+                // 只有舊版單檔的章已經由上面的「重新產生夜讀版」涵蓋，這裡只給可切檔位的章。
+                val nightUpdate = nightRegenerate && state.nightOutdated
+                // 線上章（還沒下載）：同樣給「為這一話產生夜讀版」，按了問要不要先下載（ReaderViewModel.requestOnlineChapterNight）
+                val nightOnline = nightReadEnabled && page.chapter.pageLoader is HttpPageLoader &&
+                    state.nightProgress == null
                 ReaderPageActionsDialog(
                     onDismissRequest = onDismissRequest,
                     onSetAsCover = viewModel::setAsCover,
@@ -418,6 +525,12 @@ class ReaderActivity : BaseActivity() {
                     onStartChapterTranslate = viewModel::startChapterTranslate,
                     onStopChapterTranslate = viewModel::stopChapterTranslate,
                     isChapterTranslating = state.liveTranslateProgress != null,
+                    onStartChapterNightRender = { viewModel.startChapterNightRender() }.takeIf { nightGenerate }
+                        ?: viewModel::requestOnlineChapterNight.takeIf { nightOnline },
+                    nightLegacy = state.nightAvailability == NightAvailability.LEGACY,
+                    onRegenerateChapterNight = { viewModel.startChapterNightRender(force = true) }
+                        .takeIf { nightRegenerate },
+                    onUpdateChapterNight = { viewModel.startChapterNightRender() }.takeIf { nightUpdate },
                 )
             }
             is ReaderViewModel.Dialog.ReRenderMethod -> {
@@ -432,6 +545,50 @@ class ReaderActivity : BaseActivity() {
                     chapters = viewModel.getReaderChapters(),
                     currentChapterId = viewModel.currentChapterId,
                     onSelectChapter = viewModel::loadChapterFromList,
+                )
+            }
+            is ReaderViewModel.Dialog.NightGenerateConfirm -> {
+                // 懸浮鈕點了不可用的檔位：確認後把這一話排入夜讀佇列（兩檔一次產生）
+                AlertDialog(
+                    onDismissRequest = onDismissRequest,
+                    text = {
+                        Text(
+                            stringResource(
+                                if (dialog.legacy) {
+                                    MR.strings.nightread_regenerate_confirm
+                                } else {
+                                    MR.strings.nightread_generate_confirm
+                                },
+                            ),
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { viewModel.startChapterNightRender() }) {
+                            Text(stringResource(MR.strings.action_ok))
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = onDismissRequest) {
+                            Text(stringResource(MR.strings.action_cancel))
+                        }
+                    },
+                )
+            }
+            is ReaderViewModel.Dialog.NightDownloadConfirm -> {
+                // 線上章要夜讀：先下載（鬆散資料夾）、下載完自動產生夜讀版並重載這一話
+                AlertDialog(
+                    onDismissRequest = onDismissRequest,
+                    text = { Text(stringResource(MR.strings.nightread_online_download_confirm)) },
+                    confirmButton = {
+                        TextButton(onClick = viewModel::startOnlineNightDownload) {
+                            Text(stringResource(MR.strings.action_download))
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = onDismissRequest) {
+                            Text(stringResource(MR.strings.action_cancel))
+                        }
+                    },
                 )
             }
             null -> {}
@@ -803,9 +960,10 @@ class ReaderActivity : BaseActivity() {
     /**
      * Called from the viewer whenever a [page] is marked as active. It updates the values of the
      * bottom menu and delegates the change to the presenter.
+     * Yakuyomi：[visible]＝畫面上看得到的頁（雙頁對開＝兩頁；條漫傳 null＝不確定），給夜讀換檔位的「沒有差異」提示用。
      */
-    fun onPageSelected(page: ReaderPage) {
-        viewModel.onPageSelected(page)
+    fun onPageSelected(page: ReaderPage, visible: List<ReaderPage>? = listOf(page)) {
+        viewModel.onPageSelected(page, visible)
     }
 
     /**

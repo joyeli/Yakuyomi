@@ -11,6 +11,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ChromeReaderMode
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.CollectionsBookmark
+import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.GetApp
 import androidx.compose.material.icons.outlined.Info
@@ -201,6 +202,12 @@ object SettingsMainScreen : Screen() {
             subtitleRes = MR.strings.pref_translation_summary,
             icon = Icons.Outlined.Translate,
             screen = SettingsTranslationScreen,
+        ),
+        Item(
+            titleRes = MR.strings.pref_category_nightread,
+            subtitleRes = MR.strings.pref_nightread_summary,
+            icon = Icons.Outlined.DarkMode,
+            screen = SettingsNightReadScreen,
         ),
         Item(
             titleRes = MR.strings.pref_category_tracking,

@@ -23,11 +23,21 @@ internal class DownloadPageLoader(
     private val source: Source,
     private val downloadManager: DownloadManager,
     private val downloadProvider: DownloadProvider,
-) : PageLoader() {
+) : PageLoader(), NightPageSource {
 
     private val context: Application by injectLazy()
 
+    /**
+     * 夜讀顯示端（檔位查找、檔名快取、每頁送出的檔名）：stream lambda 每次解碼都經它決定送夜讀檔還是原圖 →
+     * 切換開關或檔位後 reload 立即生效。
+     */
+    private val night = NightPageStreams()
+
     private var archivePageLoader: ArchivePageLoader? = null
+
+    /** 壓縮檔章（CBZ…）不支援夜讀：夜讀檔要逐檔落在 `<章>/.yakuyomi/`，壓縮檔內取不到。 */
+    override val nightStreams: NightPageStreams?
+        get() = night.takeIf { archivePageLoader == null }
 
     override var isLocal: Boolean = true
 
@@ -43,6 +53,7 @@ internal class DownloadPageLoader(
         return if (chapterPath?.isFile == true) {
             getPagesFromArchive(chapterPath)
         } else {
+            night.chapterDir = chapterPath?.takeIf { it.isDirectory }
             getPagesFromDirectory()
         }
     }
@@ -57,11 +68,22 @@ internal class DownloadPageLoader(
         return loader.getPages()
     }
 
+    /**
+     * 鬆散夾章的頁。章節夾（[NightPageStreams.chapterDir]）由 [getPages] 解析的下載夾提供：SAF 文件 URI 用
+     * `UniFile.fromUri` 建出的物件 **parentFile 為 null**（只有 file:// 的 RawFile 拿得到 parent），所以不能只靠
+     * parentFile；退化才試它。頁檔名要時才算（SAF 上取名字是一次查詢）、算一次就快取；開關關著時連名字都不取。
+     */
     private fun getPagesFromDirectory(): List<ReaderPage> {
         val pages = downloadManager.buildPageList(source, manga, chapter.chapter.toDomainChapter()!!)
         return pages.map { page ->
+            val uri = page.uri ?: Uri.EMPTY
+            night.registerPage(page.index) { UniFile.fromUri(context, uri)?.name }
             ReaderPage(page.index, page.url, page.imageUrl) {
-                context.contentResolver.openInputStream(page.uri ?: Uri.EMPTY)!!
+                // 夜讀：每次解碼都重查（開關 + 檔位 + 夜讀檔是否存在）——切換後 reload 立即生效，夜讀佇列後來才產出的檔也接得到。
+                night.open(
+                    page.index,
+                    dirFallback = { UniFile.fromUri(context, uri)?.parentFile },
+                ) { context.contentResolver.openInputStream(uri)!! }
             }.apply {
                 status = Page.State.Ready
             }

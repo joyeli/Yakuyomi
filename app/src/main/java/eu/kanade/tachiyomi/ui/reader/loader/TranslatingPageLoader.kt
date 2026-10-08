@@ -66,7 +66,11 @@ internal class TranslatingPageLoader(
     private val source: Source,
     private val downloadProvider: DownloadProvider,
     private val translationManager: TranslationManager,
-) : PageLoader() {
+) : PageLoader(), NightPageSource {
+
+    /** 夜讀沿用被包的 loader（頁的 stream 本來就是它的）：檔位查找、檔名快取、每頁送出的檔名都在那邊。 */
+    override val nightStreams: NightPageStreams?
+        get() = (delegate as? NightPageSource)?.nightStreams
 
     // PageTranslator 未在 DI 註冊（全 codebase 都直接 new、見 ReaderViewModel）→ 比照以 Application context 自建，避免 Injekt 取不到。
     // 本 loader 只用它讀 manifest（[PageTranslator.isPageTranslated]/[PageTranslator.donePages]）——實際翻譯在佇列。

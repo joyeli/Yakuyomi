@@ -70,6 +70,9 @@ fun MangaChapterListItem(
     onTranslate: (() -> Unit)?,
     translationStateProvider: () -> ChapterTranslationState,
     translationProgressProvider: () -> Int,
+    onNightRender: (() -> Unit)?,
+    nightStateProvider: () -> ChapterNightStatus,
+    nightProgressProvider: () -> Float?,
     onChapterSwipe: (LibraryPreferences.ChapterSwipeAction) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -185,6 +188,15 @@ fun MangaChapterListItem(
                     stateProvider = translationStateProvider,
                     progressProvider = translationProgressProvider,
                     onClick = onTranslate,
+                )
+            }
+            if (onNightRender != null) {
+                // 夜讀版指示器（月亮）：HIDDEN（夜讀總開關關 / 未下載）時整顆不畫、不佔位
+                ChapterNightIndicator(
+                    enabled = !selected,
+                    stateProvider = nightStateProvider,
+                    progressProvider = nightProgressProvider,
+                    onClick = onNightRender,
                 )
             }
             // Yakuyomi：本機章不畫下載指示器——它對 local 是 disabled 的 CheckCircle，會吞掉點擊

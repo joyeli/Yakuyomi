@@ -113,6 +113,10 @@ class MangaScreen(
         // 而非靜默 no-op）。已翻成果仍在書庫徽章可見。
         val translationPreferences = remember { Injekt.get<TranslationPreferences>() }
         val translationMasterEnabled by translationPreferences.translationMasterEnabled.collectAsState()
+        // 夜讀表層開關（「其他」頁）：關閉 → 章節列月亮指示器、多選月亮鈕一律隱藏；同時受硬總開關節制。
+        val nightReadEnabled by translationPreferences.nightReadEnabled.collectAsState()
+        // 夜讀是獨立於翻譯總開關的另一個 pool（自己的總開關、自己的消費者、自己的模型）：入口只看夜讀總開關
+        val nightAffordance = nightReadEnabled
 
         LaunchedEffect(successState.manga, viewModel.source) {
             if (isHttpSource) {
@@ -138,6 +142,8 @@ class MangaScreen(
             onDownloadChapter = viewModel::runChapterDownloadActions.takeIf { !successState.source.isLocalOrStub() },
             onTranslateChapter = viewModel::runChapterTranslateAction.takeIf { translationMasterEnabled },
             onReRenderChapter = viewModel::runChapterReRenderAction.takeIf { translationMasterEnabled },
+            onNightRenderChapter = viewModel::runChapterNightRenderAction.takeIf { nightAffordance },
+            nightReadEnabled = nightAffordance,
             onAddToLibraryClicked = {
                 viewModel.toggleFavorite()
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)

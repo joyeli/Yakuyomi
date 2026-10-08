@@ -54,6 +54,7 @@ import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.collectAsState
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import tachiyomi.core.common.i18n.pluralStringResource as ctxPluralStringResource
 import tachiyomi.core.common.i18n.stringResource as ctxStringResource
 import tachiyomi.core.common.preference.Preference as PreferenceData
 
@@ -113,6 +114,11 @@ object SettingsTranslationScreen : SearchableSettings {
         val curSuffix = stringResource(MR.strings.pref_translation_adv_current)
         // 進階 badge 文字（每個進階選項標題旁顯示、與一般選項區分）。
         val advBadge = stringResource(MR.strings.pref_advanced_badge)
+        // 會影響畫面、但改了不跳「更新已翻章」對話框的進階參數（去字外擴／解析度／膨脹、字級上下限、壓畫面描邊、
+        // 少放字數、字級縮放）：各組那一段上方放一列說明，提醒已翻章要手動重繪。只在進階模式顯示（這些項目都是進階）。
+        val manualRenderNote = Preference.PreferenceItem.InfoPreference(
+            title = stringResource(MR.strings.pref_translation_render_manual_note),
+        )
         // 進階滑桿現值（Int pref → SliderPreference 需要 value + onValueChanged）。
         val stripPadVal by prefs.stripPad.collectAsState()
         val dbnetSizeVal by prefs.dbnetSize.collectAsState()
@@ -131,23 +137,33 @@ object SettingsTranslationScreen : SearchableSettings {
         // 模型自動下載 + 狀態（下載完才重算 modelPresence）。
         val modelDownloadManager = remember { Injekt.get<ModelDownloadManager>() }
         val modelDownloadState by modelDownloadManager.state.collectAsState()
-        val modelsJustDownloaded = modelDownloadState is ModelDownloadManager.State.Done
-        val modelPresence by produceState<List<Pair<String, Boolean>>?>(initialValue = null, modelsJustDownloaded) {
+        val filesRevision by modelDownloadManager.filesRevision.collectAsState()
+        // 翻譯組下載完 / 刪除後重算（Done 是 data class、每次新物件；delete 後回 Idle 也會觸發）。
+        val modelsJustDownloaded = modelDownloadState
+        val modelPresence by produceState<List<TranslationEngineConfig.RolePresence>?>(
+            initialValue = null,
+            modelsJustDownloaded,
+            filesRevision,
+        ) {
             value = withContext(Dispatchers.IO) { TranslationEngineConfig.modelPresence(context) }
         }
         // 舊版（v1 ONNX/LaMa）模型偵測：齊全但缺 v2 NCNN → 提示更新（否則去字會壞卻無警示）。
-        val modelsOutdated by produceState(initialValue = false, modelsJustDownloaded) {
+        val modelsOutdated by produceState(initialValue = false, modelsJustDownloaded, filesRevision) {
             value = withContext(Dispatchers.IO) { TranslationEngineConfig.modelsOutdated(context) }
         }
-        val modelStatusMissing = stringResource(MR.strings.pref_translation_model_status_missing)
         val modelStatusOutdated = stringResource(MR.strings.pref_translation_model_status_outdated)
         val modelStatusChecking = stringResource(MR.strings.pref_translation_model_status_checking)
         val modelStatusSubtitle = modelPresence?.let { mp ->
-            val roles = mp.joinToString("・") { (n, ok) -> "$n ${if (ok) "✓" else "✗"}" }
+            // 每列「<名> ✓/✗」（夜讀那組的狀態在 設定 › 夜讀，這裡只列翻譯三顆）。
+            // 分隔用不分語言的「 · 」（片假名中點「・」在英文介面很突兀）。
+            val roles = mp.joinToString(" · ") { r -> "${r.label} ${if (r.present) "✓" else "✗"}" }
             when {
                 // 過時優先：有舊檔但 v2 引擎載不動（見 modelsResolvable）→ 只顯示 ⚠️ 更新提示，不列「✓✓✓」免誤導「都好了」。
                 modelsOutdated -> modelStatusOutdated
-                !mp.all { it.second } -> "$roles$modelStatusMissing"
+                // 整體「缺檔」只看非選配列：夜讀模型缺只在自己那列顯示 ✗，不把翻譯模型判成未齊（翻譯不依賴它）。
+                // 缺檔提示走模板（%1$s＝清單）：英文值開頭的空白會被 aapt2 修掉，直接接字串會黏在一起。
+                mp.any { !it.optional && !it.present } ->
+                    stringResource(MR.strings.pref_translation_model_status_missing, roles)
                 else -> roles
             }
         } ?: modelStatusChecking
@@ -250,7 +266,11 @@ object SettingsTranslationScreen : SearchableSettings {
                                 }
                                 context.toast(
                                     if (n > 0) {
-                                        context.ctxStringResource(MR.strings.pref_translation_render_update_queued, n)
+                                        context.ctxPluralStringResource(
+                                            MR.plurals.pref_translation_render_update_queued,
+                                            n,
+                                            n,
+                                        )
                                     } else {
                                         context.ctxStringResource(MR.strings.pref_translation_render_update_none)
                                     },
@@ -461,6 +481,15 @@ object SettingsTranslationScreen : SearchableSettings {
                         title = stringResource(MR.strings.pref_translation_live_inpaint_method),
                         subtitle = stringResource(MR.strings.pref_translation_live_inpaint_summary),
                     ),
+                    // 保留重繪素材排在三個進階去字參數上面：一般模式順序不變，進階模式下那三項連成一段、
+                    // 讓下面的「只影響之後翻譯」提示只罩住它們（手動重繪本來就要靠這個開關留的素材）。
+                    Preference.PreferenceItem.SwitchPreference(
+                        preference = prefs.keepMaterials,
+                        title = stringResource(MR.strings.pref_translation_keep_materials),
+                        subtitle = stringResource(MR.strings.pref_translation_keep_materials_summary),
+                    ),
+                    // 外擴／解析度／膨脹改了不跳「更新已翻章」對話框（不像去字方法），已翻章要手動重繪。
+                    manualRenderNote.takeIf { showAdvanced },
                     adv(
                         showAdvanced,
                         prefs.bboxPad,
@@ -489,11 +518,6 @@ object SettingsTranslationScreen : SearchableSettings {
                         titleBadge = advBadge,
                         onValueChanged = { prefs.maskDilate.set(it) },
                     ).takeIf { showAdvanced },
-                    Preference.PreferenceItem.SwitchPreference(
-                        preference = prefs.keepMaterials,
-                        title = stringResource(MR.strings.pref_translation_keep_materials),
-                        subtitle = stringResource(MR.strings.pref_translation_keep_materials_summary),
-                    ),
                 ).toImmutableList(),
             ),
             // —— 供應商（LLM）——
@@ -613,16 +637,36 @@ object SettingsTranslationScreen : SearchableSettings {
                                 MR.strings.pref_translation_download_models
                             },
                         ),
+                        // 只顯示翻譯組的進度／結果；夜讀組在下載時這裡標「另一組下載中」（同一資料夾不並行）。
                         subtitle = when (val s = modelDownloadState) {
-                            is ModelDownloadManager.State.Running -> "${s.label}　${s.percent}%"
-                            ModelDownloadManager.State.Done ->
-                                stringResource(MR.strings.pref_translation_download_models_done)
+                            is ModelDownloadManager.State.Running ->
+                                if (s.group == TranslationEngineConfig.ModelGroup.TRANSLATION) {
+                                    stringResource(MR.strings.model_dl_progress_subtitle, s.label, s.percent)
+                                } else {
+                                    stringResource(MR.strings.model_dl_other_group_busy)
+                                }
+                            is ModelDownloadManager.State.Done ->
+                                if (s.group == TranslationEngineConfig.ModelGroup.TRANSLATION) {
+                                    stringResource(MR.strings.pref_translation_download_models_done)
+                                } else {
+                                    stringResource(MR.strings.pref_translation_download_models_idle)
+                                }
                             is ModelDownloadManager.State.Error ->
-                                stringResource(MR.strings.pref_translation_download_models_error, s.message)
+                                if (s.group == TranslationEngineConfig.ModelGroup.TRANSLATION) {
+                                    stringResource(MR.strings.pref_translation_download_models_error, s.message)
+                                } else {
+                                    stringResource(MR.strings.pref_translation_download_models_idle)
+                                }
                             ModelDownloadManager.State.Idle ->
                                 stringResource(MR.strings.pref_translation_download_models_idle)
                         },
-                        onClick = { modelDownloadManager.download() },
+                        onClick = { modelDownloadManager.download(TranslationEngineConfig.ModelGroup.TRANSLATION) },
+                    ),
+                    // 刪翻譯組（OCR＋去字；偵測器只在夜讀組沒裝時一起刪）。夜讀組在 設定 › 夜讀 各刪各的。
+                    Preference.PreferenceItem.TextPreference(
+                        title = stringResource(MR.strings.pref_translation_delete_models),
+                        subtitle = stringResource(MR.strings.pref_translation_delete_models_summary),
+                        onClick = { modelDownloadManager.delete(TranslationEngineConfig.ModelGroup.TRANSLATION) },
                     ),
                 ).toImmutableList(),
             ),
@@ -694,6 +738,8 @@ object SettingsTranslationScreen : SearchableSettings {
                             true
                         },
                     ).takeIf { showAdvanced },
+                    // 下面六個字級／描邊／少放字數參數改了不跳「更新已翻章」對話框（上面幾項會），已翻章要手動重繪。
+                    manualRenderNote.takeIf { showAdvanced },
                     adv(
                         showAdvanced,
                         prefs.fontSizeMax,

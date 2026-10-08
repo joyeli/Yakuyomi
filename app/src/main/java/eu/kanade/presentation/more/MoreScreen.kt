@@ -7,6 +7,7 @@ import androidx.compose.material.icons.automirrored.outlined.Label
 import androidx.compose.material.icons.filled.VolunteerActivism
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Contrast
+import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.GetApp
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.NewReleases
@@ -43,6 +44,8 @@ fun MoreScreen(
     onIncognitoModeChange: (Boolean) -> Unit,
     translationMasterEnabled: Boolean,
     onTranslationMasterChange: (Boolean) -> Unit,
+    nightReadEnabled: Boolean,
+    onNightReadChange: (Boolean) -> Unit,
     onClickDownloadQueue: () -> Unit,
     onClickUpdates: () -> Unit,
     onClickCategories: () -> Unit,
@@ -98,6 +101,16 @@ fun MoreScreen(
                     icon = Icons.Outlined.Translate,
                     checked = translationMasterEnabled,
                     onCheckedChanged = onTranslationMasterChange,
+                )
+            }
+            item {
+                // Yakuyomi：夜讀表層總開關（與翻譯總開關並列、彼此獨立）。關＝所有夜讀入口隱藏、夜讀 worker 不跑。
+                SwitchPreferenceWidget(
+                    title = stringResource(MR.strings.pref_nightread_master),
+                    subtitle = stringResource(MR.strings.pref_nightread_master_summary),
+                    icon = Icons.Outlined.DarkMode,
+                    checked = nightReadEnabled,
+                    onCheckedChanged = onNightReadChange,
                 )
             }
 

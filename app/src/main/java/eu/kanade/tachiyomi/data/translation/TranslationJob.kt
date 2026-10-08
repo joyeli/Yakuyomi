@@ -20,6 +20,7 @@ import coil3.imageLoader
 import coil3.request.ImageRequest
 import coil3.request.allowHardware
 import eu.kanade.tachiyomi.data.notification.Notifications
+import eu.kanade.tachiyomi.data.translation.model.QueuePoolKey
 import eu.kanade.tachiyomi.data.translation.model.TranslationItem
 import eu.kanade.tachiyomi.util.system.getBitmapOrNull
 import eu.kanade.tachiyomi.util.system.notificationBuilder
@@ -40,8 +41,12 @@ import java.util.concurrent.TimeUnit
  * 翻譯佇列的前景服務（對照 [eu.kanade.tachiyomi.data.download.DownloadJob]）。
  *
  * 實際翻譯在 [TranslationManager] 的 scope 跑；本 worker 只負責「保活 + 前景通知」——讓 app
- * 退到背景時系統不回收行程、翻譯能跑完。觀察 [TranslationManager.queueState]/[TranslationManager.isPaused]：
+ * 退到背景時系統不回收行程、翻譯能跑完。觀察 [TranslationManager.queueState]／兩個 pool 的暫停旗標
+ * （[TranslationManager.isTranslatePaused]、[TranslationManager.isNightPaused]）：
  * 還有 QUEUE/TRANSLATING 且未暫停 → 維持前景並刷新進度通知；佇列清空或暫停 → 結束、前景服務停。
+ *
+ * 一條前景服務罩兩條消費者（翻譯／重繪 + 夜讀，見 [TranslationManager]）：只剩夜讀項時一樣算「有活」（[hasActiveWork]
+ * 依項的種類看各自的總開關）；兩條同時在跑時通知優先顯示翻譯項（[buildNotification]）。
  */
 class TranslationJob(context: Context, workerParams: WorkerParameters) : CoroutineWorker(context, workerParams) {
 
@@ -64,7 +69,7 @@ class TranslationJob(context: Context, workerParams: WorkerParameters) : Corouti
         // 行程被殺 / 重開機後 WorkManager 會重跑本 worker：先把持久佇列讀回來（[TranslationManager.ensureRestored]
         // idempotent、有排隊章時自行 ensureDrain），再判斷有沒有活要做——否則新行程裡佇列是空的、會誤判沒事做。
         translationManager.ensureRestored()
-        if (!hasActiveWork(translationManager.queueState.value, translationManager.isPaused.value)) {
+        if (!hasActiveWorkNow()) {
             return Result.success()
         }
         setForegroundSafely()
@@ -72,37 +77,67 @@ class TranslationJob(context: Context, workerParams: WorkerParameters) : Corouti
         // 保活直到佇列無活躍工作或暫停；每次佇列變動就用 setForeground 刷新通知（讀 live queueState）。
         combine(
             translationManager.queueState,
-            translationManager.isPaused,
-        ) { items, paused -> items to paused }
-            .takeWhile { (items, paused) -> !isStopped && hasActiveWork(items, paused) }
+            translationManager.isTranslatePaused,
+            translationManager.isNightPaused,
+            translationManager.pausedMangas,
+        ) { items, translatePaused, nightPaused, pausedMangas ->
+            hasActiveWork(items, translatePaused, nightPaused, pausedMangas)
+        }
+            .takeWhile { active -> !isStopped && active }
             .collect { setForegroundSafely() }
 
         // 被系統中途停掉（isStopped）但仍有活 → retry：讓 WorkManager 重排、重建前景服務，避免「worker 退場但
         // 翻譯仍在 TranslationManager.scope 背景跑、失去保活而被凍」。正常結束（佇列空 / 暫停 / 總開關關 →
         // hasActiveWork=false）→ success（不重排）。
-        return if (isStopped &&
-            hasActiveWork(translationManager.queueState.value, translationManager.isPaused.value)
-        ) {
+        return if (isStopped && hasActiveWorkNow()) {
             Result.retry()
         } else {
             Result.success()
         }
     }
 
-    private fun hasActiveWork(items: List<TranslationItem>, paused: Boolean): Boolean {
-        if (paused) return false
-        // 硬總開關：master 關時佇列不會 drain → 不算「有活」，避免前景服務 +「翻譯中」通知無限常駐。
-        if (!translationPreferences.translationMasterEnabled.get()) return false
+    private fun hasActiveWorkNow(): Boolean = hasActiveWork(
+        translationManager.queueState.value,
+        translationManager.isTranslatePaused.value,
+        translationManager.isNightPaused.value,
+        translationManager.pausedMangas.value,
+    )
+
+    private fun hasActiveWork(
+        items: List<TranslationItem>,
+        translatePaused: Boolean,
+        nightPaused: Boolean,
+        pausedMangas: Set<QueuePoolKey>,
+    ): Boolean {
+        // 硬總開關（各自）：翻譯／重繪項看翻譯總開關、夜讀項看夜讀總開關——關著的那類佇列不會 drain → 不算「有活」，
+        // 避免前景服務 +「翻譯中」通知無限常駐。只剩夜讀項（夜讀開著）一樣算有活：夜讀那條也靠這個前景服務保活。
+        // 使用者暫停也是各 pool 自己的：翻譯 pool 暫停、夜讀 pool 還在跑 → 仍有活（反之亦然）。
+        // 「整本暫停」的本 drain 不會挑（對齊 TranslationManager.hasRunnableWork）：佇列只剩被整本暫停的章＝沒活，
+        // 否則前景服務＋通知會空掛到使用者手動繼續。
+        val translateRunnable = translationPreferences.translationMasterEnabled.get() && !translatePaused
+        val nightRunnable = translationPreferences.nightReadEnabled.get() && !nightPaused
+        if (!translateRunnable && !nightRunnable) return false
         return items.any {
-            it.status == TranslationItem.Status.QUEUE || it.status == TranslationItem.Status.TRANSLATING
+            (it.status == TranslationItem.Status.QUEUE || it.status == TranslationItem.Status.TRANSLATING) &&
+                it.poolKey !in pausedMangas && !it.paused &&
+                (if (it.kind == TranslationItem.Kind.NIGHT) nightRunnable else translateRunnable)
         }
     }
 
     private suspend fun buildNotification(items: List<TranslationItem>): Notification {
-        val active = items.firstOrNull { it.status == TranslationItem.Status.TRANSLATING }
+        // 兩條消費者可能同時各跑一項：通知只放得下一項 → 翻譯／重繪優先（使用者在等的通常是它），只跑夜讀時才顯示夜讀。
+        val running = items.filter { it.status == TranslationItem.Status.TRANSLATING }
+        val active = running.firstOrNull { it.kind != TranslationItem.Kind.NIGHT } ?: running.firstOrNull()
         val cover = active?.let { getMangaIcon(it.manga) }
+        // 正在跑的是夜讀項 → 標題「夜讀版」（它不是翻譯，別寫「翻譯中」）；翻譯/重繪 → 「翻譯中」；
+        // 沒有進行中的項（只剩排隊項，可能全是夜讀）→ 中性的「佇列」。圖示共用。
+        val title = when {
+            active == null -> MR.strings.label_translation_queue
+            active.kind == TranslationItem.Kind.NIGHT -> MR.strings.queue_kind_nightread
+            else -> MR.strings.translation_status_translating
+        }
         return applicationContext.notificationBuilder(Notifications.CHANNEL_TRANSLATOR_PROGRESS) {
-            setContentTitle(applicationContext.stringResource(MR.strings.translation_status_translating))
+            setContentTitle(applicationContext.stringResource(title))
             if (active != null) {
                 setContentText(active.manga.title)
                 if (active.total > 0) setProgress(active.total, active.done, false)

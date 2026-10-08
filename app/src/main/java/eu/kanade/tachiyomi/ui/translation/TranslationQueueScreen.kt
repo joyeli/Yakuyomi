@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,8 +19,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.PlaylistPlay
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.KeyboardDoubleArrowUp
@@ -81,6 +84,7 @@ import eu.kanade.tachiyomi.data.translation.ModelDownloadManager
 import eu.kanade.tachiyomi.data.translation.TranslationEngineConfig
 import eu.kanade.tachiyomi.data.translation.TranslationEngineService
 import eu.kanade.tachiyomi.data.translation.TranslationManager
+import eu.kanade.tachiyomi.data.translation.model.QueuePoolKey
 import eu.kanade.tachiyomi.data.translation.model.TranslationItem
 import eu.kanade.tachiyomi.ui.manga.MangaScreen
 import eu.kanade.tachiyomi.ui.setting.SettingsScreen
@@ -100,6 +104,7 @@ import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.Pill
 import tachiyomi.presentation.core.components.TwoPanelBox
 import tachiyomi.presentation.core.components.material.Scaffold
+import tachiyomi.presentation.core.i18n.pluralStringResource
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.screens.EmptyScreen
 import tachiyomi.presentation.core.util.collectAsState
@@ -122,16 +127,17 @@ object TranslationQueueScreen : Screen() {
  */
 data object TranslationTab : Tab {
 
-    // Yakuyomi：再點一次「翻譯」分頁 → 三態循環（見 TranslationQueueViewModel.cycleEngineState）。
+    // Yakuyomi：再點一次「佇列」分頁 → 翻譯引擎三態循環（見 TranslationQueueViewModel.cycleEngineState）。
     private val reselectChannel = Channel<Unit>()
 
     override val options: TabOptions
         @Composable
         get() = TabOptions(
             index = 1u,
-            // 導覽列標籤用短版「翻譯」（與書櫃/記錄/探索/其他等長）；頁面標題仍是「翻譯佇列」。
+            // 導覽列標籤「佇列」（2026-09-27 從「翻譯」改名：這條佇列同時跑翻譯與夜讀兩個 pool，圖示也換成排隊清單、
+            // 與「翻譯」設定頁的 文A 脫鉤，免得被當成翻譯設定）。
             title = stringResource(MR.strings.label_translation),
-            icon = rememberVectorPainter(Icons.Outlined.Translate),
+            icon = rememberVectorPainter(Icons.AutoMirrored.Outlined.PlaylistPlay),
         )
 
     override suspend fun onReselect(navigator: Navigator) {
@@ -151,11 +157,21 @@ data object TranslationTab : Tab {
     }
 }
 
-/** 佇列頁的「漫畫分組」（同一本的章收成一組；queueState 仍是扁平章快照，UI 在此 group by manga）。 */
+/**
+ * 佇列頁的「分組」＝同一本 × 同一個 pool（翻譯／重繪 vs 夜讀）的章收成一組；queueState 仍是扁平章快照，UI 在此
+ * group by [QueuePoolKey]。同一本若既有翻譯項又有夜讀項會是兩張卡：兩個 pool 是獨立消費者，整本暫停／搶翻／取消
+ * 各管各的，混在一張卡上一顆 ⏸ 說不清停的是哪邊。
+ */
 private data class MangaGroup(
     val manga: Manga,
+    val night: Boolean,
     val chapters: List<TranslationItem>,
-)
+) {
+    val key: QueuePoolKey get() = QueuePoolKey(manga.id, night)
+
+    /** LazyColumn／展開狀態用的字串鍵（rememberSaveable 存得了）。 */
+    val id: String get() = "${manga.id}:${if (night) 1 else 0}"
+}
 
 @Composable
 private fun TranslationQueueContent(
@@ -164,30 +180,33 @@ private fun TranslationQueueContent(
 ) {
     val navigator = LocalNavigator.currentOrThrow
     val items by viewModel.queueState.collectAsState()
-    val isPaused by viewModel.isPaused.collectAsState()
+    val isTranslatePaused by viewModel.isTranslatePaused.collectAsState()
+    val isNightPaused by viewModel.isNightPaused.collectAsState()
     val pausedMangas by viewModel.pausedMangas.collectAsState()
     // 硬總開關：關閉時藏引擎面板（不讓手動預載繞過總開關）、佇列空則顯示「翻譯已關閉」。佇列非空（殘留）仍可看/清。
-    val masterEnabled by remember { Injekt.get<TranslationPreferences>() }.translationMasterEnabled.collectAsState()
+    val translationPreferences = remember { Injekt.get<TranslationPreferences>() }
+    val masterEnabled by translationPreferences.translationMasterEnabled.collectAsState()
+    val nightEnabled by translationPreferences.nightReadEnabled.collectAsState()
 
-    // 以漫畫分組（groupBy 用 LinkedHashMap → 保留漫畫首次出現順序＝佇列漫畫順序）。
+    // 以「本 × pool」分組（groupBy 用 LinkedHashMap → 保留首次出現順序＝佇列順序）。
     val groups = remember(items) {
-        items.groupBy { it.manga.id }.map { (_, list) -> MangaGroup(list.first().manga, list) }
+        items.groupBy { it.poolKey }.map { (key, list) -> MangaGroup(list.first().manga, key.night, list) }
     }
 
-    // 每本展開的 mangaId（預設摺疊）。用 rememberSaveable：折疊機折/展是 config change，否則展開狀態會丟、全合起來。
+    // 每組展開的鍵（預設摺疊）。用 rememberSaveable：折疊機折/展是 config change，否則展開狀態會丟、全合起來。
     val expandedIds = rememberSaveable(
         saver = listSaver(save = { it.toList() }, restore = { it.toMutableStateList() }),
-    ) { mutableStateListOf<Long>() }
-    val allExpanded = groups.isNotEmpty() && groups.all { it.manga.id in expandedIds }
+    ) { mutableStateListOf<String>() }
+    val allExpanded = groups.isNotEmpty() && groups.all { it.id in expandedIds }
     // 佇列是否有失敗章節（平板工具列「重試全部失敗」鈕的顯示條件）。
     val hasFailed = groups.any { g -> g.chapters.any { it.status == TranslationItem.Status.ERROR } }
 
     // 平板/折疊機展開＝主從雙欄（左清單 + 右選中本章節）；直板＝手風琴。選中本（跨重啟保留；失效則回退第一本）。
     val isTablet = isTabletUi()
-    var selectedMangaId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var selectedGroupId by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(groups) {
-        if (groups.none { it.manga.id == selectedMangaId }) {
-            selectedMangaId = groups.firstOrNull()?.manga?.id
+        if (groups.none { it.id == selectedGroupId }) {
+            selectedGroupId = groups.firstOrNull()?.id
         }
     }
 
@@ -197,7 +216,7 @@ private fun TranslationQueueContent(
     val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
         val moved = reorderGroups.removeAt(from.index)
         reorderGroups.add(to.index, moved)
-        viewModel.reorderMangas(reorderGroups.map { it.manga.id })
+        viewModel.reorderGroups(reorderGroups.map { it.key })
     }
     LaunchedEffect(groups) {
         if (!reorderableState.isAnyItemDragging) {
@@ -251,7 +270,7 @@ private fun TranslationQueueContent(
                                         expandedIds.clear()
                                     } else {
                                         expandedIds.clear()
-                                        expandedIds.addAll(groups.map { it.manga.id })
+                                        expandedIds.addAll(groups.map { it.id })
                                     }
                                 },
                             ) {
@@ -285,28 +304,61 @@ private fun TranslationQueueContent(
             )
         },
         floatingActionButton = {
-            // 全域暫停/繼續（最上層；與每本暫停獨立）。
-            SmallExtendedFloatingActionButton(
-                text = {
-                    Text(
-                        text = stringResource(
-                            if (isPaused) MR.strings.action_resume else MR.strings.action_pause,
-                        ),
-                    )
-                },
-                icon = {
-                    Icon(
-                        imageVector = if (isPaused) Icons.Filled.PlayArrow else Icons.Outlined.Pause,
-                        contentDescription = null,
-                    )
-                },
-                onClick = { if (isPaused) viewModel.resume() else viewModel.pause() },
-                expanded = true,
-                modifier = Modifier.animateFloatingActionButton(
-                    visible = groups.isNotEmpty(),
-                    alignment = Alignment.BottomEnd,
-                ),
-            )
+            // 兩個 pool 各自的暫停/繼續（與每本暫停獨立）：翻譯／重繪一顆、夜讀一顆，各在「該類有項 且 該類總開關開」
+            // 時才顯示（總開關關著 resume 是 no-op、鈕會是死的）。使用者靠這兩顆自己調度佇列先挑哪邊（佇列挑章不做自動
+            // 優先權）；CPU 讓路由 TranslationManager 的 nightGovernor 自動處理（翻譯在跑時夜讀自動降為一次一頁、低優先權）。
+            val hasTranslateItems = masterEnabled && items.any { it.kind != TranslationItem.Kind.NIGHT }
+            val hasNightItems = nightEnabled && items.any { it.kind == TranslationItem.Kind.NIGHT }
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                SmallExtendedFloatingActionButton(
+                    text = {
+                        Text(
+                            text = stringResource(
+                                if (isNightPaused) MR.strings.queue_resume_night else MR.strings.queue_pause_night,
+                            ),
+                        )
+                    },
+                    icon = {
+                        Icon(
+                            imageVector = if (isNightPaused) Icons.Filled.PlayArrow else Icons.Outlined.DarkMode,
+                            contentDescription = null,
+                        )
+                    },
+                    onClick = { if (isNightPaused) viewModel.resume(night = true) else viewModel.pause(night = true) },
+                    expanded = true,
+                    modifier = Modifier.animateFloatingActionButton(
+                        visible = hasNightItems,
+                        alignment = Alignment.BottomEnd,
+                    ),
+                )
+                SmallExtendedFloatingActionButton(
+                    text = {
+                        Text(
+                            text = stringResource(
+                                if (isTranslatePaused) {
+                                    MR.strings.queue_resume_translate
+                                } else {
+                                    MR.strings.queue_pause_translate
+                                },
+                            ),
+                        )
+                    },
+                    icon = {
+                        Icon(
+                            imageVector = if (isTranslatePaused) Icons.Filled.PlayArrow else Icons.Outlined.Pause,
+                            contentDescription = null,
+                        )
+                    },
+                    onClick = {
+                        if (isTranslatePaused) viewModel.resume(night = false) else viewModel.pause(night = false)
+                    },
+                    expanded = true,
+                    modifier = Modifier.animateFloatingActionButton(
+                        visible = hasTranslateItems,
+                        alignment = Alignment.BottomEnd,
+                    ),
+                )
+            }
         },
     ) { contentPadding ->
         Column(modifier = Modifier.padding(contentPadding)) {
@@ -320,11 +372,12 @@ private fun TranslationQueueContent(
                 )
             }
             if (groups.isEmpty()) {
+                // 兩個總開關都關才顯示「都關了」；只關翻譯、夜讀還開著，佇列仍可有夜讀工作，顯示一般空狀態。
                 EmptyScreen(
-                    stringRes = if (masterEnabled) {
+                    stringRes = if (masterEnabled || nightEnabled) {
                         MR.strings.information_no_translations
                     } else {
-                        MR.strings.translation_master_off_message
+                        MR.strings.queue_all_off_message
                     },
                 )
             } else if (isTablet) {
@@ -332,58 +385,64 @@ private fun TranslationQueueContent(
                 TwoPanelBox(
                     startContent = {
                         LazyColumn(modifier = Modifier.fillMaxSize()) {
-                            items(groups, key = { it.manga.id }) { group ->
+                            items(groups, key = { it.id }) { group ->
                                 MangaGroupCard(
                                     group = group,
-                                    paused = group.manga.id in pausedMangas,
+                                    paused = group.key in pausedMangas,
                                     expanded = false,
-                                    selected = group.manga.id == selectedMangaId,
+                                    selected = group.id == selectedGroupId,
                                     showExpandIcon = false,
-                                    onToggleExpand = { selectedMangaId = group.manga.id },
+                                    onToggleExpand = { selectedGroupId = group.id },
                                     onClickCover = { navigator.push(MangaScreen(group.manga.id)) },
-                                    onStartNow = { viewModel.startMangaNow(group.manga.id) },
-                                    onPauseManga = { viewModel.pauseManga(group.manga.id) },
-                                    onResumeManga = { viewModel.resumeManga(group.manga.id) },
-                                    onRetryManga = { viewModel.retryManga(group.manga.id) },
-                                    onCancelManga = { viewModel.cancelManga(group.manga.id) },
+                                    onStartNow = { viewModel.startMangaNow(group.key) },
+                                    onPauseManga = { viewModel.pauseManga(group.key) },
+                                    onResumeManga = { viewModel.resumeManga(group.key) },
+                                    onRetryManga = { viewModel.retryManga(group.key) },
+                                    onCancelManga = { viewModel.cancelManga(group.key) },
                                     onSetMethod = { method -> viewModel.setMangaMethod(group.manga.id, method) },
-                                    onCancelChapter = { id -> viewModel.cancelChapter(id) },
+                                    onCancelChapter = { ch -> viewModel.cancelChapter(ch) },
+                                    onPauseChapter = { ch -> viewModel.pauseChapter(ch) },
+                                    onResumeChapter = { ch -> viewModel.resumeChapter(ch) },
                                 )
                             }
                         }
                     },
                     endContent = {
                         DetailPane(
-                            group = groups.firstOrNull { it.manga.id == selectedMangaId },
-                            onCancelChapter = { id -> viewModel.cancelChapter(id) },
+                            group = groups.firstOrNull { it.id == selectedGroupId },
+                            onCancelChapter = { ch -> viewModel.cancelChapter(ch) },
+                            onPauseChapter = { ch -> viewModel.pauseChapter(ch) },
+                            onResumeChapter = { ch -> viewModel.resumeChapter(ch) },
                             modifier = Modifier.fillMaxSize(),
                         )
                     },
                 )
             } else {
                 LazyColumn(state = lazyListState, modifier = Modifier.fillMaxWidth()) {
-                    items(reorderGroups, key = { it.manga.id }) { group ->
-                        ReorderableItem(reorderableState, key = group.manga.id) {
+                    items(reorderGroups, key = { it.id }) { group ->
+                        ReorderableItem(reorderableState, key = group.id) {
                             MangaGroupCard(
                                 modifier = Modifier.longPressDraggableHandle(),
                                 group = group,
-                                paused = group.manga.id in pausedMangas,
-                                expanded = group.manga.id in expandedIds,
+                                paused = group.key in pausedMangas,
+                                expanded = group.id in expandedIds,
                                 onToggleExpand = {
-                                    if (group.manga.id in expandedIds) {
-                                        expandedIds.remove(group.manga.id)
+                                    if (group.id in expandedIds) {
+                                        expandedIds.remove(group.id)
                                     } else {
-                                        expandedIds.add(group.manga.id)
+                                        expandedIds.add(group.id)
                                     }
                                 },
                                 onClickCover = { navigator.push(MangaScreen(group.manga.id)) },
-                                onStartNow = { viewModel.startMangaNow(group.manga.id) },
-                                onPauseManga = { viewModel.pauseManga(group.manga.id) },
-                                onResumeManga = { viewModel.resumeManga(group.manga.id) },
-                                onRetryManga = { viewModel.retryManga(group.manga.id) },
-                                onCancelManga = { viewModel.cancelManga(group.manga.id) },
+                                onStartNow = { viewModel.startMangaNow(group.key) },
+                                onPauseManga = { viewModel.pauseManga(group.key) },
+                                onResumeManga = { viewModel.resumeManga(group.key) },
+                                onRetryManga = { viewModel.retryManga(group.key) },
+                                onCancelManga = { viewModel.cancelManga(group.key) },
                                 onSetMethod = { method -> viewModel.setMangaMethod(group.manga.id, method) },
-                                onCancelChapter = { id -> viewModel.cancelChapter(id) },
+                                onCancelChapter = { ch -> viewModel.cancelChapter(ch) },
+                                onPauseChapter = { ch -> viewModel.pauseChapter(ch) },
+                                onResumeChapter = { ch -> viewModel.resumeChapter(ch) },
                             )
                         }
                     }
@@ -410,7 +469,9 @@ private fun MangaGroupCard(
     onRetryManga: () -> Unit,
     onCancelManga: () -> Unit,
     onSetMethod: (String) -> Unit,
-    onCancelChapter: (Long) -> Unit,
+    onCancelChapter: (TranslationItem) -> Unit,
+    onPauseChapter: (TranslationItem) -> Unit,
+    onResumeChapter: (TranslationItem) -> Unit,
     selected: Boolean = false,
     showExpandIcon: Boolean = true,
     modifier: Modifier = Modifier,
@@ -418,6 +479,8 @@ private fun MangaGroupCard(
     val translating = group.chapters.firstOrNull { it.status == TranslationItem.Status.TRANSLATING }
     val errors = group.chapters.count { it.status == TranslationItem.Status.ERROR }
     val method = group.chapters.firstOrNull { it.method.isNotBlank() }?.method
+    // 夜讀組 → 沒有去字法可顯示/可改，控制列改放「夜讀」靜態標籤（一組只有一種 pool，不會混）。
+    val allNight = group.night
 
     Column(
         modifier = modifier
@@ -466,6 +529,9 @@ private fun MangaGroupCard(
                     if (method != null) {
                         MethodChip(method = method, editable = true, onSetMethod = onSetMethod)
                         Spacer(Modifier.width(4.dp))
+                    } else if (allNight) {
+                        NightKindLabel()
+                        Spacer(Modifier.width(4.dp))
                     }
                     GroupActionButton(
                         Icons.Outlined.KeyboardDoubleArrowUp,
@@ -490,46 +556,85 @@ private fun MangaGroupCard(
                 )
             }
         }
-        // 展開：章列（每章狀態 + ✕ 刪單章）。
+        // 展開：章列（每章狀態 + ⏸/▶ 單章暫停⇄繼續 + ✕ 刪單章）。
         AnimatedVisibility(visible = expanded) {
             Column(modifier = Modifier.fillMaxWidth()) {
                 group.chapters.forEach { ch ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = 12.dp, end = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = statusLine(ch),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
-                        IconButton(
-                            onClick = { onCancelChapter(ch.chapter.id) },
-                            modifier = Modifier.size(36.dp),
-                        ) {
-                            Icon(
-                                Icons.Outlined.Close,
-                                contentDescription = stringResource(MR.strings.action_cancel),
-                                modifier = Modifier.size(20.dp),
-                            )
-                        }
-                    }
+                    ChapterRow(
+                        item = ch,
+                        textStyle = MaterialTheme.typography.bodySmall,
+                        startPadding = 12.dp,
+                        onCancel = { onCancelChapter(ch) },
+                        onPause = { onPauseChapter(ch) },
+                        onResume = { onResumeChapter(ch) },
+                    )
                 }
             }
         }
     }
 }
 
-/** 主從雙欄的右欄：選中那本的章節清單（標題 header + 每章狀態 + ✕ 刪單章）。沒選中本則顯示空提示。 */
+/**
+ * 章列（手風琴展開列與平板右欄共用）：狀態文字 + ⏸/▶（單章暫停⇄繼續；三層 hold 的最細一層，只 hold 這一項）+ ✕。
+ * 失敗（ERROR）的章不給 ⏸——它本來就不會跑，重試才有意義。
+ */
+@Composable
+private fun ChapterRow(
+    item: TranslationItem,
+    textStyle: androidx.compose.ui.text.TextStyle,
+    startPadding: androidx.compose.ui.unit.Dp,
+    onCancel: () -> Unit,
+    onPause: () -> Unit,
+    onResume: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = startPadding, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = statusLine(item),
+            style = textStyle,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        if (item.status != TranslationItem.Status.ERROR) {
+            IconButton(
+                onClick = if (item.paused) onResume else onPause,
+                modifier = Modifier.size(36.dp),
+            ) {
+                Icon(
+                    imageVector = if (item.paused) Icons.Filled.PlayArrow else Icons.Outlined.Pause,
+                    contentDescription = stringResource(
+                        if (item.paused) MR.strings.action_resume else MR.strings.action_pause,
+                    ),
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+        IconButton(
+            onClick = onCancel,
+            modifier = Modifier.size(36.dp),
+        ) {
+            Icon(
+                Icons.Outlined.Close,
+                contentDescription = stringResource(MR.strings.action_cancel),
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+}
+
+/** 主從雙欄的右欄：選中那組的章節清單（標題 header + 每章狀態 + ⏸/▶ + ✕）。沒選中則顯示空提示。 */
 @Composable
 private fun DetailPane(
     group: MangaGroup?,
-    onCancelChapter: (Long) -> Unit,
+    onCancelChapter: (TranslationItem) -> Unit,
+    onPauseChapter: (TranslationItem) -> Unit,
+    onResumeChapter: (TranslationItem) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (group == null) {
@@ -544,39 +649,27 @@ private fun DetailPane(
     LazyColumn(modifier = modifier) {
         item {
             Text(
-                text = group.manga.title,
+                text = if (group.night) {
+                    "${group.manga.title} · ${stringResource(MR.strings.queue_kind_nightread)}"
+                } else {
+                    group.manga.title
+                },
                 style = MaterialTheme.typography.titleMedium,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             )
         }
-        items(group.chapters, key = { it.chapter.id }) { ch ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 16.dp, end = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = statusLine(ch),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                IconButton(
-                    onClick = { onCancelChapter(ch.chapter.id) },
-                    modifier = Modifier.size(36.dp),
-                ) {
-                    Icon(
-                        Icons.Outlined.Close,
-                        contentDescription = stringResource(MR.strings.action_cancel),
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-            }
+        // key 帶 kind：同章可同時有翻譯項與重繪項，只用 chapter.id 會撞 LazyColumn 重複 key。
+        items(group.chapters, key = { "${it.chapter.id}:${it.kind}" }) { ch ->
+            ChapterRow(
+                item = ch,
+                textStyle = MaterialTheme.typography.bodyMedium,
+                startPadding = 16.dp,
+                onCancel = { onCancelChapter(ch) },
+                onPause = { onPauseChapter(ch) },
+                onResume = { onResumeChapter(ch) },
+            )
         }
     }
 }
@@ -596,7 +689,7 @@ private fun GroupActionButton(
     }
 }
 
-/** 摺疊狀態的副標：翻譯中那話 + 頁進度、剩 N 話、失敗數、已暫停。 */
+/** 摺疊狀態的副標：（全是夜讀項時先標「夜讀」）翻譯中那話 + 頁進度、剩 N 話、失敗數、已暫停。 */
 @Composable
 private fun groupSubtitle(
     group: MangaGroup,
@@ -604,12 +697,21 @@ private fun groupSubtitle(
     translating: TranslationItem?,
     errors: Int,
 ): String = buildString {
+    if (group.night) {
+        append(stringResource(MR.strings.queue_kind_nightread))
+        append(" · ")
+    }
     if (translating != null) {
-        append(stringResource(MR.strings.translation_status_translating))
+        // 夜讀組不是在翻譯：進行中的文案用「產生中」
+        append(
+            stringResource(
+                if (group.night) MR.strings.nightread_status_rendering else MR.strings.translation_status_translating,
+            ),
+        )
         if (translating.total > 0) append(" ${translating.done}/${translating.total}")
         append(" · ")
     }
-    append(stringResource(MR.strings.queue_remaining_chapters, group.chapters.size))
+    append(pluralStringResource(MR.plurals.queue_remaining_chapters, group.chapters.size, group.chapters.size))
     if (errors > 0) {
         append(" · ")
         append(stringResource(MR.strings.queue_chapters_failed, errors))
@@ -739,6 +841,17 @@ private fun MethodChip(
     }
 }
 
+/** 夜讀項的靜態標籤（取代去字法晶片；夜讀與去字法無關、無可編輯項）。樣式同不可編輯的 [MethodChip]。 */
+@Composable
+private fun NightKindLabel() {
+    Text(
+        text = stringResource(MR.strings.queue_kind_nightread),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(end = 4.dp),
+    )
+}
+
 /** 去字方法原始字串 → 友善標籤（對齊 MangaScreen/ReaderPageActionsDialog 的 2 門別命名）。 */
 @Composable
 private fun methodLabel(raw: String): String = when (raw) {
@@ -753,17 +866,30 @@ private val METHOD_IDS = listOf("boxfill", "auto_whole")
 @Composable
 private fun statusLine(item: TranslationItem): String {
     val chapter = item.chapter.name
-    val status = when (item.status) {
-        TranslationItem.Status.QUEUE -> stringResource(MR.strings.translation_status_queued)
-        TranslationItem.Status.TRANSLATING ->
-            if (item.total > 0) {
-                "${stringResource(MR.strings.translation_status_translating)} ${item.done}/${item.total}"
-            } else {
-                stringResource(MR.strings.translation_status_translating)
-            }
-        TranslationItem.Status.ERROR -> stringResource(MR.strings.translation_status_error)
+    val status = when {
+        // 單章暫停：QUEUE 但被 hold 住（TRANSLATING 被停下回 QUEUE 後也走這）
+        item.paused && item.status != TranslationItem.Status.ERROR ->
+            stringResource(MR.strings.queue_manga_paused)
+        item.status == TranslationItem.Status.QUEUE -> stringResource(MR.strings.translation_status_queued)
+        item.status == TranslationItem.Status.TRANSLATING -> {
+            // 夜讀項不是在翻譯：進行中的文案用「產生中」
+            val running = stringResource(
+                if (item.kind == TranslationItem.Kind.NIGHT) {
+                    MR.strings.nightread_status_rendering
+                } else {
+                    MR.strings.translation_status_translating
+                },
+            )
+            if (item.total > 0) "$running ${item.done}/${item.total}" else running
+        }
+        else -> stringResource(MR.strings.translation_status_error)
     }
-    return "$chapter • $status"
+    // 夜讀項在章列多帶一個「夜讀」標籤：同章可能同時有翻譯項與夜讀項，沒標籤分不出哪列是哪個。
+    return if (item.kind == TranslationItem.Kind.NIGHT) {
+        "$chapter • ${stringResource(MR.strings.queue_kind_nightread)} • $status"
+    } else {
+        "$chapter • $status"
+    }
 }
 
 private class TranslationQueueViewModel(
@@ -781,8 +907,9 @@ private class TranslationQueueViewModel(
     }
 
     val queueState: StateFlow<List<TranslationItem>> = translationManager.queueState
-    val isPaused: StateFlow<Boolean> = translationManager.isPaused
-    val pausedMangas: StateFlow<Set<Long>> = translationManager.pausedMangas
+    val isTranslatePaused: StateFlow<Boolean> = translationManager.isTranslatePaused
+    val isNightPaused: StateFlow<Boolean> = translationManager.isNightPaused
+    val pausedMangas: StateFlow<Set<QueuePoolKey>> = translationManager.pausedMangas
 
     /**
      * Yakuyomi：「翻譯」分頁再點一次的三態循環（總開關 × 引擎是否載入），一直切換循環：
@@ -796,17 +923,21 @@ private class TranslationQueueViewModel(
         val warm = engineService.warm.value
         return when {
             master && warm -> {
-                val hadTasks = translationManager.queueState.value.isNotEmpty()
-                if (hadTasks) translationManager.pause()
+                // 只暫停翻譯 pool（引擎是翻譯那條在用；夜讀 pool 不用 warm 引擎、不必陪停）
+                val hadTasks = translationManager.queueState.value.any { it.kind != TranslationItem.Kind.NIGHT }
+                if (hadTasks) translationManager.pause(night = false)
                 engineService.shutdownAsync()
                 if (hadTasks) MR.strings.translation_retap_paused_unloaded else MR.strings.translation_retap_unloaded
             }
             master -> {
                 translationPreferences.translationMasterEnabled.set(false)
+                // 同 MoreTab／設定頁：切換副作用走 manager（中止當前章、沒活就停前景服務、釋放引擎）
+                translationManager.onMasterEnabledChanged(false)
                 MR.strings.translation_retap_master_off
             }
             else -> {
                 translationPreferences.translationMasterEnabled.set(true)
+                translationManager.onMasterEnabledChanged(true) // 有排隊的翻譯項且未暫停 → 續跑 + 前景服務
                 engineService.warmUpAsync()
                 MR.strings.translation_retap_master_on
             }
@@ -814,27 +945,29 @@ private class TranslationQueueViewModel(
     }
 
     fun clearQueue() = translationManager.clearQueue()
-    fun pause() = translationManager.pause()
-    fun resume() = translationManager.resume()
+    fun pause(night: Boolean) = translationManager.pause(night)
+    fun resume(night: Boolean) = translationManager.resume(night)
 
-    // 單章刪除（展開列）。
-    fun cancelChapter(chapterId: Long) = translationManager.cancel(listOf(chapterId))
+    // 單章操作（章列）。帶 kind：同章可同時有翻譯項與夜讀項，只動它那一列、不連同章的另一種一起。
+    fun cancelChapter(item: TranslationItem) = translationManager.cancel(listOf(item.chapter.id), item.kind)
+    fun pauseChapter(item: TranslationItem) = translationManager.pauseChapter(item.chapter.id, item.kind)
+    fun resumeChapter(item: TranslationItem) = translationManager.resumeChapter(item.chapter.id, item.kind)
 
-    // 以「本」為單位的操作。
-    fun startMangaNow(mangaId: Long) = translationManager.startMangaNow(mangaId)
-    fun pauseManga(mangaId: Long) = translationManager.pauseManga(mangaId)
-    fun resumeManga(mangaId: Long) = translationManager.resumeManga(mangaId)
-    fun retryManga(mangaId: Long) = translationManager.retryManga(mangaId)
-    fun cancelManga(mangaId: Long) = translationManager.cancelManga(mangaId)
+    // 以「本 × pool」組為單位的操作。
+    fun startMangaNow(key: QueuePoolKey) = translationManager.startMangaNow(key.mangaId, key.night)
+    fun pauseManga(key: QueuePoolKey) = translationManager.pauseManga(key.mangaId, key.night)
+    fun resumeManga(key: QueuePoolKey) = translationManager.resumeManga(key.mangaId, key.night)
+    fun retryManga(key: QueuePoolKey) = translationManager.retryManga(key.mangaId, key.night)
+    fun cancelManga(key: QueuePoolKey) = translationManager.cancelManga(key.mangaId, key.night)
 
-    /** Yakuyomi：重試佇列中所有含失敗（ERROR）章節的漫畫（逐本 retryManga）。 */
+    /** Yakuyomi：重試佇列中所有含失敗（ERROR）章節的組（逐組 retryManga）。 */
     fun retryAllFailed() {
         queueState.value
             .filter { it.status == TranslationItem.Status.ERROR }
-            .map { it.manga.id }
+            .map { it.poolKey }
             .distinct()
-            .forEach { translationManager.retryManga(it) }
+            .forEach { translationManager.retryManga(it.mangaId, it.night) }
     }
     fun setMangaMethod(mangaId: Long, method: String) = translationManager.setMangaMethod(mangaId, method)
-    fun reorderMangas(orderedMangaIds: List<Long>) = translationManager.reorderMangas(orderedMangaIds)
+    fun reorderGroups(orderedKeys: List<QueuePoolKey>) = translationManager.reorderGroups(orderedKeys)
 }

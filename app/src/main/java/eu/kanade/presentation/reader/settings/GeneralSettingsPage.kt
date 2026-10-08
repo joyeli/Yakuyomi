@@ -7,10 +7,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import eu.kanade.tachiyomi.data.nightread.NightLevel
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderSettingsViewModel
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
 import eu.kanade.tachiyomi.util.system.hasDisplayCutout
+import tachiyomi.domain.translation.service.TranslationPreferences
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.CheckboxItem
 import tachiyomi.presentation.core.components.SettingsChipRow
@@ -18,12 +21,20 @@ import tachiyomi.presentation.core.components.SliderItem
 import tachiyomi.presentation.core.i18n.pluralStringResource
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.collectAsState
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 
 private val themes = listOf(
     MR.strings.black_background to 1,
     MR.strings.gray_background to 2,
     MR.strings.white_background to 0,
     MR.strings.automatic_background to 3,
+)
+
+/** 夜讀填黑程度（標準／更多；與懸浮鈕同一個偏好，這裡給有文字的版本）。 */
+private val nightLevels = listOf(
+    MR.strings.nightread_level_chip_standard to NightLevel.STANDARD,
+    MR.strings.nightread_level_chip_more to NightLevel.MORE,
 )
 
 private val flashColors = listOf(
@@ -55,6 +66,31 @@ internal fun ColumnScope.GeneralPage(viewModel: ReaderSettingsViewModel) {
                 onClick = { viewModel.preferences.readerTheme.set(value) },
                 label = { Text(stringResource(labelRes)) },
             )
+        }
+    }
+
+    // Yakuyomi 夜讀模式：有夜讀版（章節夾 `.yakuyomi/` 的夜讀檔）的頁改顯示夜讀版、沒有的照常顯示原圖。
+    // 這裡只翻偏好；切換後當前/相鄰章的重畫由 ReaderViewModel 觀察此偏好統一處理（與懸浮鈕同一條路）。
+    // 只在夜讀表層總開關（「其他」頁 TranslationPreferences.nightReadEnabled）開時顯示；ReaderSettingsViewModel 只帶
+    // ReaderPreferences → 這裡直接從 Injekt 取（同翻譯設定頁的做法）。
+    val translationPreferences = remember { Injekt.get<TranslationPreferences>() }
+    val nightReadEnabled by translationPreferences.nightReadEnabled.collectAsState()
+    if (nightReadEnabled) {
+        CheckboxItem(
+            label = stringResource(MR.strings.pref_reader_nightread_mode),
+            pref = viewModel.preferences.nightReadMode,
+        )
+        // 填黑程度（有文字的替代入口，與懸浮鈕的訊號格圖示同一個偏好）：寫入後 ReaderViewModel debounce 再只重畫會變的頁。
+        val fillLevel by translationPreferences.nightReadFillLevel.collectAsState()
+        val currentLevel = NightLevel.fromPref(fillLevel)
+        SettingsChipRow(MR.strings.pref_reader_nightread_fill_level) {
+            nightLevels.map { (labelRes, level) ->
+                FilterChip(
+                    selected = currentLevel == level,
+                    onClick = { translationPreferences.nightReadFillLevel.set(level.prefValue) },
+                    label = { Text(stringResource(labelRes)) },
+                )
+            }
         }
     }
 

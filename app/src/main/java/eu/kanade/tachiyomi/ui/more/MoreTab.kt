@@ -23,6 +23,7 @@ import eu.kanade.presentation.util.Tab
 import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.translation.TranslationManager
+import eu.kanade.tachiyomi.data.translation.model.TranslationItem
 import eu.kanade.tachiyomi.ui.capture.CaptureScreen
 import eu.kanade.tachiyomi.ui.category.CategoryScreen
 import eu.kanade.tachiyomi.ui.download.DownloadQueueScreen
@@ -78,6 +79,8 @@ data object MoreTab : Tab {
             onIncognitoModeChange = { viewModel.incognitoMode = it },
             translationMasterEnabled = viewModel.translationMasterEnabled,
             onTranslationMasterChange = { viewModel.setTranslationMaster(it) },
+            nightReadEnabled = viewModel.nightReadEnabled,
+            onNightReadChange = { viewModel.applyNightRead(it) },
             onClickDownloadQueue = { navigator.push(DownloadQueueScreen) },
             // Yakuyomi：「更新」分頁已從導覽列移除 → 從這裡切換過去（翻譯佇列改成導覽列分頁）。
             onClickUpdates = { scope.launch { HomeScreen.openTab(HomeScreen.Tab.Updates) } },
@@ -124,6 +127,16 @@ class MoreViewModel(
         translationManager.onMasterEnabledChanged(enabled)
     }
 
+    // Yakuyomi：夜讀表層總開關（獨立於翻譯總開關）；set 後觸發 manager 副作用（關＝夜讀項在頁邊界停、不再挑；開＝續跑）。
+    // 關閉時順手把 reader 的「夜讀模式」顯示偏好也關掉：入口全隱藏後若還顯示著夜讀版，使用者會沒地方關（同 applyEinkMode
+    // 一次套一組 reader 偏好的做法）；ReaderViewModel 觀察 nightReadMode 會自行重畫回原圖。
+    var nightReadEnabled by translationPreferences.nightReadEnabled.asState(viewModelScope)
+    fun applyNightRead(enabled: Boolean) {
+        nightReadEnabled = enabled
+        if (!enabled) readerPreferences.nightReadMode.set(false)
+        translationManager.onNightEnabledChanged(enabled)
+    }
+
     private var _downloadQueueState: MutableStateFlow<DownloadQueueState> = MutableStateFlow(DownloadQueueState.Stopped)
     val downloadQueueState: StateFlow<DownloadQueueState> = _downloadQueueState.asStateFlow()
 
@@ -151,8 +164,15 @@ class MoreViewModel(
         viewModelScope.launchIO {
             combine(
                 translationManager.queueState,
-                translationManager.isPaused,
-            ) { queue, paused -> Pair(queue.size, paused) }
+                translationManager.isTranslatePaused,
+                translationManager.isNightPaused,
+            ) { queue, translatePaused, nightPaused ->
+                // 兩個 pool 各自暫停：佇列裡每一項所屬的 pool 都暫停了才算「已暫停」，否則有一條在跑就算「翻譯中」
+                val allPaused = queue.isNotEmpty() && queue.all {
+                    if (it.kind == TranslationItem.Kind.NIGHT) nightPaused else translatePaused
+                }
+                Pair(queue.size, allPaused)
+            }
                 .collectLatest { (size, paused) ->
                     _translationQueueState.value = when {
                         size == 0 -> TranslationQueueState.Stopped

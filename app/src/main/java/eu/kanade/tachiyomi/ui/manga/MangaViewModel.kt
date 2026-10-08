@@ -29,10 +29,12 @@ import eu.kanade.domain.track.model.AutoTrackState
 import eu.kanade.domain.track.service.TrackPreferences
 import eu.kanade.presentation.manga.DownloadAction
 import eu.kanade.presentation.manga.components.ChapterDownloadAction
+import eu.kanade.presentation.manga.components.ChapterNightStatus
 import eu.kanade.presentation.util.formattedMessage
 import eu.kanade.tachiyomi.data.download.DownloadCache
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.download.model.Download
+import eu.kanade.tachiyomi.data.nightread.NightPages
 import eu.kanade.tachiyomi.data.track.EnhancedTracker
 import eu.kanade.tachiyomi.data.track.TrackerManager
 import eu.kanade.tachiyomi.data.translation.TranslationCache
@@ -48,6 +50,8 @@ import eu.kanade.tachiyomi.util.removeCovers
 import eu.kanade.tachiyomi.util.storage.DiskUtil
 import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
@@ -60,6 +64,7 @@ import logcat.LogPriority
 import mihon.core.viewmodel.StateViewModel
 import mihon.domain.chapter.interactor.FilterChaptersForDownload
 import mihon.domain.source.interactor.UpdateMangaFromRemote
+import tachiyomi.core.common.i18n.pluralStringResource
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.preference.CheckboxState
 import tachiyomi.core.common.preference.TriState
@@ -203,12 +208,16 @@ class MangaViewModel(
                 getMangaAndChapters.subscribe(mangaId, applyScanlatorFilter = true).distinctUntilChanged(),
                 downloadCache.changes,
                 downloadManager.queueState,
-            ) { mangaAndChapters, _, _ -> mangaAndChapters }
+                // Yakuyomi：夜讀版磁碟狀態變了（做完一章／翻譯重繪作廢舊版）→ 重掃 hasNightPages，指示器才不會卡在 DONE
+                translationManager.nightVersion,
+            ) { mangaAndChapters, _, _, _ -> mangaAndChapters }
                 .collectLatest { (manga, chapters) ->
+                    val items = chapters.toChapterListItems(manga)
                     updateSuccessState {
                         it.copy(
                             manga = manga,
-                            chapters = chapters.toChapterListItems(manga),
+                            // 佇列狀態在寫入當下才讀（見 currentTranslationObservation）
+                            chapters = items.withTranslationState(currentTranslationObservation()),
                         )
                     }
                 }
@@ -261,15 +270,21 @@ class MangaViewModel(
             val needRefreshInfo = !manga.initialized || autoRefreshOnOpen
             val needRefreshChapter = chapters.isEmpty() || autoRefreshOnOpen
 
+            // 兩個 DB 查詢先做完：下面寫入時最後才讀佇列狀態（具名參數由左到右求值，查詢放在後面的話佇列狀態會先讀、
+            // 查詢期間的佇列變化在 Loading 時是 no-op，就被這份較舊的值蓋掉）
+            val availableScanlators = getAvailableScanlators.await(mangaId)
+            val excludedScanlators = getExcludedScanlators.await(mangaId)
+
             // Show what we have earlier
             mutableState.update {
                 State.Success(
                     manga = manga,
                     source = Injekt.get<SourceManager>().getOrStub(manga.source),
                     isFromSource = isFromSource,
-                    chapters = chapters,
-                    availableScanlators = getAvailableScanlators.await(mangaId),
-                    excludedScanlators = getExcludedScanlators.await(mangaId),
+                    // 佇列狀態在寫入當下才讀：Loading 期間佇列觀察者的更新是 no-op，這裡不能用掃描前的快照
+                    chapters = chapters.withTranslationState(currentTranslationObservation()),
+                    availableScanlators = availableScanlators,
+                    excludedScanlators = excludedScanlators,
                     isRefreshingData = needRefreshInfo || needRefreshChapter,
                     dialog = null,
                     hideMissingChapters = libraryPreferences.hideMissingChapters.get(),
@@ -618,34 +633,45 @@ class MangaViewModel(
             combine(
                 translationManager.queueState,
                 translationManager.translatedIds,
-            ) { queue, translated -> queue to translated }
-                .collect { (queue, translated) ->
-                    withUIContext { updateTranslationState(queue, translated) }
-                }
-        }
-    }
-
-    private fun updateTranslationState(queue: List<TranslationItem>, translatedIds: Set<Long>) {
-        updateSuccessState { successState ->
-            val byId = queue.associateBy { it.chapter.id }
-            val newChapters = successState.chapters.map { item ->
-                val t = byId[item.id]
-                item.copy(
-                    translationStatus = t?.status,
-                    translationProgress = if (t != null && t.total > 0) t.done * 100 / t.total else 0,
-                    // 只增不覆蓋：保留 toChapterListItems 掃出的持久「已翻」，再加上本 session 翻成的
-                    isTranslated = item.isTranslated || item.id in translatedIds,
-                )
+                translationManager.nightDoneIds,
+                translationPreferences.nightReadEnabled.changes(),
+            ) { queue, translated, nightDone, nightEnabled ->
+                TranslationObservation(queue, translated, nightDone, nightEnabled)
             }
-            successState.copy(chapters = newChapters)
+                .collect { withUIContext { updateTranslationState(it) } }
         }
     }
 
-    private fun List<Chapter>.toChapterListItems(manga: Manga): List<ChapterList.Item> {
+    private fun updateTranslationState(obs: TranslationObservation) {
+        updateSuccessState { successState ->
+            successState.copy(chapters = successState.chapters.withTranslationState(obs))
+        }
+    }
+
+    /**
+     * 佇列與本 session 集合的**當下**值。章節列掃磁碟（[toChapterListItems]）要好幾秒（SAF），掃完寫入時一律在
+     * `updateSuccessState` 的 lambda 裡呼叫這個、重套一次佇列狀態：用掃描開頭的快照的話，掃描期間佇列觀察者套上去的新狀態
+     * 會被舊快照蓋回去（例如夜讀做完一章 → nightVersion 觸發重掃、重掃開頭佇列還沒移除那項 → 掃完把指示器寫回「產生中」，
+     * 之後佇列沒有新變化就一直轉圈）。
+     */
+    private fun currentTranslationObservation() = TranslationObservation(
+        queue = translationManager.queueState.value,
+        translatedIds = translationManager.translatedIds.value,
+        nightDoneIds = translationManager.nightDoneIds.value,
+        nightEnabled = translationPreferences.nightReadEnabled.get(),
+    )
+
+    /**
+     * 掃磁碟建章節列：下載狀態與磁碟上的「已翻」「已有夜讀版」「可更新」「能不能夜讀」。佇列與本 session 的狀態不在這裡算——
+     * 呼叫端寫入時以 [withTranslationState] 套上當下的值（見 [currentTranslationObservation]）。
+     */
+    private suspend fun List<Chapter>.toChapterListItems(manga: Manga): List<ChapterList.Item> {
         val isLocal = manga.isLocal()
-        val translations = translationManager.queueState.value.associateBy { it.chapter.id }
-        val translatedIds = translationManager.translatedIds.value
+        val scanContext = currentCoroutineContext()
         return map { chapter ->
+            // 每章檢查一次取消：掃描是阻塞的 SAF 呼叫，佇列跑著時 nightVersion 每做完一章就觸發一次重掃，collectLatest
+            // 要能在章與章之間停掉舊的那次，不然舊掃描會一直跑完、佔著磁碟
+            scanContext.ensureActive()
             val activeDownload = if (isLocal) {
                 null
             } else {
@@ -668,22 +694,23 @@ class MangaViewModel(
                 else -> Download.State.NOT_DOWNLOADED
             }
 
-            val translation = translations[chapter.id]
+            // 磁碟上的「已翻」與夜讀資訊，只對已下載章、同一次找章節夾一起算（SAF 上找章節夾要列目錄）：
+            //  - 已翻：manifest 有標記（跨重啟；observer combine 了 downloadCache.changes，下載增刪會重跑這裡刷新）。
+            //  - 已有夜讀版：是鬆散圖夾，而且 .yakuyomi/ 有完成標記（std／三檔 l1）或舊版單檔；同一次列目錄順便判「可更新」
+            //    （有舊規則產生的頁，見 NightPages 的規則版本）與「能不能夜讀」（壓縮檔章、本機 epub、找不到章節夾 → 夜讀
+            //    做不了，不畫夜讀入口）。
+            // 夜讀總開關關著也照掃：這裡只在 downloadCache 變動時重跑，若關著跳過，開啟那一刻會先閃一輪 NONE。
+            val disk = if (downloaded) translationManager.chapterDiskInfo(manga, chapter) else null
+            val nightInfo = disk?.night
             ChapterList.Item(
                 chapter = chapter,
                 downloadState = downloadState,
                 downloadProgress = activeDownload?.progress ?: 0,
-                translationStatus = translation?.status,
-                translationProgress = if (translation != null && translation.total > 0) {
-                    translation.done * 100 / translation.total
-                } else {
-                    0
-                },
-                // 持久「已翻」：session 翻成的 OR 已下載且 manifest 有標記（跨重啟；observer combine 了
-                // downloadCache.changes，下載增刪會重跑這裡刷新）。只對已下載章掃 manifest（在 launchIO）。
-                isTranslated = chapter.id in translatedIds ||
-                    (downloaded && translationManager.isTranslated(manga, chapter)),
+                translatedOnDisk = disk?.translated == true,
                 selected = chapter.id in selectedChapterIds,
+                nightOnDisk = nightInfo != null && nightInfo.summary.state != NightPages.ChapterState.NONE,
+                nightOutdated = nightInfo?.summary?.outdated == true,
+                nightUnsupported = nightInfo != null && !nightInfo.loose,
             )
         }
     }
@@ -877,12 +904,52 @@ class MangaViewModel(
         return book to url
     }
 
-    /** 重繪選取章（換 [method] 去字法重做去字+排版，復用素材、不重跑 OCR/翻譯）。對象＝已下載章（同翻譯）。 */
+    /**
+     * 重繪選取章（換 [method] 去字法重做去字+排版，復用素材、不重跑 OCR/翻譯）。對象＝已下載章（同翻譯）。
+     * 沒有重繪素材的章（翻譯時沒開「保留重繪素材」、只存了夜讀素材、壓縮檔章）不排，提示略過幾話——排了只會重繪 0 頁、
+     * 整章標錯誤。
+     */
     fun runChapterReRenderAction(items: List<ChapterList.Item>, method: String) {
         val manga = successState?.manga ?: return
         val downloaded = items.filter { it.isDownloaded }.map { it.chapter }
         if (downloaded.isEmpty()) return
-        translationManager.reRender(manga, downloaded, method)
+        viewModelScope.launchIO {
+            val (eligible, skipped) = downloaded.partition { translationManager.hasReRenderMaterials(manga, it) }
+            if (eligible.isNotEmpty()) translationManager.reRender(manga, eligible, method)
+            if (skipped.isNotEmpty()) {
+                snackbarHostState.showSnackbar(
+                    context.pluralStringResource(MR.plurals.rerender_skipped_no_materials, skipped.size, skipped.size),
+                )
+            }
+        }
+    }
+
+    /**
+     * 產生選取章的夜讀版（[TranslationManager.nightRender]：人物分割 + 白底變暗另存夜讀檔，不翻譯）。
+     * 對象＝已下載章（同翻譯；不需已翻——夜讀是對頁圖本身的重繪）。舊章補做的入口；新翻完的章由佇列自動接。
+     * 夜讀模型（yolo/cseg）一顆都沒有、或翻譯模型（偵測器 dbnet 與夜讀共用）缺/舊版 → 提示後不排入，
+     * 免得排入後 renderNightChapter 拋錯、整章變紅才知道缺模型。
+     */
+    fun runChapterNightRenderAction(items: List<ChapterList.Item>) {
+        val manga = successState?.manga ?: return
+        val downloaded = items.filter { it.isDownloaded }.map { it.chapter }
+        if (downloaded.isEmpty()) return
+        viewModelScope.launchIO {
+            // 夜讀只要偵測器（dbnet）＋人物分割，不要求 OCR／去字模型齊（非翻譯本、BYOM 只放這兩顆也能用）
+            val modelsOk = TranslationEngineConfig.detectorResolvable(context) &&
+                TranslationEngineConfig.charSegResolvable(context)
+            if (!modelsOk) {
+                snackbarHostState.showSnackbar(context.stringResource(MR.strings.nightread_missing_models))
+                return@launchIO
+            }
+            // 只鬆散圖夾（本機來源的 cbz/rar/7z/epub 章 downloaded 恆為 true，排了只會整章紅）→ 先分流、提示不支援
+            val (loose, unsupported) = downloaded.partition { translationManager.isLooseChapter(manga, it) }
+            if (unsupported.isNotEmpty()) {
+                snackbarHostState.showSnackbar(context.stringResource(MR.strings.nightread_archive_unsupported))
+            }
+            if (loose.isEmpty()) return@launchIO
+            translationManager.nightRender(manga, loose)
+        }
     }
 
     /**
@@ -892,6 +959,7 @@ class MangaViewModel(
      * 對象限定＝既下載又已翻的章（[ChapterList.Item.isDownloaded] && [ChapterList.Item.isTranslated]）：
      * 沒下載＝沒素材可重繪、沒翻過＝重繪無意義，皆排除（與單列指示器/底部選單一致）。
      * 沒有可重繪的章 → 提示後返回；否則讀目前去字法字串排入佇列、回報排入幾章。
+     * 已翻章裡沒有重繪素材的（翻譯時沒開「保留重繪素材」、只存了夜讀素材、壓縮檔章）不排，另外提示略過幾話。
      */
     fun runMangaReRenderAction() {
         val state = successState ?: return
@@ -906,11 +974,23 @@ class MangaViewModel(
         }
         // 目前的去字法原始字串（boxfill / auto_whole / auto_tile），與設定頁選擇器寫入的同一格
         val method = translationPreferences.inpaintMethod.get()
-        translationManager.reRender(state.manga, chapters, method)
-        viewModelScope.launch {
-            snackbarHostState.showSnackbar(
-                message = context.stringResource(MR.strings.pref_translation_render_update_queued, chapters.size),
-            )
+        viewModelScope.launchIO {
+            val (eligible, skipped) = chapters.partition { translationManager.hasReRenderMaterials(state.manga, it) }
+            if (eligible.isNotEmpty()) {
+                translationManager.reRender(state.manga, eligible, method)
+                snackbarHostState.showSnackbar(
+                    message = context.pluralStringResource(
+                        MR.plurals.pref_translation_render_update_queued,
+                        eligible.size,
+                        eligible.size,
+                    ),
+                )
+            }
+            if (skipped.isNotEmpty()) {
+                snackbarHostState.showSnackbar(
+                    context.pluralStringResource(MR.plurals.rerender_skipped_no_materials, skipped.size, skipped.size),
+                )
+            }
         }
     }
 
@@ -1459,10 +1539,93 @@ sealed class ChapterList {
         val downloadProgress: Int,
         val translationStatus: TranslationItem.Status? = null,
         val translationProgress: Int = 0,
+        /** 已翻＝[translatedOnDisk] OR 本 session 翻成的（[withTranslationState] 算）。 */
         val isTranslated: Boolean = false,
         val selected: Boolean = false,
+        /** 已有夜讀版＝[nightOnDisk] OR 本 session 做完的（[withTranslationState] 算）。 */
+        val hasNightPages: Boolean = false,
+        /** 夜讀版裡有舊規則產生的頁（app 更新改了夜讀規則；見 NightPages 的規則版本）：指示器畫「可更新」。只從磁碟掃。 */
+        val nightOutdated: Boolean = false,
+        /** 章節列夜讀指示器狀態（model 算好；夜讀總開關關 / 未下載 / 做不了夜讀＝HIDDEN，UI 不畫）。 */
+        val nightStatus: ChapterNightStatus = ChapterNightStatus.HIDDEN,
+        /** 夜讀產生中的進度 0..1；沒在跑 / 未知＝null（畫不定轉圈）。 */
+        val nightProgress: Float? = null,
+        /**
+         * 磁碟上的「已翻」（manifest／壓縮檔 marker；只在掃磁碟時算）。和本 session 集合分開存：session 集合清掉時
+         * （刪下載、重新下載，見 TranslationManager.forgetChapterOutputs）合併值才退得回去。
+         */
+        val translatedOnDisk: Boolean = false,
+        /** 磁碟上的「已有夜讀版」（`.yakuyomi/` 有完成標記或舊版單檔；只在掃磁碟時算）。分開存的理由同 [translatedOnDisk]。 */
+        val nightOnDisk: Boolean = false,
+        /** 已下載但做不了夜讀（壓縮檔章、本機 epub、找不到章節夾）：夜讀入口不畫。只在掃磁碟時算。 */
+        val nightUnsupported: Boolean = false,
     ) : ChapterList() {
         val id = chapter.id
         val isDownloaded = downloadState == Download.State.DOWNLOADED
+    }
+}
+
+/**
+ * 章節列夜讀指示器的狀態（純函式，JVM 測試見 ChapterNightStatusTest）：夜讀總開關關 / 未下載 / 這章做不了夜讀
+ * （[unsupported]：壓縮檔章等）→ HIDDEN（不畫）；佇列有該章 NIGHT 項 → 依其狀態（產生中、排隊中、失敗都蓋過「可更新」：
+ * 已在處理的章不必再提示）；否則看有沒有夜讀版（本 session 完成或 `.yakuyomi/` 裡有完成標記 std／三檔 l1 或舊版單檔，
+ * 見 [TranslationManager.nightSummary]）→ 有舊規則產生的頁（[outdated]）＝UPDATABLE、否則 DONE；沒有 → NONE。
+ */
+internal fun nightStatusOf(
+    nightEnabled: Boolean,
+    downloaded: Boolean,
+    queued: TranslationItem?,
+    hasNightPages: Boolean,
+    outdated: Boolean,
+    unsupported: Boolean = false,
+): ChapterNightStatus = when {
+    !nightEnabled || !downloaded || unsupported -> ChapterNightStatus.HIDDEN
+    queued?.status == TranslationItem.Status.TRANSLATING -> ChapterNightStatus.RENDERING
+    queued?.status == TranslationItem.Status.QUEUE -> ChapterNightStatus.QUEUED
+    queued?.status == TranslationItem.Status.ERROR -> ChapterNightStatus.ERROR
+    hasNightPages && outdated -> ChapterNightStatus.UPDATABLE
+    hasNightPages -> ChapterNightStatus.DONE
+    else -> ChapterNightStatus.NONE
+}
+
+/** [MangaViewModel] 觀察翻譯佇列時一次 combine 的來源：佇列快照、本 session 翻成 / 夜讀完成集合、夜讀總開關。 */
+internal data class TranslationObservation(
+    val queue: List<TranslationItem>,
+    val translatedIds: Set<Long>,
+    val nightDoneIds: Set<Long>,
+    val nightEnabled: Boolean,
+)
+
+/**
+ * 把佇列與本 session 的狀態套到章節列（純函式，JVM 測試見 ChapterListTranslationStateTest）。只讀 [obs] 與每項的磁碟欄位
+ * （[ChapterList.Item.translatedOnDisk]／[ChapterList.Item.nightOnDisk]／[ChapterList.Item.nightOutdated]／
+ * [ChapterList.Item.nightUnsupported]），不讀這一項先前套上去的值，所以同一個 [obs] 套幾次結果都一樣，誰最後寫誰就對：
+ * 掃磁碟那條在寫入當下拿最新的 [obs] 重套，不會被掃描開頭的舊快照蓋回去；session 集合清掉時合併值也跟著退回。
+ * 翻譯指示器只反映翻譯/重繪項、夜讀指示器只反映 NIGHT 項：同章可同時有兩種項，各自顯示、互不遮蓋。
+ */
+internal fun List<ChapterList.Item>.withTranslationState(obs: TranslationObservation): List<ChapterList.Item> {
+    val (nightQueue, translationQueue) = obs.queue.partition { it.kind == TranslationItem.Kind.NIGHT }
+    val byId = translationQueue.associateBy { it.chapter.id }
+    val nightById = nightQueue.associateBy { it.chapter.id }
+    return map { item ->
+        val t = byId[item.id]
+        val n = nightById[item.id]
+        val hasNight = item.nightOnDisk || item.id in obs.nightDoneIds
+        item.copy(
+            translationStatus = t?.status,
+            translationProgress = if (t != null && t.total > 0) t.done * 100 / t.total else 0,
+            isTranslated = item.translatedOnDisk || item.id in obs.translatedIds,
+            hasNightPages = hasNight,
+            nightStatus = nightStatusOf(
+                obs.nightEnabled,
+                item.isDownloaded,
+                n,
+                hasNight,
+                item.nightOutdated,
+                item.nightUnsupported,
+            ),
+            // 夜讀項進度 0..1（頁 done/total）；沒在佇列 / total 未知 → null（指示器畫不定轉圈）
+            nightProgress = n?.takeIf { it.total > 0 }?.let { it.done.toFloat() / it.total },
+        )
     }
 }

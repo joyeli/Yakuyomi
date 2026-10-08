@@ -55,6 +55,7 @@ import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.presentation.components.relativeDateText
 import eu.kanade.presentation.manga.components.ChapterDownloadAction
 import eu.kanade.presentation.manga.components.ChapterHeader
+import eu.kanade.presentation.manga.components.ChapterNightStatus
 import eu.kanade.presentation.manga.components.ChapterTranslationState
 import eu.kanade.presentation.manga.components.ExpandableMangaDescription
 import eu.kanade.presentation.manga.components.MangaActionRow
@@ -103,6 +104,8 @@ fun MangaScreen(
     onDownloadChapter: ((List<ChapterList.Item>, ChapterDownloadAction) -> Unit)?,
     onTranslateChapter: ((List<ChapterList.Item>) -> Unit)?,
     onReRenderChapter: ((List<ChapterList.Item>, String) -> Unit)?,
+    onNightRenderChapter: ((List<ChapterList.Item>) -> Unit)?,
+    nightReadEnabled: Boolean,
     onAddToLibraryClicked: () -> Unit,
     onWebViewClicked: (() -> Unit)?,
     onWebViewLongClicked: (() -> Unit)?,
@@ -170,6 +173,8 @@ fun MangaScreen(
                 onDownloadChapter = onDownloadChapter,
                 onTranslateChapter = onTranslateChapter,
                 onReRenderChapter = onReRenderChapter,
+                onNightRenderChapter = onNightRenderChapter,
+                nightReadEnabled = nightReadEnabled,
                 onAddToLibraryClicked = onAddToLibraryClicked,
                 onWebViewClicked = onWebViewClicked,
                 onWebViewLongClicked = onWebViewLongClicked,
@@ -211,6 +216,8 @@ fun MangaScreen(
                 onDownloadChapter = onDownloadChapter,
                 onTranslateChapter = onTranslateChapter,
                 onReRenderChapter = onReRenderChapter,
+                onNightRenderChapter = onNightRenderChapter,
+                nightReadEnabled = nightReadEnabled,
                 onAddToLibraryClicked = onAddToLibraryClicked,
                 onWebViewClicked = onWebViewClicked,
                 onWebViewLongClicked = onWebViewLongClicked,
@@ -256,6 +263,8 @@ private fun MangaScreenSmallImpl(
     onDownloadChapter: ((List<ChapterList.Item>, ChapterDownloadAction) -> Unit)?,
     onTranslateChapter: ((List<ChapterList.Item>) -> Unit)?,
     onReRenderChapter: ((List<ChapterList.Item>, String) -> Unit)?,
+    onNightRenderChapter: ((List<ChapterList.Item>) -> Unit)?,
+    nightReadEnabled: Boolean,
     onAddToLibraryClicked: () -> Unit,
     onWebViewClicked: (() -> Unit)?,
     onWebViewLongClicked: (() -> Unit)?,
@@ -363,6 +372,8 @@ private fun MangaScreenSmallImpl(
                 onDownloadChapter = onDownloadChapter,
                 onTranslateChapter = onTranslateChapter,
                 onReRenderChapter = onReRenderChapter,
+                onNightRenderChapter = onNightRenderChapter,
+                nightReadEnabled = nightReadEnabled,
                 onMultiDeleteClicked = onMultiDeleteClicked,
                 fillFraction = 1f,
             )
@@ -488,6 +499,7 @@ private fun MangaScreenSmallImpl(
                         onChapterClicked = onChapterClicked,
                         onDownloadChapter = onDownloadChapter,
                         onTranslateChapterSingle = onTranslateChapter?.let { cb -> { item -> cb(listOf(item)) } },
+                        onNightRenderChapterSingle = onNightRenderChapter?.let { cb -> { item -> cb(listOf(item)) } },
                         onChapterSelected = onChapterSelected,
                         onChapterSwipe = onChapterSwipe,
                     )
@@ -509,6 +521,8 @@ fun MangaScreenLargeImpl(
     onDownloadChapter: ((List<ChapterList.Item>, ChapterDownloadAction) -> Unit)?,
     onTranslateChapter: ((List<ChapterList.Item>) -> Unit)?,
     onReRenderChapter: ((List<ChapterList.Item>, String) -> Unit)?,
+    onNightRenderChapter: ((List<ChapterList.Item>) -> Unit)?,
+    nightReadEnabled: Boolean,
     onAddToLibraryClicked: () -> Unit,
     onWebViewClicked: (() -> Unit)?,
     onWebViewLongClicked: (() -> Unit)?,
@@ -613,6 +627,8 @@ fun MangaScreenLargeImpl(
                     onDownloadChapter = onDownloadChapter,
                     onTranslateChapter = onTranslateChapter,
                     onReRenderChapter = onReRenderChapter,
+                    onNightRenderChapter = onNightRenderChapter,
+                    nightReadEnabled = nightReadEnabled,
                     onMultiDeleteClicked = onMultiDeleteClicked,
                     fillFraction = 0.5f,
                 )
@@ -738,6 +754,9 @@ fun MangaScreenLargeImpl(
                                 onTranslateChapterSingle = onTranslateChapter?.let { cb ->
                                     { item -> cb(listOf(item)) }
                                 },
+                                onNightRenderChapterSingle = onNightRenderChapter?.let { cb ->
+                                    { item -> cb(listOf(item)) }
+                                },
                                 onChapterSelected = onChapterSelected,
                                 onChapterSwipe = onChapterSwipe,
                             )
@@ -758,6 +777,8 @@ private fun SharedMangaBottomActionMenu(
     onDownloadChapter: ((List<ChapterList.Item>, ChapterDownloadAction) -> Unit)?,
     onTranslateChapter: ((List<ChapterList.Item>) -> Unit)?,
     onReRenderChapter: ((List<ChapterList.Item>, String) -> Unit)?,
+    onNightRenderChapter: ((List<ChapterList.Item>) -> Unit)?,
+    nightReadEnabled: Boolean,
     onMultiDeleteClicked: (List<Chapter>) -> Unit,
     fillFraction: Float,
     modifier: Modifier = Modifier,
@@ -795,6 +816,14 @@ private fun SharedMangaBottomActionMenu(
             // 重繪只對已下載(已翻)章有意義；門檻同翻譯/刪除＝選取含已下載章
             onReRenderChapter != null && selected.fastAny { it.downloadState == Download.State.DOWNLOADED }
         },
+        onNightRenderClicked = {
+            onNightRenderChapter!!(selected.toList())
+        }.takeIf {
+            // 夜讀版讀的是下載好的頁圖（不需已翻）；門檻＝選取含做得了夜讀的已下載章（壓縮檔章等做不了，見 nightUnsupported）
+            onNightRenderChapter != null &&
+                selected.fastAny { it.downloadState == Download.State.DOWNLOADED && !it.nightUnsupported }
+        },
+        nightReadEnabled = nightReadEnabled,
         onDownloadClicked = {
             onDownloadChapter!!(selected.toList(), ChapterDownloadAction.START)
         }.takeIf {
@@ -864,6 +893,7 @@ private fun LazyListScope.sharedChapterItems(
     onChapterClicked: (Chapter) -> Unit,
     onDownloadChapter: ((List<ChapterList.Item>, ChapterDownloadAction) -> Unit)?,
     onTranslateChapterSingle: ((ChapterList.Item) -> Unit)?,
+    onNightRenderChapterSingle: ((ChapterList.Item) -> Unit)?,
     onChapterSelected: (ChapterList.Item, Boolean, Boolean) -> Unit,
     onChapterSwipe: (ChapterList.Item, LibraryPreferences.ChapterSwipeAction) -> Unit,
 ) {
@@ -946,6 +976,13 @@ private fun LazyListScope.sharedChapterItems(
                         }
                     },
                     translationProgressProvider = { item.translationProgress },
+                    onNightRender = onNightRenderChapterSingle?.let { cb -> { cb(item) } },
+                    nightStateProvider = {
+                        // model 算好的 nightStatus 已含「未下載＝HIDDEN」；這裡再以即時的 isDownloaded 擋一次，
+                        // 讓下載狀態變動（updateDownloadState 只改 downloadState）當下不殘留舊指示器
+                        if (item.isDownloaded) item.nightStatus else ChapterNightStatus.HIDDEN
+                    },
+                    nightProgressProvider = { item.nightProgress },
                     onChapterSwipe = {
                         onChapterSwipe(item, it)
                     },

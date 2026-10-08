@@ -208,7 +208,8 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
     private fun onPageSelected(page: ReaderPage, allowPreload: Boolean) {
         val pages = page.chapter.pages ?: return
         logcat { "onPageSelected: ${page.number}/${pages.size}" }
-        activity.onPageSelected(page)
+        // 條漫一畫面可能好幾頁、當前頁是最下面那頁：可見頁不確定（null），夜讀換檔位不發「沒有差異」提示
+        activity.onPageSelected(page, visible = null)
 
         // Preload next chapter once we're within the last 5 pages of the current chapter
         val inPreloadRange = pages.size - page.number < 5

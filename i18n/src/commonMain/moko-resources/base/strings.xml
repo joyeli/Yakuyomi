@@ -24,9 +24,9 @@
     <string name="label_more">More</string>
     <string name="label_settings">Settings</string>
     <string name="label_download_queue">Download queue</string>
-    <string name="label_translation_queue">Translation queue</string>
-    <string name="label_translation">Translation</string>
-    <string name="translation_retap_paused_unloaded">Paused the queue and unloaded the engine</string>
+    <string name="label_translation_queue">Queue</string>
+    <string name="label_translation">Queue</string>
+    <string name="translation_retap_paused_unloaded">Paused translation and unloaded the engine</string>
     <string name="translation_retap_unloaded">Unloaded the translation engine</string>
     <string name="translation_retap_master_off">Translation turned off</string>
     <string name="translation_retap_master_on">Translation on — loading the engine</string>
@@ -34,7 +34,6 @@
     <string name="translation_status_translating">Translating</string>
     <string name="translation_status_error">Failed</string>
     <string name="translation_epub_unsupported">EPUB chapters can\'t be translated yet — use a folder or CBZ/CBR/7z.</string>
-    <string name="queue_remaining_chapters">%1$d chapters left</string>
     <string name="queue_chapters_failed">%1$d failed</string>
     <string name="queue_manga_paused">Paused</string>
     <string name="action_priority_translate">Translate next</string>
@@ -423,11 +422,11 @@
     <string name="quickstart_what_title">On-device, bring-your-own-key</string>
     <string name="quickstart_what_body">Detection, OCR and text removal all run on your phone. Only the OCR\'d text goes to the LLM provider you pick — using your own API key and endpoint. Your images, and the detection / OCR / erase steps, never leave the device. There is no analytics or telemetry.\n\nCloud translation may cost money, billed by your provider. Tapping Got it at the end means you understand this.</string>
     <string name="quickstart_setup_title">Three things to get ready</string>
-    <string name="quickstart_setup_body">1. Pick a provider and paste your API key.\nSettings → Translation → Provider. Default is DeepSeek; OpenAI, Gemini, Groq, Qwen, OpenRouter and self-hosted (Sakura / custom) also work. Paste the key from your provider\'s dashboard — it is encrypted on this device. For a self-hosted or custom provider, also fill in the API base.\n\n2. Get the models (detector, OCR, text-removal).\nSettings → Translation → Models → Download models (about 200 MB, verified). Or bring your own: drop the model files into the models folder in your storage location. The Model status row shows a check or cross for each.\n\n3. Pick your languages.\nDefault is Japanese → Traditional Chinese (Taiwan). Change the target or source any time.</string>
+    <string name="quickstart_setup_body">1. Pick a provider and paste your API key.\nSettings → Translation → Provider. Default is DeepSeek; OpenAI, Gemini, Groq, Qwen, OpenRouter and self-hosted (Sakura / custom) also work. Paste the key from your provider\'s dashboard — it is encrypted on this device. For a self-hosted or custom provider, also fill in the API base.\n\n2. Get the models (detector, OCR, text-removal).\nSettings → Translation → Models → Download models (about 250 MB, verified). Or bring your own: drop the model files into the models folder in your storage location. The Model status row shows a check or cross for each.\n\n3. Pick your languages.\nDefault is Japanese → Traditional Chinese (Taiwan). Change the target or source any time.</string>
     <string name="quickstart_workflows_title">Two ways to translate</string>
     <string name="quickstart_workflows_body">Translate on download — turn on Translate chapters on download. Every chapter you download is then translated automatically in the background, and the page images are replaced in place. Best when you download ahead and read later.\n\nLive (read-as-you-go) — turn on Live translation, a separate switch. When you open an unread chapter it is translated in the background and pages swap in as they become ready (a Translating X/Y pill shows at the top-left). Opening an undownloaded chapter downloads it first, then translates. Use Live translation categories to limit it to, or exclude, certain library categories.\n\nThe two switches are independent: use either, both, or neither — and both sit under the master Enable translation switch at the top of the page. Turn that off and nothing translates.</string>
     <string name="quickstart_manual_title">By hand, and keeping it tidy</string>
-    <string name="quickstart_manual_body">Manual translate — on a manga\'s chapter list, downloaded chapters show a translate button. The icon spins while running, turns the accent colour when done, and red on error. Long-press to multi-select, then tap Translate in the bottom bar.\n\nTranslation queue — the Translation tab in the bottom navigation bar lists everything in progress with its status. Pause or resume, cancel, or retry failed chapters there.\n\nRe-render — already translated a chapter but want cleaner text removal? Change the method in Settings (you will be asked to update existing chapters), or long-press a page → Re-render. No re-OCR or re-translation needed.</string>
+    <string name="quickstart_manual_body">Manual translate — on a manga\'s chapter list, downloaded chapters show a translate button. The icon spins while running, turns the accent color when done, and red on error. Long-press to multi-select, then tap Translate in the bottom bar.\n\nQueue — the Queue tab in the bottom navigation bar lists every translation and night-page job with its status. Pause or resume, cancel, or retry failed chapters there.\n\nRe-render — already translated a chapter but want cleaner text removal? Change the method in Settings (you will be asked to update existing chapters), or long-press a page → Text removal. No re-OCR or re-translation needed.</string>
     <string name="quickstart_action_done">Got it</string>
     <!-- Enhancements guide (a swipeable tour of everything this fork adds on top of mihon) -->
     <string name="enhancements_guide_title">Yakuyomi enhancements</string>
@@ -1313,7 +1312,8 @@
 
     <!-- Information Text -->
     <string name="information_no_downloads">No downloads</string>
-    <string name="information_no_translations">No translations in queue</string>
+    <string name="information_no_translations">No translation or night-page jobs in queue</string>
+    <string name="queue_all_off_message">Translation and night reading are both off. Turn one on in Settings to queue jobs</string>
     <string name="information_no_recent">No recent updates</string>
     <string name="information_no_recent_manga">Nothing read recently</string>
     <string name="information_empty_library">Your library is empty</string>
@@ -1469,7 +1469,7 @@
     <string name="pref_translation_privacy_full">When translating:\n• Only the OCR\'d text is sent to the LLM provider you configure (your own key, your own endpoint).\n• Images, detection, OCR, and text removal all run on your device and never leave it.\n• Your API key is encrypted on-device with the Android Keystore.\n• This app adds no analytics or telemetry.\n• What you send and your usage follow your chosen provider\'s terms; cloud translation may incur costs.</string>
     <string name="pref_translation_model_status">Model status</string>
     <string name="pref_translation_model_status_checking">Checking…</string>
-    <string name="pref_translation_model_status_missing"> (missing = put the models in the storage models/ folder, or tap Download models)</string>
+    <string name="pref_translation_model_status_missing">%1$s (missing = put the models in the storage models/ folder, or tap Download models)</string>
     <string name="translation_models_outdated_action">Old-format models — the v2 engine can\'t use them. Go to Settings → Translation and tap “Update models” to re-download.</string>
     <string name="translation_models_missing_action">No translation models yet. Go to Settings → Translation to download them.</string>
     <string name="pref_translation_model_status_outdated">⚠️ Old-format models detected — translation is off until you update. The v2 engine needs the NCNN model set: tap “Update models” below to re-download.</string>
@@ -1483,8 +1483,8 @@
     <string name="pref_translation_render_update_title">Update translated chapters</string>
     <string name="pref_translation_render_update_upgrade">Text-removal method changed. Re-render all translated chapters with the current settings? It only upgrades removal quality, never downgrades (keeps the best result); loose downloaded chapters with saved materials only.</string>
     <string name="pref_translation_render_update_layout">Typesetting changed. Re-render all translated chapters with the new layout? Each keeps its own removal method, only the layout changes; loose downloaded chapters with saved materials only.</string>
-    <string name="pref_translation_render_update_queued">Queued %d chapters for re-render</string>
     <string name="pref_translation_render_update_none">No translated chapters to update (or materials not kept)</string>
+    <string name="pref_translation_render_manual_note">Changes below only apply to pages translated from now on; re-render translated chapters manually to apply them</string>
     <string name="pref_translation_thread_auto">Auto (%d cores)</string>
     <string name="pref_translation_thread_count">%d threads</string>
     <string name="pref_translation_keep_materials">Keep re-render materials</string>
@@ -1555,13 +1555,18 @@
     <string name="model_dl_downloading">Downloading %s</string>
     <string name="model_dl_verifying">Verifying %s…</string>
     <string name="model_dl_done_one">%s done</string>
-    <string name="model_dl_failed">Download failed</string>
+    <string name="model_dl_failed">Unknown error</string>
     <string name="model_dl_notif_title">Downloading models %d%%</string>
     <string name="model_dl_notif_done">Models downloaded</string>
     <string name="model_dl_notif_done_text">All 3 models are ready</string>
     <string name="model_dl_notif_failed">Model download failed</string>
     <!-- Yakuyomi: notification channel names (Downloader group) -->
+    <string name="channel_translation_progress">Translation &amp; night reading</string>
     <string name="channel_browse_fetch">Browse fetching</string>
+    <string name="model_dl_progress_subtitle">%1$s (%2$d%%)</string>
+    <string name="model_dl_error_network">Network error — check your connection</string>
+    <string name="model_dl_error_checksum">File check failed; the download may be corrupted</string>
+    <string name="model_dl_error_http">Server error (HTTP %1$d)</string>
     <!-- Yakuyomi: engine status + preload -->
     <string name="engine_unavailable">Engine unavailable (missing models/key or build failed)</string>
     <string name="translate_exception">Translation exception</string>
@@ -1586,6 +1591,9 @@
     <string name="reader_rerendering">Re-rendering…</string>
     <string name="reader_rerender_done">Page re-rendered</string>
     <string name="reader_rerender_failed">Re-render failed (no materials or error)</string>
+    <string name="reader_rerender_no_materials">This page has no re-render materials (\"Keep re-render materials\" was off when it was translated), so it can\'t be re-rendered or restored to the original</string>
+    <string name="reader_translate_page_no_original">This page is already translated and its original wasn\'t kept, so it can\'t be translated again</string>
+    <string name="reader_translate_page_too_large">This page is too large to translate (over 40 megapixels). The original is kept</string>
     <string name="reader_translating_page">Translating this page…</string>
     <string name="reader_translate_page_done">Page translated</string>
     <string name="reader_translate_page_failed">Translation failed (skipped or error)</string>
@@ -1600,4 +1608,129 @@
     <string name="rerender_original">Original (restore untranslated)</string>
     <string name="rerender_all_book">Re-render whole book (current removal setting)</string>
     <string name="rerender_none">No translated chapters to re-render</string>
+    <!-- Yakuyomi: night read -->
+    <string name="pref_translation_nightread">Auto-generate night pages</string>
+    <string name="pref_translation_nightread_summary">After a chapter is downloaded (and translated, when translation is on), generate a darkened night-reading copy of each page. Also works for manga you don\'t translate (needs the character-segmentation models; slow — several seconds per page)</string>
+    <string name="reader_nightread_chapter_started">Queued night pages for this chapter</string>
+    <string name="nightread_archive_unsupported">Night pages only work for loose image folders; archive (CBZ/RAR/7z/EPUB) chapters were skipped</string>
+    <string name="action_nightread">Generate night pages</string>
+    <string name="queue_kind_nightread">Night pages</string>
+    <string name="nightread_status_rendering">Generating</string>
+    <string name="pref_category_nightread">Night reading</string>
+    <string name="pref_nightread_summary">Darkened page copies for reading at night: auto-generation scope, brightness, models</string>
+    <string name="pref_nightread_categories">Auto-generate categories</string>
+    <string name="pref_nightread_categories_message">Include categories = generate only for those; exclude = skip them; none = all. Manual generation is not affected</string>
+    <string name="pref_nightread_excluded_sources">Sources to skip</string>
+    <string name="pref_nightread_excluded_sources_summary">Chapters from these sources are not auto-generated (manual still works): %s</string>
+    <string name="pref_nightread_skip_color">Skip color pages</string>
+    <string name="pref_nightread_skip_color_summary">Color pages are only desaturated and look worse; skip them and show the original instead</string>
+    <string name="pref_nightread_fill_level">Fill level (synced with the reader\'s floating button)</string>
+    <string name="pref_nightread_fill_level_summary">How much white may be painted black. Standard = panel gutters, page margins, speech bubbles and large, simple white areas; More also paints smaller simple ones. Busy artwork and characters are never painted at either level. Both levels are prepared when a chapter is generated, so this only picks which one is shown; switch while reading with the floating button: %s</string>
+    <string name="nightread_fill_standard">Standard (gutters, margins, bubbles, large simple whites)</string>
+    <string name="nightread_fill_more">More (+ smaller simple whites)</string>
+    <string name="pref_nightread_brightness_info">Applies to night pages generated from now on; to update a chapter, use “Regenerate this chapter with current settings” in the reader\'s long-press menu</string>
+    <string name="pref_nightread_brightness">Preset</string>
+    <string name="nightread_brightness_standard">Standard (bright)</string>
+    <string name="nightread_brightness_soft">Soft</string>
+    <string name="nightread_brightness_softer">Softer</string>
+    <string name="nightread_brightness_custom">Custom</string>
+    <string name="pref_nightread_ink">Text</string>
+    <string name="pref_nightread_ink_summary">Brightness of text inside bubbles</string>
+    <string name="pref_nightread_edge_ink">Outlines</string>
+    <string name="pref_nightread_edge_ink_summary">Brightness of panel borders, bubble outlines and edges of filled areas</string>
+    <string name="pref_nightread_stroke_obj">Character edges</string>
+    <string name="pref_nightread_stroke_obj_summary">Brightness of the thin outline drawn around characters</string>
+    <string name="pref_nightread_bg">Background level</string>
+    <string name="pref_nightread_bg_summary">Darkness of filled areas (margins, bubbles, backgrounds)</string>
+    <string name="pref_nightread_dim_ceil">Scene brightness ceiling</string>
+    <string name="pref_nightread_dim_ceil_summary">How bright paper white is allowed to stay inside artwork</string>
+    <string name="pref_nightread_glow_cap">Ink glow cap</string>
+    <string name="pref_nightread_glow_cap_summary">Maximum brightness of line art after glow (kept below the scene ceiling)</string>
+    <string name="pref_nightread_page_concurrency">Pages at once</string>
+    <string name="pref_nightread_page_concurrency_summary">How many night pages are generated in parallel. Only applies while night processing runs alone; while translation or live translation runs, it automatically drops to one page at a time, a single thread and low priority. Current: %s</string>
+    <string name="pref_nightread_page_concurrency_auto">Auto (%d on this device)</string>
+    <string name="pref_nightread_download_models">Download night models</string>
+    <string name="pref_nightread_download_models_idle">Two character-segmentation models (about 147 MB); the detector is shared with translation and skipped if already present</string>
+    <string name="pref_nightread_delete_models">Delete night models</string>
+    <string name="pref_nightread_delete_models_summary">Removes the two character-segmentation models (about 147 MB); the detector stays for translation</string>
+    <string name="pref_nightread_model_status_missing">%1$s — missing; download the night models</string>
+    <string name="pref_translation_delete_models">Delete translation models</string>
+    <string name="pref_translation_delete_models_summary">Removes OCR and text-removal models; the detector is kept if night reading still uses it</string>
+    <string name="model_dl_other_group_busy">Another model group is downloading…</string>
+    <string name="model_role_detect_shared">Detector (shared)</string>
+    <string name="model_role_charseg_yolo">Segmentation A</string>
+    <string name="model_role_charseg_cseg">Segmentation B</string>
+    <string name="queue_pause_translate">Pause translation</string>
+    <string name="queue_resume_translate">Resume translation</string>
+    <string name="queue_pause_night">Pause night pages</string>
+    <string name="queue_resume_night">Resume night pages</string>
+    <string name="pref_reader_nightread_mode">Night reading</string>
+    <string name="pref_reader_nightread_mode_summary">Show the darkened night page when one exists</string>
+    <string name="nightread_missing_models">Night-reading models are missing — download the models again.</string>
+    <string name="pref_nightread_master">Night reading</string>
+    <string name="pref_nightread_master_summary">Show night-page buttons and let night jobs run</string>
+    <string name="action_nightread_chapter">Generate night pages for this chapter</string>
+    <string name="action_nightread_chapter_regen_tiers">Regenerate night pages</string>
+    <string name="action_nightread_chapter_regen_current">Regenerate this chapter with current settings</string>
+    <string name="nightread_generate_confirm">Generate night pages for this chapter?</string>
+    <string name="nightread_regenerate_confirm">Regenerate night pages for this chapter? The old single-level version will be replaced.</string>
+    <string name="nightread_chapter_updatable">Night-reading rules were updated: some pages here were made with the old rules. Tap to regenerate them.</string>
+    <string name="nightread_chapter_status_done">Night pages ready</string>
+    <string name="nightread_chapter_status_queued">Night pages queued</string>
+    <string name="nightread_chapter_status_rendering">Generating night pages</string>
+    <string name="nightread_chapter_status_error">Night pages failed. Tap to try again.</string>
+    <string name="action_nightread_chapter_update">Update night pages (rules updated)</string>
+    <string name="pref_nightread_regen_outdated">Regenerate outdated night pages</string>
+    <string name="pref_nightread_regen_outdated_scanning">Scanning library… (%1$d/%2$d)</string>
+    <string name="pref_nightread_regen_outdated_scanning_start">Scanning library…</string>
+    <string name="pref_nightread_regen_outdated_none">All night pages use the current rules. Tap to scan again.</string>
+    <string name="pref_nightread_regen_outdated_confirm_skip_color">“Skip color pages” is on, so the old night versions of color pages will be removed.</string>
+    <string name="pref_nightread_regen_outdated_nothing">Nothing to queue: these chapters are already being generated or were deleted</string>
+    <string name="pref_nightread_regen_outdated_failed">Couldn\'t scan the library (check storage access). Tap to try again.</string>
+    <string name="nightread_generating_progress">Generating night pages %1$d/%2$d</string>
+    <string name="nightread_needs_loose_download">Night reading needs the chapter downloaded as a folder first</string>
+    <string name="nightread_generating">Generating night pages…</string>
+    <string name="nightread_queued_waiting">Queued for night pages (waiting)</string>
+    <string name="nightread_queue_paused">Night queue is paused</string>
+    <string name="nightfab_mode">Night reading</string>
+    <string name="nightfab_state_on">On</string>
+    <string name="nightfab_state_off">Off</string>
+    <string name="nightfab_to_night">Switch to night reading</string>
+    <string name="nightfab_to_day">Switch to day reading</string>
+    <string name="nightfab_level_standard">Fill: standard</string>
+    <string name="nightfab_level_more">Fill: more</string>
+    <string name="nightfab_tier_not_generated">Not generated for this chapter</string>
+    <string name="nightfab_move_left">Move to left side</string>
+    <string name="nightfab_move_right">Move to right side</string>
+    <string name="nightfab_no_difference">No difference on this page at this level</string>
+    <string name="nightfab_tier_generating">Generating</string>
+    <string name="nightfab_tier_legacy">Old version, needs regenerating</string>
+    <string name="pref_reader_nightread_fill_level">Night fill level</string>
+    <string name="nightread_level_chip_standard">Standard</string>
+    <string name="nightread_level_chip_more">More</string>
+    <string name="pref_nightread_group_display">Display (instant)</string>
+    <string name="pref_nightread_group_generate">Generation (applies to pages generated from now on)</string>
+    <string name="pref_nightread_group_advanced">Advanced (applies to pages generated from now on)</string>
+    <!-- Yakuyomi night reading: background running (Settings › Night reading) -->
+    <string name="pref_nightread_group_background">Background processing</string>
+    <string name="pref_nightread_battery">Keep working with the screen off</string>
+    <string name="pref_nightread_battery_restricted">When the screen is off, the system may freeze the night-reading and translation queues. Status: restricted by battery optimization. Tap to allow running in the background.</string>
+    <string name="pref_nightread_battery_unrestricted">When the screen is off, the system may freeze the night-reading and translation queues. Status: not restricted by battery optimization.</string>
+    <string name="pref_nightread_battery_background_restricted">When the screen is off, the system may freeze the night-reading and translation queues. Status: the system restricts this app\'s background activity. Tap to open app info, then set Battery to Unrestricted.</string>
+    <string name="pref_nightread_battery_oem_note">On vivo and some other brands, also turn on “Allow high background power consumption” for this app in the phone manager or battery settings.</string>
+    <!-- Yakuyomi night reading: online (not downloaded) chapters in the reader -->
+    <string name="nightread_online_download_confirm">This chapter has to be downloaded before a night version can be made. Download it?</string>
+    <string name="nightread_online_download_started">Downloading. The night version will be made when the download finishes</string>
+    <string name="nightread_online_download_waiting">Still downloading. The night version will be made when the download finishes</string>
+    <!-- Yakuyomi night reading: storage used by night versions (Settings › Night reading) -->
+    <string name="pref_nightread_group_storage">Storage</string>
+    <string name="pref_nightread_storage_usage">Space used by night versions</string>
+    <string name="pref_nightread_storage_scanning_start">Calculating…</string>
+    <string name="pref_nightread_storage_scanning">Calculating… (%1$d/%2$d series)</string>
+    <string name="pref_nightread_storage_clearing">Clearing… (%1$d/%2$d chapters)</string>
+    <string name="pref_nightread_storage_none">No night versions stored. Tap to recalculate.</string>
+    <string name="pref_nightread_storage_failed">Couldn\'t read the storage location (check storage access). Tap to try again.</string>
+    <string name="pref_nightread_clear_read">Clear night versions of read chapters</string>
+    <string name="pref_nightread_clear_all">Clear all night versions</string>
+    <string name="pref_nightread_clear_nothing">Nothing to clear</string>
 </resources>

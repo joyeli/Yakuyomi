@@ -72,6 +72,39 @@
     <plurals name="translation_queue_summary">
         <item quantity="other">%1$s 待翻</item>
     </plurals>
+    <plurals name="pref_nightread_regen_outdated_count">
+        <item quantity="other">%d 話有舊規則產生的夜讀頁，點一下全部排入重新產生（只重做舊的頁）</item>
+    </plurals>
+    <plurals name="pref_nightread_regen_outdated_confirm">
+        <item quantity="other">把 %d 話的舊版夜讀頁排入重新產生？只重做舊版頁，用目前的亮度設定；夜讀佇列暫停中的話會一併繼續。每話要幾分鐘，進度在佇列頁。</item>
+    </plurals>
+    <plurals name="pref_nightread_regen_outdated_queued">
+        <item quantity="other">已排入 %d 話重新產生夜讀頁</item>
+    </plurals>
+    <plurals name="pref_nightread_storage_total">
+        <item quantity="other">%1$d 話，共 %2$s。點一下重新計算</item>
+    </plurals>
+    <plurals name="pref_nightread_clear_amount">
+        <item quantity="other">%1$d 話，%2$s</item>
+    </plurals>
+    <plurals name="pref_nightread_clear_read_confirm">
+        <item quantity="other">要刪除 %1$d 話已讀章節的夜讀版（%2$s）嗎？原圖、譯圖與翻譯素材都會保留，正在產生的話不會動。</item>
+    </plurals>
+    <plurals name="pref_nightread_clear_all_confirm">
+        <item quantity="other">要刪除全部夜讀版（%1$d 話，%2$s）嗎？原圖、譯圖與翻譯素材都會保留，正在產生的話不會動。</item>
+    </plurals>
+    <plurals name="nightread_storage_cleared">
+        <item quantity="other">已清除 %1$d 話，釋出 %2$s</item>
+    </plurals>
+    <plurals name="nightread_storage_clear_failed">
+        <item quantity="other">有 %d 話的部分檔案刪不掉</item>
+    </plurals>
+    <plurals name="nightread_storage_clear_skipped">
+        <item quantity="other">%d 話正在產生，沒有動</item>
+    </plurals>
+    <plurals name="queue_remaining_chapters">
+        <item quantity="other">剩 %1$d 話</item>
+    </plurals>
     <plurals name="snapshot_saved">
         <item quantity="other">已儲存快照（%1$d 本）</item>
     </plurals>
@@ -95,5 +128,11 @@
     </plurals>
     <plurals name="capture_review_delete_confirm">
         <item quantity="other">刪除選取的 %1$d 頁？此動作無法復原。</item>
+    </plurals>
+    <plurals name="pref_translation_render_update_queued">
+        <item quantity="other">已排入 %d 章重繪</item>
+    </plurals>
+    <plurals name="rerender_skipped_no_materials">
+        <item quantity="other">略過 %d 話：翻譯時沒開「保留重繪素材」，沒有重繪素材</item>
     </plurals>
 </resources>

@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.data.download
 import android.content.Context
 import eu.kanade.tachiyomi.data.download.model.Download
 import eu.kanade.tachiyomi.data.translation.TranslationCache
+import eu.kanade.tachiyomi.data.translation.TranslationManager
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.model.Page
 import kotlinx.coroutines.flow.Flow
@@ -232,6 +233,8 @@ class DownloadManager(
 
             val (mangaDir, chapterDirs) = provider.findChapterDirs(filteredChapters, manga, source)
             chapterDirs.forEach { it.delete() }
+            // Yakuyomi：檔案沒了 → 本 session 記下的「翻成」「夜讀做完」作廢（同 session 重下載時章節列才不會亮著舊狀態）
+            Injekt.get<TranslationManager>().forgetChapterOutputs(filteredChapters.map { it.id })
             cache.removeChapters(filteredChapters, manga)
             Injekt.get<TranslationCache>().invalidate(manga.id) // 已翻章可能被刪 → 失效該本書庫徽章
 
@@ -257,6 +260,8 @@ class DownloadManager(
             provider.findMangaDir(manga.title, source)?.delete()
             cache.removeManga(manga)
             Injekt.get<TranslationCache>().invalidate(manga.id) // 整本刪 → 失效該本書庫徽章
+            // 設定 › 夜讀「儲存空間」的結果裡這本的夜讀檔已經不在：下次進設定頁時拿掉
+            Injekt.get<TranslationManager>().nightStorage.forgetManga(manga)
 
             // Delete source directory if empty
             val sourceDir = provider.findSourceDir(source)

@@ -129,6 +129,76 @@ class TranslationPreferences(
     /** 保留重繪素材：翻完每頁另存遮罩 + 文字區 + 原圖，日後可換去字方法低成本重繪（免重跑 OCR/翻譯）；約多一倍儲存。 */
     val keepMaterials = preferenceStore.getBoolean("pref_translation_keep_materials", false)
 
+    /**
+     * 夜讀**表層總開關**（預設關；放「其他」頁翻譯總開關旁、不在設定頁裡）。
+     * 關＝**隱藏所有夜讀入口**（章節列夜讀指示器、多選底部選單月亮鈕、reader 長壓切換鈕、reader 設定勾選、
+     * 翻譯設定頁的夜讀項）**且夜讀 worker 不跑**：TranslationManager 的夜讀 drain 不再挑夜讀項、正在跑的夜讀項在頁邊界
+     * 停下回 QUEUE 留著、翻完也不自動排夜讀。開＝入口全部出現、夜讀 drain 續跑。
+     * 與翻譯總開關 [translationMasterEnabled] 獨立（翻譯與夜讀是兩個獨立任務、各自一個消費者）。
+     * **不進 configSignature**：只決定夜讀入口與 worker 要不要動，不影響翻譯引擎的建構參數 → 切換不需重建引擎。
+     */
+    val nightReadEnabled = preferenceStore.getBoolean("translation_nightread_enabled", false)
+
+    /**
+     * 翻完一章後自動產生夜讀版（預設**關**；只在 [nightReadEnabled] 開時顯示與生效）：章翻譯成功 → TranslationManager
+     * 另排一個「夜讀」佇列工作，把每頁重繪成
+     * 「白底／白泡變暗、字反白、人物原樣」的另一張圖，存 `<章節夾>/.yakuyomi/<頁>.night.std.webp`（標準）＋與標準不同時才有的
+     * `.night.more.webp`（更多）（原圖不動、翻譯結果不動）。
+     * 為何預設關：離線預算每頁 6–25 s（人物分割 + 偵測），且要人物分割模型（yolo/cseg，選配）——不是每個人都要。
+     * **與翻譯就緒無關**：isReady 不看它、夜讀模型缺也不影響翻譯；缺模型時只有夜讀那個工作標 ERROR。
+     * **不進 configSignature**：它只決定「翻完要不要多排一個工作」，不影響翻譯引擎的建構參數 → 切換不需重建引擎。
+     * 舊章補做走章節多選「產生夜讀版」；reader 端要不要顯示夜讀版由 ReaderPreferences.nightReadMode 決定（沒夜讀版就顯示正常版）。
+     */
+    val nightReadGenerate = preferenceStore.getBoolean("pref_translation_nightread", false)
+
+    // ── 夜讀（設定 › 夜讀 頁）：以下只管**自動**路徑（下載完／翻完後），手動月亮鈕與 reader 長壓不查。 ──
+
+    /** 自動產生夜讀版的分類過濾（tri-state，語義同即時翻譯分類：包含非空→書至少屬其一；命中排除→不做）。 */
+    val nightReadCategories = preferenceStore.getStringSet("nightread_categories", emptySet())
+    val nightReadCategoriesExclude = preferenceStore.getStringSet("nightread_categories_exclude", emptySet())
+
+    /** 不自動做夜讀的來源（source id 字串集合，同翻譯的 per-source 排除）。 */
+    val nightReadSourcesExclude = preferenceStore.getStringSet("nightread_sources_exclude", emptySet())
+
+    /** 略過彩色頁：研究端對彩頁只是去色套同一條曲線、效果明顯較差；開了就量頁面彩度、彩頁不產生（reader 顯示原圖）。 */
+    val nightReadSkipColor = preferenceStore.getBoolean("nightread_skip_color", false)
+
+    /**
+     * 背景填黑的檔位：產品**兩檔**（2026-10-01 定案）`l2`＝標準（預設）、`l3`＝更多，對應 nightread 的 L2／L3
+     * （app 的 `NightLevel`）：
+     * `l2` 標準＝分鏡溝、頁邊留白、封閉對話框、「無畫面背景」，加上大而形狀簡單的白（貼紙規則通過、輪廓複雜度 rough ≤ 10、
+     * 面積 ≥ 頁面 0.5%）；`l3` 更多＝rough ≤ 20、無面積下限。兩檔都不做偽泡與亮島填黑——桌面消融證明撕裂（黑色侵染）的
+     * 真凶是「碰到人物、內有線稿的大白」被核心填色沿人物邊界停下，rough 把它們和正當的大白分得開（1.8–8.3 vs 17.8+）。
+     * 三檔時代的 `l1`（最低）從產品拿掉：47 頁裡 L1 與 L2 只有 14 頁不同、守護框違規相同（12/664）。
+     * 舊值照對應、不必遷移：`l1`／`protect`→標準、`aggressive`→更多、其餘→標準。詳見 nightread `docs/DECISIONS.md`。
+     *
+     * **意義＝顯示哪一檔**：產生時兩檔一律備齊（`.night.std.webp`／`.night.more.webp`，更多與標準相同就不存；2026-10-01
+     * 產生的三檔 `.night.l1/l2/l3.webp` 照讀），這個值只決定 reader 讀哪一檔；閱讀器懸浮鈕、閱讀設定面板的 chips、
+     * 設定 › 夜讀 寫的都是它，三處自然同步。轉成檔位用 app 的 `NightLevel.fromPref`（domain 不依賴 nightread 函式庫）。
+     * key 與預設值不變，不必遷移。
+     */
+    val nightReadFillLevel = preferenceStore.getString("nightread_fill_level", "l2")
+
+    /**
+     * 夜讀亮度（0–255，對應 nightread `NightReadParams`）。研究端定案＝240/240/220（字／描亮邊線／人物描邊）；
+     * 真機回報「純白到發亮的線條、字特別刺眼」後 fork 預設改**柔和** 205/170/190。只影響之後產生的夜讀版。
+     */
+    val nightReadInk = preferenceStore.getInt("nightread_ink", 205)
+    val nightReadEdgeInk = preferenceStore.getInt("nightread_edge_ink", 170)
+    val nightReadStrokeObjV = preferenceStore.getInt("nightread_stroke_obj", 190)
+
+    /** 進階：底色（研究端 16）、場景亮度上限（紙白壓到多亮，140）、墨線發光上限（112，須小於場景上限）。 */
+    val nightReadBg = preferenceStore.getInt("nightread_bg", 16)
+    val nightReadDimCeil = preferenceStore.getInt("nightread_dim_ceil", 140)
+    val nightReadGlowCap = preferenceStore.getInt("nightread_glow_cap", 112)
+
+    /**
+     * 夜讀同時處理頁數（`auto`／`1`..`3`，存字串；消費端 NightConcurrency.pagesCap parse + 夾到這台 heap 放得下的頁數）。
+     * 只在只有夜讀在跑時生效；翻譯／即時翻在跑時夜讀自動降為一次一頁、單執行緒、低優先權（取代舊的「夜讀用低優先權」開關）。
+     * 下一頁放行時生效。
+     */
+    val nightReadPageConcurrency = preferenceStore.getString("nightread_page_concurrency", "auto")
+
     /** OCR 逐行並發度（auto=硬體核數 / 2/4/6/8），對應引擎 OcrConfig.concurrency（concurrent 鎖 true）。 */
     val ocrConcurrency = preferenceStore.getString("translation_ocr_concurrency", DEFAULT_OCR_CONCURRENCY)
 

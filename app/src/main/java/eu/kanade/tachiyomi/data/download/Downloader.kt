@@ -406,11 +406,17 @@ class Downloader(
             )
 
             // Only rename the directory if it's downloaded
-            if (downloadPreferences.saveChaptersAsCBZ.get()) {
+            // Yakuyomi：閱讀器要「下載完產生夜讀版」的章一律存鬆散資料夾（夜讀檔要逐檔放在章節夾的 .yakuyomi 子夾）
+            if (downloadPreferences.saveChaptersAsCBZ.get() &&
+                !translationManager.isPendingNight(download.chapter.id)
+            ) {
                 archiveChapter(mangaDir, chapterDirname, tmpDir)
             } else {
                 tmpDir.renameTo(chapterDirname)
             }
+            // Yakuyomi：這章的檔案是新下載的原圖 → 本 session 記下的「翻成」「夜讀做完」作廢（刪掉後重下載、或在 app 外刪掉
+            // 再下載的章，章節列才不會把新原圖亮成已翻／已有夜讀版）。要在進下載快取之前：快取一變章節列就重掃。
+            translationManager.forgetChapterOutputs(listOf(download.chapter.id))
             cache.addChapter(chapterDirname, mangaDir, download.manga)
 
             DiskUtil.createNoMediaFile(tmpDir, context)
@@ -437,7 +443,15 @@ class Downloader(
                     method = if (pending) translationManager.liveInpaintMethod() else null,
                 )
                 if (pending) translationManager.clearPending(download.chapter.id)
+            } else if (translationManager.autoNightEligible() &&
+                !translationManager.willLiveTranslate(download.manga)
+            ) {
+                // 這章不會進翻譯（翻譯關／來源排除／沒 key，且讀到時也不會被即時翻接手）→ 非翻譯本也要夜讀：直接排夜讀項
+                // （會翻的章由翻完後自動接，頁圖要先貼好譯文才產夜讀版）。自動路徑不動使用者的暫停狀態。
+                translationManager.nightRenderAuto(download.manga, listOf(download.chapter))
             }
+            // Yakuyomi：閱讀器對線上章按了「下載後產生夜讀版」（markForNight）→ 排夜讀（已排翻譯的章由翻完後接，見該函式）
+            translationManager.onDownloadedForNight(download.manga, download.chapter)
         } catch (error: Throwable) {
             if (error is CancellationException) throw error
             // If the page list threw, it will resume here
