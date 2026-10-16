@@ -109,12 +109,26 @@ object EngineConfigMapping {
         maskDilate = prefs.maskDilate.get().coerceIn(8, 40).toFloat(),
     )
 
+    /** 目標語言是否可直排（中／日／韓）；自訂語言名也照字面判斷。 */
+    fun canTypesetVertically(targetLang: String): Boolean {
+        val name = targetLang.lowercase()
+        return listOf("chinese", "japanese", "korean", "cantonese", "中文", "日本語", "한국어").any { it in name }
+    }
+
     /** 排版設定（翻譯與重繪共用）。 */
     fun renderConfig(prefs: TranslationPreferences): RenderConfig = RenderConfig(
         orientation = when (prefs.orientation.get()) {
             "vertical" -> TextOrientation.VERTICAL
             "horizontal" -> TextOrientation.HORIZONTAL
-            else -> TextOrientation.AUTO
+            // auto 只有目標語言能直排（中日韓）時才照原文方向；阿拉伯文、拉丁字母等一律橫排，免得逐字直排拆散字母。
+            else -> if (canTypesetVertically(
+                    prefs.targetLangName.get(),
+                )
+            ) {
+                TextOrientation.AUTO
+            } else {
+                TextOrientation.HORIZONTAL
+            }
         },
         fontBorder = prefs.fontBorder.get(),
         colorMode = if (prefs.colorMode.get() == "mono") "mono" else "auto",

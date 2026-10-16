@@ -29,6 +29,7 @@ import cafe.adriel.voyager.navigator.currentOrThrow
 import eu.kanade.domain.source.interactor.GetSourcesWithFavoriteCount
 import eu.kanade.presentation.category.visualName
 import eu.kanade.presentation.more.settings.Preference
+import eu.kanade.presentation.more.settings.widget.LanguagePickerDialog
 import eu.kanade.presentation.more.settings.widget.TriStateListDialog
 import eu.kanade.tachiyomi.data.translation.ModelDownloadManager
 import eu.kanade.tachiyomi.data.translation.TranslationEngineConfig
@@ -131,6 +132,7 @@ object SettingsTranslationScreen : SearchableSettings {
         // 顯示名走 [providerLabel]（引擎的 displayName 有幾家是寫死的中文）。
         val providerEntries = LlmProviders.ALL.associate { it.id to providerLabel(it) }.toImmutableMap()
         val providerName = providerLabel(providerPreset)
+        var langPicker by remember { mutableStateOf<String?>(null) }
         var modelPicker by remember { mutableStateOf<List<String>?>(null) }
         var fetchingModels by remember { mutableStateOf(false) }
 
@@ -323,31 +325,34 @@ object SettingsTranslationScreen : SearchableSettings {
             }
         }.toImmutableMap()
 
-        val targetLangs = persistentMapOf(
-            TranslationPreferences.DEFAULT_TARGET_LANG to stringResource(MR.strings.pref_translation_lang_trad_chinese),
-            "Japanese" to stringResource(MR.strings.pref_translation_lang_japanese),
-            "Simplified Chinese" to stringResource(MR.strings.pref_translation_lang_simp_chinese),
-            "English" to stringResource(MR.strings.pref_translation_lang_english),
-            "Korean" to stringResource(MR.strings.pref_translation_lang_korean),
-            "Spanish" to stringResource(MR.strings.pref_translation_lang_spanish),
-            "French" to stringResource(MR.strings.pref_translation_lang_french),
-            "German" to stringResource(MR.strings.pref_translation_lang_german),
-            "Portuguese" to stringResource(MR.strings.pref_translation_lang_portuguese),
-            "Russian" to stringResource(MR.strings.pref_translation_lang_russian),
+        val tradChineseLabel = stringResource(MR.strings.pref_translation_lang_trad_chinese)
+        val autoDetectLabel = stringResource(MR.strings.pref_translation_lang_auto_detect)
+        val targetPinned = listOf(TranslationPreferences.DEFAULT_TARGET_LANG to tradChineseLabel)
+        val sourcePinned = listOf(
+            "" to autoDetectLabel,
+            TranslationPreferences.DEFAULT_SOURCE_LANG to "Japanese — 日本語",
+            TranslationPreferences.DEFAULT_TARGET_LANG to tradChineseLabel,
         )
-        val sourceLangs = persistentMapOf(
-            "" to stringResource(MR.strings.pref_translation_lang_auto_detect),
-            TranslationPreferences.DEFAULT_SOURCE_LANG to stringResource(MR.strings.pref_translation_lang_japanese),
-            TranslationPreferences.DEFAULT_TARGET_LANG to stringResource(MR.strings.pref_translation_lang_trad_chinese),
-            "Simplified Chinese" to stringResource(MR.strings.pref_translation_lang_simp_chinese),
-            "English" to stringResource(MR.strings.pref_translation_lang_english),
-            "Korean" to stringResource(MR.strings.pref_translation_lang_korean),
-            "Spanish" to stringResource(MR.strings.pref_translation_lang_spanish),
-            "French" to stringResource(MR.strings.pref_translation_lang_french),
-            "German" to stringResource(MR.strings.pref_translation_lang_german),
-            "Portuguese" to stringResource(MR.strings.pref_translation_lang_portuguese),
-            "Russian" to stringResource(MR.strings.pref_translation_lang_russian),
-        )
+
+        // 顯示目前值：預設值用在地化名稱，其餘（含自訂）直接顯示儲存的語言名。
+        fun langLabel(value: String, pinned: List<Pair<String, String>>) =
+            if (value.isEmpty()) autoDetectLabel else pinned.firstOrNull { it.first == value }?.second ?: value
+        val targetLangValue by prefs.targetLangName.collectAsState()
+        val sourceLangValue by prefs.sourceLangName.collectAsState()
+        if (langPicker != null) {
+            val isTarget = langPicker == "target"
+            LanguagePickerDialog(
+                title = stringResource(
+                    if (isTarget) MR.strings.pref_translation_target_lang else MR.strings.pref_translation_source_lang,
+                ),
+                pinned = if (isTarget) targetPinned else sourcePinned,
+                onSelect = {
+                    (if (isTarget) prefs.targetLangName else prefs.sourceLangName).set(it)
+                    langPicker = null
+                },
+                onDismiss = { langPicker = null },
+            )
+        }
 
         // 常駐頂層（不受總開關隱藏）：快速上手導覽 + 啟用翻譯總開關（從「翻譯」組移到頂層）。
         val quickstartItem = Preference.PreferenceItem.TextPreference(
@@ -607,17 +612,16 @@ object SettingsTranslationScreen : SearchableSettings {
             Preference.PreferenceGroup(
                 title = stringResource(MR.strings.pref_translation_group_language),
                 preferenceItems = listOfNotNull<Item>(
-                    Preference.PreferenceItem.ListPreference(
-                        preference = prefs.targetLangName,
-                        entries = targetLangs,
+                    Preference.PreferenceItem.TextPreference(
                         title = stringResource(MR.strings.pref_translation_target_lang),
+                        subtitle = langLabel(targetLangValue, targetPinned),
+                        onClick = { langPicker = "target" },
                     ),
-                    Preference.PreferenceItem.ListPreference(
-                        preference = prefs.sourceLangName,
-                        entries = sourceLangs,
+                    Preference.PreferenceItem.TextPreference(
                         title = stringResource(MR.strings.pref_translation_source_lang),
-                        subtitle = stringResource(MR.strings.pref_translation_source_lang_subtitle),
-                        subtitleProvider = { _, _ -> stringResource(MR.strings.pref_translation_source_lang_subtitle) },
+                        subtitle = langLabel(sourceLangValue, sourcePinned) + "\n" +
+                            stringResource(MR.strings.pref_translation_source_lang_subtitle),
+                        onClick = { langPicker = "source" },
                     ),
                 ).toImmutableList(),
             ),

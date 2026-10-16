@@ -75,14 +75,17 @@ fun ChapterNavigator(
 ) {
     val haptic = LocalHapticFeedback.current
 
+    // 單頁（或頁數尚未載入＝0）的章節：滑桿不會顯示（totalPages > 1 才畫），但 SliderState 仍會建立；
+    // steps = totalPages - 2 為負會讓 SliderState 建構時 NegativeArraySizeException 閃退 → 夾到合法範圍。
+    val sliderMax = totalPages.coerceAtLeast(2)
     val state = remember(totalPages) {
         SliderState(
-            value = currentPage.toFloat(),
-            steps = totalPages - 2,
-            valueRange = 1f..totalPages.toFloat(),
+            value = currentPage.toFloat().coerceIn(1f, sliderMax.toFloat()),
+            steps = (totalPages - 2).coerceAtLeast(0),
+            valueRange = 1f..sliderMax.toFloat(),
         )
     }
-    state.value = currentPage.toFloat()
+    state.value = currentPage.toFloat().coerceIn(1f, sliderMax.toFloat())
     state.onValueChange = { onPageIndexChange(it.roundToInt() - 1) }
     state.onValueChangeFinished = onPageIndexChangeFinished
 

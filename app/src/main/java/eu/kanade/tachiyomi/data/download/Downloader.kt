@@ -4,6 +4,7 @@ import android.content.Context
 import com.hippo.unifile.UniFile
 import eu.kanade.domain.chapter.model.toSChapter
 import eu.kanade.domain.manga.model.getComicInfo
+import eu.kanade.tachiyomi.crash.TraceLog
 import eu.kanade.tachiyomi.data.cache.ChapterCache
 import eu.kanade.tachiyomi.data.download.model.Download
 import eu.kanade.tachiyomi.data.library.LibraryUpdateNotifier
@@ -255,6 +256,7 @@ class Downloader(
         } catch (e: Throwable) {
             if (e is CancellationException) throw e
             logcat(LogPriority.ERROR, e)
+            TraceLog.log("dl", "job.error ${e.javaClass.simpleName}: ${e.message?.take(200)}")
             notifier.onError(e.message)
             stop()
         }
@@ -326,7 +328,12 @@ class Downloader(
      * @param download the chapter to be downloaded.
      */
     private suspend fun downloadChapter(download: Download) {
+        TraceLog.log(
+            "dl",
+            "chapter.start ${download.manga.title} / ${download.chapter.name} src=${download.source.name}",
+        )
         val mangaDir = provider.getMangaDir(download.manga.title, download.source).getOrElse { e ->
+            TraceLog.log("dl", "chapter.error mangaDir ${e.javaClass.simpleName}: ${e.message}")
             download.status = Download.State.ERROR
             notifier.onError(e.message, download.chapter.name, download.manga.title, download.manga.id)
             return
@@ -334,6 +341,7 @@ class Downloader(
 
         val availSpace = DiskUtil.getAvailableStorageSpace(mangaDir)
         if (availSpace != -1L && availSpace < MIN_DISK_SPACE) {
+            TraceLog.log("dl", "chapter.error insufficient space avail=$availSpace")
             download.status = Download.State.ERROR
             notifier.onError(
                 context.stringResource(MR.strings.download_insufficient_space),
@@ -365,6 +373,7 @@ class Downloader(
                 download.pages = reIndexedPages
                 reIndexedPages
             }
+            TraceLog.log("dl", "pages=${pageList.size}")
 
             download.status = Download.State.DOWNLOADING
 
@@ -394,6 +403,16 @@ class Downloader(
             // Do after download completes
 
             if (!isDownloadSuccessful(download, tmpDir)) {
+                val bad = pageList.filter { it.status is Page.State.Error }
+                TraceLog.log(
+                    "dl",
+                    "chapter.error incomplete failedPages=${bad.size}/${pageList.size} " +
+                        bad.take(3).joinToString(" ; ") { pg ->
+                            "#${pg.index}: ${(pg.status as Page.State.Error).error.let {
+                                "${it.javaClass.simpleName}: ${it.message}"
+                            }}"
+                        },
+                )
                 download.status = Download.State.ERROR
                 return
             }
@@ -422,6 +441,7 @@ class Downloader(
             DiskUtil.createNoMediaFile(tmpDir, context)
 
             download.status = Download.State.DOWNLOADED
+            TraceLog.log("dl", "chapter.done ${download.chapter.name}")
 
             // Yakuyomi M4：章已下載並進 cache → 排入翻譯佇列（與下載 worker 解耦、非阻塞）。
             // 此處是「下載完成」的權威時點：tmpDir 已 rename 成正式目錄、cache.addChapter 也跑過 →
@@ -456,6 +476,7 @@ class Downloader(
             if (error is CancellationException) throw error
             // If the page list threw, it will resume here
             logcat(LogPriority.ERROR, error)
+            TraceLog.log("dl", "chapter.error ${error.javaClass.simpleName}: ${error.message?.take(200)}")
             download.status = Download.State.ERROR
             notifier.onError(error.message, download.chapter.name, download.manga.title, download.manga.id)
         }
@@ -501,6 +522,7 @@ class Downloader(
         } catch (e: Throwable) {
             if (e is CancellationException) throw e
             // Mark this page as error and allow to download the remaining
+            TraceLog.log("dl", "page.error #${page.index} ${e.javaClass.simpleName}: ${e.message?.take(160)}")
             page.progress = 0
             page.status = Page.State.Error(e)
             notifier.onError(e.message, download.chapter.name, download.manga.title, download.manga.id)

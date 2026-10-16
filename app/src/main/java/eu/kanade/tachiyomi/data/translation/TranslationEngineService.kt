@@ -14,6 +14,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import li.joye.yakuyomi.engine.PageResult
+import li.joye.yakuyomi.engine.RegionScope
 import li.joye.yakuyomi.engine.TranslationEngine
 import li.joye.yakuyomi.engine.Yakuyomi
 import logcat.LogPriority
@@ -114,8 +115,9 @@ class TranslationEngineService(private val context: Context) {
      *
      * @param methodRaw 去字法原始字串（boxfill / auto_whole / auto_tile）；與 warm 引擎當前去字法不同 → 重建引擎。
      *   同一章逐頁去字法相同 → 首頁後 [ensureEngine] 是 no-op、不重建（重建只在章邊界、此時 [inFlight]=0）。
+     * @param scope 只處理哪些文字區（條漫逐頁跳過貼邊區、接縫拼條只翻跨縫區；見 [RegionScope]）。預設全部。
      */
-    suspend fun translatePage(src: Bitmap, methodRaw: String): PageResult {
+    suspend fun translatePage(src: Bitmap, methodRaw: String, scope: RegionScope = RegionScope.ALL): PageResult {
         // 在鎖下：確保引擎已建、註冊在飛頁，並判定「這是不是這個 build 的第一次推論」（[warmedUp]，鎖下讀無 TOCTOU）。
         // 冷引擎的第一頁 → **持鎖單緒**跑完（讓 NCNN/ORT 各 session 首次 lazy 初始化在單緒完成），之後才放行併發。
         // 修「開 app 後第一本翻譯（下載/即時皆是），多頁同時打進剛載好、還沒推論過的原生 session → SIGSEGV 閃退」。
@@ -132,7 +134,7 @@ class TranslationEngineService(private val context: Context) {
                 // 冷引擎首次推論：整段持鎖跑（其他頁在 mutex.withLock 上等），暖完設 warmedUp=true 才放行併發。
                 // 代價＝只有冷啟動後第一本的第一頁不被跨頁重疊（含一次網路往返）；換得不再撞冷 session。
                 try {
-                    e.translatePage(src).also { warmedUp = true }
+                    e.translatePage(src, scope).also { warmedUp = true }
                 } catch (ex: Throwable) {
                     logcat(LogPriority.ERROR, ex) { "warm 引擎翻譯單頁失敗（冷引擎首次）" }
                     PageResult.Failed(ex.message ?: context.stringResource(MR.strings.translate_exception))
@@ -149,7 +151,7 @@ class TranslationEngineService(private val context: Context) {
         val engine = engineForConcurrent!!
         TraceLog.log("svc", "translatePage.concurrent.call inFlight=${inFlight.get()}")
         return try {
-            engine.translatePage(src)
+            engine.translatePage(src, scope)
         } catch (e: Throwable) {
             logcat(LogPriority.ERROR, e) { "warm 引擎翻譯單頁失敗" }
             PageResult.Failed(e.message ?: context.stringResource(MR.strings.translate_exception))
