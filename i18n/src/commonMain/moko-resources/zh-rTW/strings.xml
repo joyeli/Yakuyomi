@@ -1333,7 +1333,7 @@
     <string name="action_source_filters">來源篩選</string>
     <string name="action_clear_filters">清除篩選</string>
     <string name="pref_translation_orientation">排版方向</string>
-    <string name="pref_translation_orientation_auto">自動（原文方向）</string>
+    <string name="pref_translation_orientation_auto">自動（原文方向；非中日韓目標語言一律橫排）</string>
     <string name="pref_translation_orientation_vertical">垂直（垂直優先）</string>
     <string name="pref_translation_orientation_horizontal">水平（水平優先）</string>
     <string name="pref_translation_inpaint_method">去字方法</string>

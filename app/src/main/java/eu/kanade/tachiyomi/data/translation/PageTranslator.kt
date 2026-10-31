@@ -39,6 +39,7 @@ import li.joye.yakuyomi.engine.NightReadStats
 import li.joye.yakuyomi.engine.PageAnalysis
 import li.joye.yakuyomi.engine.PageResult
 import li.joye.yakuyomi.engine.Pt
+import li.joye.yakuyomi.engine.RegionScope
 import li.joye.yakuyomi.engine.RenderConfig
 import li.joye.yakuyomi.engine.Renderer
 import li.joye.yakuyomi.engine.TextLine
@@ -169,11 +170,26 @@ class PageTranslator(private val context: Context) {
         // 跨頁流水線深度（§8 二層併發之「跨頁」）：頁 N 的網路翻譯疊上頁 N+1 的裝置端偵測/OCR。
         // 去字便宜（boxfill/即時）→ 網路綁定、深 4 達約 2×；去字貴（aot）→ CPU 綁定、深 2（再深不加速且吃記憶體）。
         val gate = Semaphore(pipelineDepth(inpaintMethodRaw))
+        // 條漫（長條切成多個圖檔）：氣泡常被檔案邊界切成兩半，各頁只看得到半個 → 讀錯、半邊去字。
+        // 逐頁翻時跳過貼著「也在這輪要翻的相鄰頁」那一側邊緣的文字區，整章翻完再由 [translateSeams] 把接縫拼成一條補翻。
+        val stripMode = isStripChapter(images)
+        val pendingSet = pending.mapNotNullTo(HashSet()) { it.name }
+        val pageIndex = HashMap<String, Int>().apply { images.forEachIndexed { i, f -> f.name?.let { put(it, i) } } }
+        fun scopeFor(name: String): RegionScope {
+            if (!stripMode) return RegionScope.ALL
+            val i = pageIndex[name] ?: return RegionScope.ALL
+            return RegionScope(
+                skipTopEdge = i > 0 && images[i - 1].name in pendingSet,
+                skipBottomEdge = i < images.size - 1 && images[i + 1].name in pendingSet,
+            )
+        }
+        val edgeFlags = java.util.concurrent.ConcurrentHashMap<String, Pair<Boolean, Boolean>>()
+        val edgeBoxes = java.util.concurrent.ConcurrentHashMap<String, List<FloatArray>>()
         TraceLog.log(
             "chap",
             "translateChapter.start ${chapterDir.name} pages=$total pending=${pending.size} " +
                 "depth=${pipelineDepth(inpaintMethodRaw)} method=$inpaintMethodRaw keepMat=$keepMaterials " +
-                "nightOnly=$nightOnly",
+                "nightOnly=$nightOnly strip=$stripMode",
         )
         try {
             coroutineScope {
@@ -251,7 +267,17 @@ class PageTranslator(private val context: Context) {
                             TraceLog.log("page", "$name decoded ${bmp.width}x${bmp.height} -> engine")
                             try {
                                 // 併發進引擎（EngineService 已放鬆成可並發；同章去字法相同、不重建）。§11 三態處理與循序版完全一致。
-                                when (val r = engineService.translatePage(bmp, inpaintMethodRaw)) {
+                                val result = engineService.translatePage(bmp, inpaintMethodRaw, scopeFor(name))
+                                val stats = when (result) {
+                                    is PageResult.Translated -> result.stats
+                                    is PageResult.Skipped -> result.stats
+                                    is PageResult.Failed -> null
+                                }
+                                if (stats != null) {
+                                    edgeFlags[name] = stats.skippedTopEdge to stats.skippedBottomEdge
+                                    edgeBoxes[name] = stats.skippedBoxes
+                                }
+                                when (val r = result) {
                                     is PageResult.Translated -> {
                                         val keepThisPage = keepMaterials && r.analysis != null
                                         // 落地整段在頁鎖內（只擋同一頁；別頁照樣並發）：存原檔 → 覆蓋頁檔 → 存素材 → 記清單 → 刪記號。
@@ -359,6 +385,12 @@ class PageTranslator(private val context: Context) {
                     }
                 }
             }
+            // 條漫接縫補翻（逐頁時跳過的貼邊文字區）
+            if (stripMode && !shouldStop()) {
+                val (pt, ct) = translateSeams(chapterDir, images, edgeFlags, edgeBoxes, done, pendingSet, inpaintMethodRaw, errors, onPageDone, shouldStop)
+                promptTokens += pt
+                completionTokens += ct
+            }
         } catch (c: CancellationException) {
             throw c // 整個 drain 被 cancel（暫停/關即時翻/行程收）→ 傳播、別當章例外記；已翻頁有 manifest、resume 續補
         } catch (e: Throwable) {
@@ -385,6 +417,139 @@ class PageTranslator(private val context: Context) {
             statsStore.record(chapterCount, translated, promptTokens, completionTokens)
         }
         return translated
+    }
+
+    /**
+     * 是否為條漫章（長條切成多個圖檔）：至少 3 頁、寬度全部相同（±1%），且頁偏長（中位長寬比 ≥ 1.6）或頁高參差
+     * （最高／最矮 > 1.15）。一般漫畫頁寬高幾乎一致、長寬比約 1.4 → 不算（頁緣的字是作者排在頁邊，不是被切開）。
+     */
+    private fun isStripChapter(images: List<UniFile>): Boolean {
+        if (images.size < 3) return false
+        val dims = images.map { f ->
+            val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            runCatching { context.contentResolver.openInputStream(f.uri)?.use { BitmapFactory.decodeStream(it, null, o) } }
+            o.outWidth to o.outHeight
+        }
+        if (dims.any { it.first <= 0 || it.second <= 0 }) return false
+        val w0 = dims[0].first
+        if (dims.any { abs(it.first - w0) > w0 / 100 }) return false
+        val aspects = dims.map { it.second.toFloat() / it.first }.sorted()
+        val hs = dims.map { it.second }
+        return aspects[aspects.size / 2] >= 1.6f || hs.max().toFloat() / hs.min() > 1.15f
+    }
+
+    /**
+     * 條漫接縫補翻：對每對相鄰頁（i, i+1），若逐頁翻時 i 跳過了貼下緣的區、或 i+1 跳過了貼上緣的區，就把 i 的底部與
+     * i+1 的頂部（各至多 [SEAM_BAND]×頁寬）拼成一條，只翻跨接縫的區與逐頁時跳過的貼邊區（[RegionScope.onlyTouchingY]／keepBoxes），
+     * 再把結果切回兩頁、覆蓋頁檔。兩頁都要是這輪處理過的（已進清單）。單對失敗只記錯、不影響其他接縫。
+     * @return 這段花的 (prompt, completion) token。
+     */
+    private suspend fun translateSeams(
+        chapterDir: UniFile,
+        images: List<UniFile>,
+        edgeFlags: Map<String, Pair<Boolean, Boolean>>,
+        edgeBoxes: Map<String, List<FloatArray>>,
+        done: Set<String>,
+        thisRun: Set<String>,
+        method: String,
+        errors: StringBuilder,
+        onPageDone: (String) -> Unit,
+        shouldStop: () -> Boolean,
+    ): Pair<Int, Int> {
+        var pt = 0
+        var ct = 0
+        for (i in 0 until images.size - 1) {
+            if (shouldStop()) break
+            val a = images[i]; val b = images[i + 1]
+            val an = a.name ?: continue; val bn = b.name ?: continue
+            if (edgeFlags[an]?.second != true && edgeFlags[bn]?.first != true) continue
+            if (an !in thisRun || bn !in thisRun || an !in done || bn !in done) continue
+            val la = pageLock(a); val lb = pageLock(b)
+            val patched = try {
+                la.withLock {
+                    val ba = edgeBoxes[an].orEmpty(); val bb = edgeBoxes[bn].orEmpty()
+                    if (lb === la) seamPair(a, b, ba, bb, method) else lb.withLock { seamPair(a, b, ba, bb, method) }
+                }
+            } catch (c: CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                logcat(LogPriority.WARN, t) { "接縫補翻例外 $an|$bn" }
+                SeamOutcome(false, 0, 0, "例外 ${t.javaClass.simpleName}: ${t.message}")
+            }
+            pt += patched.promptTokens
+            ct += patched.completionTokens
+            patched.error?.let { errors.appendLine("$an|$bn\t接縫：$it") }
+            if (patched.written) {
+                invalidateNightPage(chapterDir.findFile(MATERIALS_DIR), an)
+                invalidateNightPage(chapterDir.findFile(MATERIALS_DIR), bn)
+                onPageDone(an)
+                onPageDone(bn)
+            }
+        }
+        return pt to ct
+    }
+
+    private class SeamOutcome(val written: Boolean, val promptTokens: Int, val completionTokens: Int, val error: String?)
+
+    /** 一對相鄰頁的接縫補翻（呼叫端持兩頁的頁鎖）。[boxesA]／[boxesB]：兩頁逐頁翻時跳過的貼邊區（頁座標）。 */
+    private suspend fun seamPair(
+        a: UniFile,
+        b: UniFile,
+        boxesA: List<FloatArray>,
+        boxesB: List<FloatArray>,
+        method: String,
+    ): SeamOutcome {
+        val da = decodePageCapped(a) as? PageDecode.Ok ?: return SeamOutcome(false, 0, 0, "讀不出 ${a.name}")
+        val db = decodePageCapped(b) as? PageDecode.Ok ?: run {
+            da.bitmap.recycle()
+            return SeamOutcome(false, 0, 0, "讀不出 ${b.name}")
+        }
+        val pa = da.bitmap; val pb = db.bitmap
+        try {
+            if (pa.width != pb.width) return SeamOutcome(false, 0, 0, null)
+            val w = pa.width
+            val h1 = minOf(pa.height, (w * SEAM_BAND).toInt())
+            val h2 = minOf(pb.height, (w * SEAM_BAND).toInt())
+            val band = Bitmap.createBitmap(w, h1 + h2, Bitmap.Config.ARGB_8888)
+            android.graphics.Canvas(band).apply {
+                drawBitmap(pa, android.graphics.Rect(0, pa.height - h1, w, pa.height), android.graphics.Rect(0, 0, w, h1), null)
+                drawBitmap(pb, android.graphics.Rect(0, 0, w, h2), android.graphics.Rect(0, h1, w, h1 + h2), null)
+            }
+            // 跳過的貼邊區換算到拼條座標（上頁往上移 pa.height − h1、下頁往下移 h1）
+            val keep = boxesA.filter { it[3] > pa.height - h1 }
+                .map { floatArrayOf(it[0], it[1] - (pa.height - h1), it[2], it[3] - (pa.height - h1)) } +
+                boxesB.filter { it[1] < h2 }.map { floatArrayOf(it[0], it[1] + h1, it[2], it[3] + h1) }
+            val r = try {
+                engineService.translatePage(band, method, RegionScope(onlyTouchingY = h1, keepBoxes = keep))
+            } finally {
+                band.recycle()
+            }
+            return when (r) {
+                is PageResult.Translated -> {
+                    val outA = pa.copy(Bitmap.Config.ARGB_8888, true)
+                    val outB = pb.copy(Bitmap.Config.ARGB_8888, true)
+                    android.graphics.Canvas(outA).drawBitmap(
+                        r.page, android.graphics.Rect(0, 0, w, h1), android.graphics.Rect(0, pa.height - h1, w, pa.height), null,
+                    )
+                    android.graphics.Canvas(outB).drawBitmap(
+                        r.page, android.graphics.Rect(0, h1, w, h1 + h2), android.graphics.Rect(0, 0, w, h2), null,
+                    )
+                    r.page.recycle()
+                    try {
+                        writeBack(a, outA)
+                        writeBack(b, outB)
+                    } finally {
+                        outA.recycle(); outB.recycle()
+                    }
+                    TraceLog.log("page", "seam ${a.name}|${b.name} patched")
+                    SeamOutcome(true, r.stats.promptTokens, r.stats.completionTokens, null)
+                }
+                is PageResult.Skipped -> SeamOutcome(false, r.stats.promptTokens, r.stats.completionTokens, null)
+                is PageResult.Failed -> SeamOutcome(false, 0, 0, r.reason)
+            }
+        } finally {
+            pa.recycle(); pb.recycle()
+        }
     }
 
     /**
@@ -1816,7 +1981,9 @@ class PageTranslator(private val context: Context) {
                 return false
             }
 
+            // 沒譯成的區（譯文空白或＝原文）不去字、不排版＝保留原圖（與引擎 Pipeline 一致，不重貼 OCR 原文）
             val regions = regionsFromMaterials(materials)
+                .filter { it.translatedText.isNotBlank() && it.translatedText.trim() != it.sourceText.trim() }
             val cleaned = inpainter!!.inpaint(original, regions, mask) // 引擎內部 copy 輸入，不會 mutate original/mask
             val finalPage = Renderer.render(cleaned, regions, renderCfg!!, null) // 引擎內部 copy cleaned
 
@@ -2550,6 +2717,9 @@ class PageTranslator(private val context: Context) {
          * 只擋同一頁（雜湊撞條的頁偶爾互等一下，無害），別頁照樣並發。拿鎖順序固定：頁鎖 → 章內狀態鎖 → manifest 鎖。
          */
         private val pageLocks = Array(32) { Mutex() }
+
+        /** 條漫接縫補翻：上下兩頁各取至多「頁寬×此值」高的一段拼條（夠容下一顆被切開的氣泡）。 */
+        private const val SEAM_BAND = 1.2f
 
         private fun pageLock(pageFile: UniFile): Mutex = pageLocks[pageFile.uri.hashCode().mod(pageLocks.size)]
 

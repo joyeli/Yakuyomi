@@ -94,6 +94,48 @@ class EngineConfigMappingTest {
      * 前提是 buildEngineConfig 只經由這個映射看去字法，映射後相同的原始字串建出來的設定要一模一樣。
      */
     @Test
+    fun `任意（自訂）語言名照原樣進引擎；非預設目標語言清掉內建 few-shot`() {
+        val default = EngineConfigMapping.buildEngineConfig(prefs(), "auto_whole").translator
+        default.toLangName shouldBe TranslationPreferences.DEFAULT_TARGET_LANG
+        default.fromLangName shouldBe TranslationPreferences.DEFAULT_SOURCE_LANG
+        default.sampleSource.isNotBlank() shouldBe true
+        default.sampleTarget.isNotBlank() shouldBe true
+
+        for (target in listOf("Arabic", "Egyptian Arabic", "Modern Standard Arabic (فصحى)", "Klingon")) {
+            val p = prefs {
+                targetLangName.set(target)
+                sourceLangName.set("")
+            }
+            val t = EngineConfigMapping.buildEngineConfig(p, "auto_whole").translator
+            t.toLangName shouldBe target
+            t.fromLangName shouldBe ""
+            t.sampleSource shouldBe ""
+            t.sampleTarget shouldBe ""
+            // 改語言要讓常駐引擎重建（簽章不同）。
+            (EngineConfigMapping.signatureFields(p) == EngineConfigMapping.signatureFields(prefs())) shouldBe false
+        }
+    }
+
+    @Test
+    fun `auto 排版：非中日韓目標語言改橫排，使用者明確選的方向照舊`() {
+        EngineConfigMapping.renderConfig(prefs()).orientation shouldBe TextOrientation.AUTO
+        for (cjk in listOf("Japanese", "Simplified Chinese", "Korean", "Cantonese")) {
+            EngineConfigMapping.renderConfig(prefs { targetLangName.set(cjk) }).orientation shouldBe
+                TextOrientation.AUTO
+        }
+        for (other in listOf("Arabic", "Egyptian Arabic", "English", "Klingon")) {
+            EngineConfigMapping.renderConfig(prefs { targetLangName.set(other) }).orientation shouldBe
+                TextOrientation.HORIZONTAL
+            EngineConfigMapping.renderConfig(
+                prefs {
+                    targetLangName.set(other)
+                    orientation.set("vertical")
+                },
+            ).orientation shouldBe TextOrientation.VERTICAL
+        }
+    }
+
+    @Test
     fun `去字法舊值與 auto_whole 建出同一份引擎設定，簽章可用映射後的值`() {
         for (p in listOf(prefs(), prefs { tileSize.set(1024) })) {
             val whole = EngineConfigMapping.buildEngineConfig(p, "auto_whole")
