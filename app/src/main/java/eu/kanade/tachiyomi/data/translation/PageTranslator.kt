@@ -101,8 +101,9 @@ class PageTranslator(private val context: Context) {
     }
 
     /**
-     * 主動放掉合併輪留著的夜讀模型組（S2）：夜讀總開關關、模型檔有變動、`App.onTrimMemory`（由 [TranslationManager] 轉來）。
-     * 一輪正在用時等它結束才關。[reason] 記進紀錄（`held release reason=…`）。
+     * 主動放掉合併輪留著的夜讀模型組（S2）：夜讀總開關關、模型檔有變動、`App.onTrimMemory`（由 [TranslationManager] 轉來）；
+     * 分開模式的夜讀項開自己那組之前也會放（[renderNightChapter]，reason＝separate）。一輪正在用時等它結束才關。
+     * [reason] 記進紀錄（`held release reason=…`）。
      */
     fun releaseCombinedNightNets(reason: String) = combinedNets.release(reason)
 
@@ -1094,6 +1095,10 @@ class PageTranslator(private val context: Context) {
             NightPump<NightJob, NightNets>(governor).run(
                 pages = pending,
                 open = { kind ->
+                    // 合併輪留著的多緒組（S2，閒置中最多 60 s、約 0.9–1.3 GB 原生記憶體）先放掉再開分開模式自己的一組：
+                    // 兩組夜讀模型同時開著放不下（合併輪開跑時也會先停掉在跑的夜讀項，同一個理由）。一輪正在用＝不會發生
+                    // （合併輪在跑時夜讀那條不挑新項），萬一撞上也只是記下、還回來時才關。
+                    combinedNets.release("separate")
                     // NightPump 開組失敗會退回另一組、只記一行進 governor.log（TraceLog，診斷紀錄預設關、沒有堆疊）；
                     // 這裡另記 logcat 帶堆疊，某台裝置 LOCKED 組一直開不起來、每章默默退回 FREE 時才查得到
                     try {

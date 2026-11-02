@@ -141,6 +141,23 @@ class NightNetsHolderTest {
     }
 
     @Test
+    fun `合併輪結束後分開模式的夜讀項要開組：先放掉閒置中的多緒組，不等 60 秒`() = runTest {
+        val env = Env(this)
+        val a = env.acquire("k")
+        env.holder.giveBack(a) // 合併輪結束，留著、開始閒置計時
+        advanceTimeBy(1_000)
+        runCurrent()
+        // PageTranslator.renderNightChapter 的開組：release("separate") 之後才開自己的 NIGHT_LOCKED 組
+        env.holder.release("separate")
+        a.nets.closed shouldBe 1
+        env.holder.holdsNets shouldBe false
+        env.logs.last() shouldBe "held release reason=separate"
+        advanceTimeBy(60_000)
+        runCurrent()
+        a.nets.closed shouldBe 1 // 閒置計時已作廢，不會再關一次
+    }
+
+    @Test
     fun `什麼都沒留著時釋放不記任何事`() = runTest {
         val env = Env(this)
         env.holder.release("trim")
