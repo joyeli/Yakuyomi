@@ -16,6 +16,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import li.joye.yakuyomi.engine.NcnnLowPriorityHook
 import java.util.TreeSet
+import java.util.concurrent.Executor
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.CoroutineContext
 
@@ -76,6 +77,8 @@ class NightGovernor(
      * 太少時傳 true，別再開多緒那組。一般夜讀用的那份不傳（false＝行為與以前完全相同）。
      */
     private val preferFree: () -> Boolean = { false },
+    /** [inferenceBranch] 的分支跑在哪（正式＝[NightWorkers.branchPool]；測試注入自己的）。 */
+    private val branchPool: Executor = NightWorkers.branchPool,
 ) {
     enum class Mode(val tag: String) { EXCLUSIVE("EX"), YIELD("YIELD") }
 
@@ -188,6 +191,29 @@ class NightGovernor(
         override fun shouldAbort(): Boolean = currentWork.get()?.abort?.invoke() == true
 
         override fun <T> aroundLockedForward(block: () -> T): T = lockedForward(currentWork.get()?.slot, block)
+    }
+
+    /**
+     * 頁內偵測‖人物分割的分支（S11，引擎 `NightReadRenderer` 的 inferenceBranch）。引擎在**頁的 worker** 上呼叫 execute：
+     * 這裡取那條執行緒綁的 [Work]，在 [branchPool] 的執行緒上綁一段**同中止條件**的新 Work、登記進 governor（套當下模式的
+     * nice；持鎖前向的 ceiling 套在分支自己的 tid 上，不是頁那條），跑完登出、解綁。所以分支上的分割前向跟頁上的偵測前向
+     * 一樣：暫停／取消／讓路時在等鎖期間放棄，YIELD 時讓路的 nice、持鎖時拉回 0。不在夜讀工作裡呼叫（沒綁 Work）＝不放棄。
+     * FREE 組（1 緒、不進鎖、刻意不吃核）不用它，由 [NightPump] 傳 null（依序）。
+     */
+    val inferenceBranch: Executor = Executor { r ->
+        val parent = currentWork.get()
+        val work = Work(parent?.abort ?: { false })
+        branchPool.execute {
+            currentWork.set(work)
+            val slot = enter()
+            work.slot = slot
+            try {
+                r.run()
+            } finally {
+                exit(slot)
+                currentWork.remove()
+            }
+        }
     }
 
     /** 當前執行緒進入夜讀工作：登記、套當下模式的 nice。與 [exit] 成對。 */

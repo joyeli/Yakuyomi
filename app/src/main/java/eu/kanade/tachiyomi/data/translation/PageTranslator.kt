@@ -1738,6 +1738,8 @@ class PageTranslator(private val context: Context) {
                 // 引擎一次分析、產品兩檔（[NightLevel.engineTiers]＝L2、L3）依序交 ARGB_8888（>3.5 MPx 自動縮、輸出縮後
                 // 尺寸）；sink 回傳後引擎就 recycle，所以這裡在 sink 裡寫完。page 與 inpaint 所有權不變：inpaint 在這次呼叫
                 // 一結束就 recycle（引擎重繪前已轉成自己的遮罩），page 下面自己 recycle。
+                // 偵測與人物分割同時跑（S11，ticket.inferenceBranch：多緒組＝governor 的分支執行緒，FREE 組＝null 依序）；
+                // 兩邊的 checkpoint 可能在兩條執行緒上同時問。
                 val rendered = try {
                     NightReadRenderer.renderTiers(
                         page,
@@ -1756,6 +1758,7 @@ class PageTranslator(private val context: Context) {
                         // 重繪前檢查點：只問要不要繼續，不動任何檔（舊檔留到換檔那一刻，見寫入順序）
                         beforeRender = { ticket.keep() },
                         tiers = NightLevel.engineTiers,
+                        inferenceBranch = ticket.inferenceBranch,
                     ) { tier, bmp ->
                         // 1. 與前一檔相同（bmp == null；只會是更多）不存；有圖的檔位一律只寫暫存
                         if (bmp != null) {

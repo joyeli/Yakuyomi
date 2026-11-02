@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.data.nightread
 
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.asCoroutineDispatcher
+import java.util.concurrent.Executor
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
@@ -98,5 +99,23 @@ object NightWorkers {
         ) { r ->
             Thread(r, "yaku-night-${seq.incrementAndGet()}").apply { priority = Thread.NORM_PRIORITY }
         }.apply { allowCoreThreadTimeOut(true) }.asCoroutineDispatcher()
+    }
+
+    /**
+     * 頁內偵測‖人物分割的分支執行緒（`yaku-night-b-N`，S11，[NightGovernor.inferenceBranch] 用）。每頁在飛時最多一個分支、
+     * 在飛頁數又不超過 [dispatcher] 的執行緒數（一般夜讀與合併輪共用它），所以同樣 [NightConcurrency.MAX_PAGES] 條就不必排隊；
+     * 分支只等 NCNN 全域鎖、從不等別的分支，萬一排隊也不會卡死（分支還沒開跑時引擎由頁自己跑）。優先權同 [dispatcher]：以 Java
+     * 預設出生，nice 由 governor 依模式設。
+     */
+    val branchPool: Executor by lazy {
+        ThreadPoolExecutor(
+            NightConcurrency.MAX_PAGES,
+            NightConcurrency.MAX_PAGES,
+            30,
+            TimeUnit.SECONDS,
+            LinkedBlockingQueue(),
+        ) { r ->
+            Thread(r, "yaku-night-b-${seq.incrementAndGet()}").apply { priority = Thread.NORM_PRIORITY }
+        }.apply { allowCoreThreadTimeOut(true) }
     }
 }

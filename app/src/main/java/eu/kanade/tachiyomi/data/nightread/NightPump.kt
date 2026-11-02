@@ -9,6 +9,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import li.joye.yakuyomi.engine.NcnnForwardAbortedException
 import java.util.PriorityQueue
+import java.util.concurrent.Executor
 
 /** 一頁在 worker 上跑完的結果（[NightPump] 依此決定要不要丟回待做或補跑）。 */
 enum class NightPageOutcome {
@@ -54,6 +55,12 @@ class NightTicket<N> internal constructor(
     private val gate: NightGovernor.ChapterGate,
     private val work: NightGovernor.Work,
     private val shouldStop: () -> Boolean,
+    /**
+     * 頁內偵測‖人物分割的分支（引擎 `NightReadRenderer` 的 inferenceBranch，S11）：多緒組＝[NightGovernor.inferenceBranch]；
+     * FREE 組＝null（依序：1 緒不進鎖的組刻意不吃核，同時跑會變兩條各吃一核）。偵測與分割前的 [checkpoint] 因此可能在兩條
+     * 執行緒上同時被叫（[keep] 讀的都是有鎖或 volatile 的狀態，可以）。
+     */
+    val inferenceBranch: Executor?,
 ) {
     /** 檢查點：false＝放棄這頁（暫停／取消，或讓路時不是最早放行的那頁）。每次推論前與重繪前問；引擎等翻譯讓出鎖時也會問。 */
     fun keep(): Boolean = !shouldStop() && gate.keep(admission)
@@ -306,7 +313,8 @@ class NightPump<P : Any, N : AutoCloseable>(
                     // 這頁的工作：引擎每次推論前、等翻譯讓出鎖時問——暫停／取消、讓路時不是最早放行的那頁，或（LOCKED 組）
                     // 讓路夠久該換 FREE 了（見類別說明；只放在這裡、不進 ticket.keep()：推論都做完的頁就讓它畫完）
                     val work = governor.newWork { shouldStop() || !gate.keep(a) || wantsFree(pageKind, canSwap) }
-                    val ticket = NightTicket(pageNets, pageKind, a, gate, work, shouldStop)
+                    val branch = if (pageKind == NetKind.FREE) null else governor.inferenceBranch
+                    val ticket = NightTicket(pageNets, pageKind, a, gate, work, shouldStop, branch)
                     // 名額在 invokeOnCompletion 還：子工作還沒開始就被取消（不跑本體）也一定會還
                     launch(workers + governor.workElement(work)) {
                         val slot = governor.enter()
