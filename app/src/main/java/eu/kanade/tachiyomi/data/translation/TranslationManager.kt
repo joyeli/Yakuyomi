@@ -33,6 +33,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -203,7 +204,8 @@ class TranslationManager(private val context: Context) {
     private fun combinedLowMemory(): Boolean {
         if (combinedLowMemSticky) return true
         val avail = availMem()
-        val need = if (combinedGovernor.openNets == NetKind.LOCKED) {
+        // 多緒那組開著、或是上一輪留著（S2，[PageTranslator.holdsCombinedNightNets]）：它的記憶體都已算在可用記憶體裡
+        val need = if (combinedGovernor.openNets == NetKind.LOCKED || pageTranslator.holdsCombinedNightNets) {
             CombinedNight.MIN_AVAIL_LOCKED_OPEN_BYTES
         } else {
             CombinedNight.MIN_AVAIL_BYTES
@@ -213,6 +215,21 @@ class TranslationManager(private val context: Context) {
         val mb = 1024 * 1024
         TraceLog.log("combined", "low mem → FREE avail=${avail / mb}MB need=${need / mb}MB")
         return true
+    }
+
+    init {
+        // S2：模型檔有變動（下載、刪除、清殘留）→ 放掉合併輪留著的夜讀模型組（一輪正在用就等它結束）。下一輪也會因檔案戳記
+        // 不同而重開，這裡是讓記憶體早點回來。Injekt 在協程裡才取（不在建構期間碰別的單例）。
+        scope.launch {
+            Injekt.get<ModelDownloadManager>().filesRevision.drop(1).collect {
+                pageTranslator.releaseCombinedNightNets("models-changed")
+            }
+        }
+    }
+
+    /** `App.onTrimMemory`（真的有記憶體壓力）：放掉合併輪留著的夜讀模型組（S2；一輪正在用就等它結束）。 */
+    fun onTrimMemory() {
+        pageTranslator.releaseCombinedNightNets("trim")
     }
 
     /**
@@ -1978,6 +1995,8 @@ class TranslationManager(private val context: Context) {
             deleteHoldFilesLater(holdCleanup)
             // 設定 › 夜讀 的舊版頁掃描也停（大書庫要掃好幾分鐘，關了夜讀就別再佔儲存的 IO）；再開時重掃
             cancelOutdatedNightScan()
+            // 合併輪留著的夜讀模型組（S2）放掉（正在跑的那輪夜讀段剛被停，結束時才關）
+            pageTranslator.releaseCombinedNightNets("night-off")
             // 以「切換後」的開關值判斷（同 haltForMasterOff）：翻譯那條還有活 → 前景服務留住。
             if (!hasRunnableWork(master = masterEnabled(), night = false)) TranslationJob.stop(context)
         }

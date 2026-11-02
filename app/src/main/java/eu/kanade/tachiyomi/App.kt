@@ -283,6 +283,8 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
             level == ComponentCallbacks2.TRIM_MEMORY_COMPLETE
         if (realPressure) {
             runCatching { Injekt.get<TranslationEngineService>().shutdownBlocking() }
+            // 合併輪留著的夜讀模型組（S2）也放掉（正在用就等那一輪結束）
+            runCatching { Injekt.get<TranslationManager>().onTrimMemory() }
         }
     }
 

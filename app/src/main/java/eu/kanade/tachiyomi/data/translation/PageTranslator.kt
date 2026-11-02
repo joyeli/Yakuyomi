@@ -14,6 +14,7 @@ import eu.kanade.tachiyomi.data.nightread.NetKind
 import eu.kanade.tachiyomi.data.nightread.NightConcurrency
 import eu.kanade.tachiyomi.data.nightread.NightGovernor
 import eu.kanade.tachiyomi.data.nightread.NightLevel
+import eu.kanade.tachiyomi.data.nightread.NightNetsHolder
 import eu.kanade.tachiyomi.data.nightread.NightPageOutcome
 import eu.kanade.tachiyomi.data.nightread.NightPages
 import eu.kanade.tachiyomi.data.nightread.NightPerfProbe
@@ -21,7 +22,9 @@ import eu.kanade.tachiyomi.data.nightread.NightPump
 import eu.kanade.tachiyomi.data.nightread.NightTicket
 import eu.kanade.tachiyomi.data.nightread.SharedNightDetector
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -84,6 +87,27 @@ class PageTranslator(private val context: Context) {
 
     /** 翻譯統計（每日章/頁/token 計數）。[translateChapter] 章翻完時 record。 */
     private val statsStore: TranslationStatsStore = Injekt.get()
+
+    /**
+     * 合併輪夜讀的多緒模型組跨輪、跨章常駐（S2，見 [NightNetsHolder]）。只有 [TranslationManager] 那份 PageTranslator 跑合併輪，
+     * 其他實例從不碰它（lazy，不建）。釋放的觸發見 [releaseCombinedNightNets]。
+     */
+    private val combinedNets by lazy {
+        NightNetsHolder<NightNetsKey, NightNets>(
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+            now = SystemClock::elapsedRealtime,
+            log = { TraceLog.log("combined", it) },
+        )
+    }
+
+    /**
+     * 主動放掉合併輪留著的夜讀模型組（S2）：夜讀總開關關、模型檔有變動、`App.onTrimMemory`（由 [TranslationManager] 轉來）。
+     * 一輪正在用時等它結束才關。[reason] 記進紀錄（`held release reason=…`）。
+     */
+    fun releaseCombinedNightNets(reason: String) = combinedNets.release(reason)
+
+    /** 合併輪留著（或正在用）多緒的夜讀模型組：判「多緒那組已經開著」用（那組的記憶體已算在系統可用記憶體裡）。 */
+    val holdsCombinedNightNets: Boolean get() = combinedNets.holdsNets
 
     /** key：設定頁（BYOK，Keystore 加密）。不再有 build 時寫進 APK 的後備 key（曾把開發者的 key 帶進發佈的 APK）。 */
     private fun apiKey(): String = translationPreferences.activeApiKey()
@@ -1384,7 +1408,7 @@ class PageTranslator(private val context: Context) {
                         pages = emptyList(),
                         open = { kind ->
                             try {
-                                openNightNets(detector, yoloParam, csegParam, kind, night.governor, combined = true)
+                                openCombinedNightNets(detector, yoloParam, csegParam, kind, night.governor)
                             } catch (t: Throwable) {
                                 logcat(LogPriority.WARN, t) { "合併夜讀開組失敗 ${kind.tag}" }
                                 throw t
@@ -1490,6 +1514,8 @@ class PageTranslator(private val context: Context) {
      * [detect]＝這組的偵測：自己的 [Detector]，或（合併輪的多緒組）[shared]——每次先借翻譯引擎那顆偵測器、借不到用自己的
      * （S1，[SharedNightDetector]）。[ownsDetector]＝開組時偵測器是不是自己的（false＝借翻譯引擎的，關組時不碰它；之後借不到
      * 而建的那顆由 [shared] 自己關）。[detectorPath]＝偵測模型 `.param`（debug 一次性比對用）。
+     * [onClose]＝null 時關組就關掉偵測器與分割器；留給下一輪的那組借出時是一個外殼（[lentView]），close＝還給
+     * [NightNetsHolder]。
      */
     private class NightNets(
         val detect: (Bitmap) -> Detection,
@@ -1498,11 +1524,45 @@ class PageTranslator(private val context: Context) {
         val detectorPath: String,
         val shared: SharedNightDetector<Bitmap, Detection, Detector>? = null,
         private val detector: Detector? = null,
+        private val onClose: (() -> Unit)? = null,
     ) : AutoCloseable {
         override fun close() {
+            val giveBack = onClose
+            if (giveBack != null) {
+                giveBack()
+                return
+            }
             runCatching { segmenter.close() }
             runCatching { shared?.close() }
             runCatching { detector?.close() }
+        }
+
+        /** 同一組 Net 的外殼：close＝[giveBack]（還給 [NightNetsHolder]），不關任何東西。 */
+        fun lentView(giveBack: () -> Unit) =
+            NightNets(detect, segmenter, ownsDetector, detectorPath, shared, detector = null, onClose = giveBack)
+    }
+
+    /**
+     * 合併輪留著的多緒模型組的鑰匙（[NightNetsHolder]）：三顆模型的 `.param` 路徑與檔案戳記（[ModelStamp]：`.param`、`.bin`
+     * 的長度與修改時間）。任一顆換了檔（重新下載、BYOM 換檔）就不同，下一輪開新的一組。
+     */
+    private data class NightNetsKey(
+        val detector: String,
+        val detectorStamp: ModelStamp?,
+        val yolo: String?,
+        val yoloStamp: ModelStamp?,
+        val cseg: String?,
+        val csegStamp: ModelStamp?,
+    ) {
+        companion object {
+            fun of(detector: String, yolo: String?, cseg: String?) = NightNetsKey(
+                detector,
+                ModelStamp.of(detector),
+                yolo,
+                ModelStamp.of(yolo),
+                cseg,
+                ModelStamp.of(cseg),
+            )
         }
     }
 
@@ -1653,6 +1713,32 @@ class PageTranslator(private val context: Context) {
         )
         TraceLog.log("combined", "nets detector=${if (lendable) "shared" else "own"}")
         return NightNets(shared::detect, seg, ownsDetector = !lendable, detectorPath = detectorPath, shared = shared)
+    }
+
+    /**
+     * 合併輪夜讀段的開組（[NightPump] 的 open，在夜讀 worker 上）：
+     *  - 多緒組（LOCKED）→ 向 [combinedNets] 拿（S2）：同一把鑰匙（[NightNetsKey]）留著的那組直接用（不重開、不暖機），回合邊界
+     *    順手把「借不到時建的自己那顆偵測器」在引擎又借得到時收掉；沒有就 [openNightNets] 開一組。給 pump 的是外殼
+     *    （[NightNets.lentView]），pump 關組＝還給 holder（留著、閒置 60 s 才關）。
+     *  - 單緒組（FREE，記憶體不足時）→ 先放掉留著的多緒組（改走單緒組＝要省記憶體），再照舊自己開一組（不留）。
+     */
+    private fun openCombinedNightNets(
+        detectorPath: String,
+        yoloParam: String?,
+        csegParam: String?,
+        kind: NetKind,
+        governor: NightGovernor,
+    ): NightNets {
+        if (kind == NetKind.FREE) {
+            combinedNets.release("free")
+            return openNightNets(detectorPath, yoloParam, csegParam, kind, governor, combined = true)
+        }
+        val lease = combinedNets.acquire(NightNetsKey.of(detectorPath, yoloParam, csegParam)) {
+            openNightNets(detectorPath, yoloParam, csegParam, kind, governor, combined = true)
+        }
+        val nets = lease.nets
+        if (lease.reused) nets.shared?.dropOwnIfBorrowable { engineService.canLendDetector(detectorPath) }
+        return nets.lentView { combinedNets.giveBack(lease) }
     }
 
     /**
