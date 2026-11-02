@@ -222,6 +222,8 @@ class TranslationEngineService(private val context: Context) {
             val bundle = TranslationEngineConfig.resolveModelSet(context) ?: return null
             // 去字法照呼叫端傳入（佇列逐章帶來的去字法），其餘參數（語言/緒數/排版…）照使用者設定。
             val cfg = TranslationEngineConfig.buildEngineConfig(translationPreferences, methodRaw)
+            // 借給夜讀的判準之一（S1）：偵測模型檔在載入前的戳記，載入＋暖機完再比一次（[ModelStamp.stableAcrossLoad]）
+            val detStampBefore = ModelStamp.of(bundle.models.detectorNcnn)
             TraceLog.log("svc", "ensureEngine.create.start")
             val built = Yakuyomi.create(bundle.models, bundle.alphabet, apiKey(), cfg)
             TraceLog.log("svc", "ensureEngine.create.done")
@@ -233,9 +235,15 @@ class TranslationEngineService(private val context: Context) {
             runCatching { built.warmUp() }
                 .onSuccess { warmedUp = true }
                 .onFailure { logcat(LogPriority.WARN, it) { "引擎暖機失敗，退回第一頁序列化保險" } }
-            // 建好、暖好才借給夜讀（偵測器是 DEFAULT 組、前向在全域鎖內串行，沒暖成也不會撞冷 Net 的併發）
+            // 建好、暖好才借給夜讀（偵測器是 DEFAULT 組、前向在全域鎖內串行，沒暖成也不會撞冷 Net 的併發）。戳記用載入前讀的那個，
+            // 而且載入＋暖機之後要沒變：期間換了檔（例如夜讀組重新下載偵測器，那條不關翻譯引擎）＝Net 跟檔案對不上，這顆整個不借
             val detPath = built.detectorModelPath
-            lease.publish(Lent(built, detPath, ModelStamp.of(detPath)))
+            val before = if (detPath == bundle.models.detectorNcnn) detStampBefore else null
+            val detStamp = ModelStamp.stableAcrossLoad(before, ModelStamp.of(detPath))
+            if (detPath != null && detStamp == null) {
+                TraceLog.log("svc", "night detector not lendable: model file changed while loading (or unreadable)")
+            }
+            lease.publish(Lent(built, detPath, detStamp))
             built
         } catch (e: Throwable) {
             logcat(LogPriority.ERROR, e) { "建翻譯引擎失敗" }
@@ -378,13 +386,12 @@ class TranslationEngineService(private val context: Context) {
      * 或新引擎 publish）。等了 [NIGHT_LEASE_WAIT_MS] 還沒還 → 恢復借出、回 false（呼叫端這次不關）。只在 [mutex] 下呼叫。
      */
     private suspend fun drainNightLeases(): Boolean {
-        val n = lease.beginClose()
-        if (n == 0) return true
-        TraceLog.log("svc", "close waits night detector lease n=$n")
-        if (lease.awaitDrained(NIGHT_LEASE_WAIT_MS)) return true
-        lease.cancelClose()
-        TraceLog.log("svc", "close skipped: night detector lease still out n=${lease.outstanding}")
-        return false
+        // 等待中被取消（例如 reader「翻譯這頁」換了去字法、等的時候離開閱讀器）：drainForClose 先恢復借出再把取消往外拋
+        val drained = lease.drainForClose(NIGHT_LEASE_WAIT_MS) { n ->
+            TraceLog.log("svc", "close waits night detector lease n=$n")
+        }
+        if (!drained) TraceLog.log("svc", "close skipped: night detector lease still out n=${lease.outstanding}")
+        return drained
     }
 
     /**

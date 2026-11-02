@@ -13,7 +13,8 @@ import java.io.File
  *  - [acquire]：有引擎、沒在關、[acquire] 的 accept 接受 → 借出（計數 +1，之後一定要 [release]）；否則 null（呼叫端用自己的
  *    偵測器）。
  *  - 關引擎的路徑：先 [beginClose]（之後一律不借），等借出數歸零（[awaitDrained]）才真的關；等不到、或不能等（onTrimMemory
- *    那條非 suspend）→ [cancelClose] 恢復借出、這次不關（同在飛頁不歸零時的做法）。
+ *    那條非 suspend）→ [cancelClose] 恢復借出、這次不關（同在飛頁不歸零時的做法）。suspend 的路徑用 [drainForClose]（含等待中
+ *    協程被取消時也恢復借出）。
  */
 class EngineLease<E : Any> {
     private val lock = Any()
@@ -69,6 +70,25 @@ class EngineLease<E : Any> {
     val outstanding: Int
         get() = synchronized(lock) { leases }
 
+    /**
+     * 關引擎前停借並等借出數歸零（[beginClose] ＋ [awaitDrained]）：回 true＝可以關（之後維持停借，直到 [publish]）；等了
+     * [timeoutMs] 還沒歸零 → 恢復借出、回 false（這次不關）。**等待中協程被取消也恢復借出**再把取消往外拋：不然停借會一直留著、
+     * 引擎卻沒關，之後夜讀一律借不到、每頁都用自己的偵測器（多約 0.4 GB），直到下次重建或關引擎。[onWait]＝有借出、開始等時
+     * 呼叫一次（記紀錄用）。
+     */
+    suspend fun drainForClose(timeoutMs: Long, pollMs: Long = 20L, onWait: (Int) -> Unit = {}): Boolean {
+        val n = beginClose()
+        if (n == 0) return true
+        onWait(n)
+        var drained = false
+        try {
+            drained = awaitDrained(timeoutMs, pollMs)
+        } finally {
+            if (!drained) cancelClose()
+        }
+        return drained
+    }
+
     /** 等借出數歸零，最多 [timeoutMs]（每 [pollMs] 看一次）。回 true＝歸零了。 */
     suspend fun awaitDrained(timeoutMs: Long, pollMs: Long = 20L): Boolean {
         var waited = 0L
@@ -94,5 +114,12 @@ data class ModelStamp(val paramLen: Long, val paramTime: Long, val binLen: Long,
             if (!p.isFile || !b.isFile) return null
             return ModelStamp(p.length(), p.lastModified(), b.length(), b.lastModified())
         }
+
+        /**
+         * 載入前後各讀一次戳記，兩次相同才回那個戳記（可以借）；不同、或任一次讀不到 → null（這顆 Net 不借）。載入（加暖機）要
+         * 好幾秒，期間檔案被換掉的話，載入後才讀的戳記會是新檔的、Net 卻是舊權重（或讀到一半的檔），借出去就跟分開模式不一樣。
+         */
+        fun stableAcrossLoad(before: ModelStamp?, after: ModelStamp?): ModelStamp? =
+            if (before != null && before == after) before else null
     }
 }

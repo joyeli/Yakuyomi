@@ -23,6 +23,14 @@ internal object NightShareCheck {
     /** 搶這個行程唯一的一次比對（多頁同時借時只有一頁拿到）。 */
     fun claim(): Boolean = BuildConfig.DEBUG && claimed.compareAndSet(false, true)
 
+    /**
+     * 搶到名額的那頁沒走到比對（暫停／取消在重繪前放棄、推論或重繪丟例外、OOM）：名額還回去，之後借來的頁再比。
+     * 不還的話這個行程就永遠不會有 `verify=` 那行，手機驗收看不出是沒比還是忘了印。
+     */
+    fun unclaim() {
+        claimed.set(false)
+    }
+
     /** 一邊（借的／自己的）的偵測與兩檔。 */
     class Side {
         private var lines = -1

@@ -80,6 +80,49 @@ class EngineLeaseTest {
     }
 
     @Test
+    fun `drainForClose：沒借出直接可關、等到歸零可關、等不到恢復借出`() = runTest {
+        val lease = EngineLease<Eng>()
+        lease.publish(Eng("a"))
+        val waits = ArrayList<Int>()
+        lease.drainForClose(timeoutMs = 500) { waits += it } shouldBe true
+        waits shouldBe emptyList()
+        lease.acquire { true } shouldBe null // 可以關＝維持停借
+        lease.publish(Eng("b"))
+        lease.acquire { true } shouldBe Eng("b")
+        val drained = async { lease.drainForClose(timeoutMs = 15_000) { waits += it } }
+        advanceTimeBy(1_000)
+        runCurrent()
+        drained.isCompleted shouldBe false
+        waits shouldBe listOf(1)
+        lease.release()
+        advanceTimeBy(100)
+        runCurrent()
+        drained.await() shouldBe true
+        lease.available { true } shouldBe false
+        lease.publish(Eng("c"))
+        lease.acquire { true }
+        lease.drainForClose(timeoutMs = 500) shouldBe false
+        lease.acquire { true } shouldBe Eng("c") // 等不到＝恢復借出
+    }
+
+    @Test
+    fun `drainForClose 等待中被取消：恢復借出、取消照樣往外拋`() = runTest {
+        val lease = EngineLease<Eng>()
+        lease.publish(Eng("a"))
+        lease.acquire { true }
+        val waiting = async { lease.drainForClose(timeoutMs = 15_000) }
+        advanceTimeBy(1_000)
+        runCurrent()
+        lease.available { true } shouldBe false // 等的時候停借
+        waiting.cancel()
+        runCurrent()
+        waiting.isCancelled shouldBe true
+        lease.available { true } shouldBe true // 取消後恢復借出，不會一直停借
+        lease.acquire { true } shouldBe Eng("a")
+        lease.outstanding shouldBe 2
+    }
+
+    @Test
     fun `非 suspend 路徑：有借出就不關（beginClose 回非 0 後 cancelClose）`() {
         val lease = EngineLease<Eng>()
         lease.publish(Eng("a"))
@@ -130,5 +173,18 @@ class EngineLeaseTest {
         bin.writeText("bin-longer")
         (ModelStamp.of(param.path) == a) shouldBe false
         ModelStamp.of(null) shouldBe null
+    }
+
+    @Test
+    fun `載入前後戳記相同才借；載入期間換了檔或讀不到就不借`(@TempDir dir: File) {
+        val param = File(dir, "dbnet.param").apply { writeText("p") }
+        val bin = File(dir, "dbnet.bin").apply { writeText("bin") }
+        val before = ModelStamp.of(param.path)
+        ModelStamp.stableAcrossLoad(before, ModelStamp.of(param.path)) shouldBe before
+        bin.writeText("bin-new-weights") // 載入（含暖機）期間被換掉
+        ModelStamp.stableAcrossLoad(before, ModelStamp.of(param.path)) shouldBe null
+        ModelStamp.stableAcrossLoad(null, ModelStamp.of(param.path)) shouldBe null
+        bin.delete()
+        ModelStamp.stableAcrossLoad(before, ModelStamp.of(param.path)) shouldBe null
     }
 }

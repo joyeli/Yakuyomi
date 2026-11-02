@@ -1863,6 +1863,7 @@ class PageTranslator(private val context: Context) {
                 // debug 一次性比對（S1）：這個行程第一頁「偵測是借翻譯引擎的」夜讀頁 → 記下偵測與兩檔，畫完用自己建的偵測器
                 // 再做一次比（[verifySharedDetector]）。偵測在頁的執行緒上（分割才在分支上），sink 也是，所以不必同步。
                 var shareCheck: NightShareCheck.Side? = null
+                var shareChecked = false
                 // 引擎一次分析、產品兩檔（[NightLevel.engineTiers]＝L2、L3）依序交 ARGB_8888（>3.5 MPx 自動縮、輸出縮後
                 // 尺寸）；sink 回傳後引擎就 recycle，所以這裡在 sink 裡寫完。page 與 inpaint 所有權不變：inpaint 在這次呼叫
                 // （與 debug 比對）一結束就 recycle（引擎重繪前已轉成自己的遮罩），page 下面自己 recycle。
@@ -1904,7 +1905,10 @@ class PageTranslator(private val context: Context) {
                         }
                     }
                     val check = shareCheck
-                    if (ok && check != null) verifySharedDetector(name, page, nets, chapter.base, extra, inpaint, check)
+                    if (ok && check != null) {
+                        verifySharedDetector(name, page, nets, chapter.base, extra, inpaint, check)
+                        shareChecked = true
+                    }
                     ok
                 } catch (t: Throwable) {
                     // 2. 交檔途中出錯：這一輪的暫存全刪、舊檔沒動（推論階段出錯時本來就沒寫任何檔）
@@ -1912,6 +1916,8 @@ class PageTranslator(private val context: Context) {
                     throw t
                 } finally {
                     inpaint?.recycle()
+                    // debug 比對的名額被這頁搶到、卻沒走到比對（放棄、例外、OOM）→ 還回去，之後借來的頁再比
+                    if (shareCheck != null && !shareChecked) NightShareCheck.unclaim()
                 }
                 if (!rendered) {
                     // 暫停／取消，或讓路時不是最早那頁：不寫檔、不計 done、不記錯，丟回待做（heap 由 finally 放掉）
