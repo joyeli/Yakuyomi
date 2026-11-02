@@ -1610,7 +1610,7 @@
     <string name="rerender_none">No translated chapters to re-render</string>
     <!-- Yakuyomi: night read -->
     <string name="pref_translation_nightread">Auto-generate night pages</string>
-    <string name="pref_translation_nightread_summary">After a chapter is downloaded (and translated, when translation is on), generate a darkened night-reading copy of each page. Also works for manga you don\'t translate (needs the character-segmentation models; slow — several seconds per page)</string>
+    <string name="pref_translation_nightread_summary">Generate a darkened night-reading copy of each page after a chapter is downloaded and not translated, or after a translation that did not make night pages along the way (\"Manual translation &amp; night pages\" set to Separate, or live translation without \"Also make night pages during live translation\"). Also works for manga you don\'t translate (needs the character-segmentation models; slow — several seconds per page)</string>
     <string name="reader_nightread_chapter_started">Queued night pages for this chapter</string>
     <string name="nightread_archive_unsupported">Night pages only work for loose image folders; archive (CBZ/RAR/7z/EPUB) chapters were skipped</string>
     <string name="action_nightread">Generate night pages</string>
@@ -1734,6 +1734,20 @@
     <string name="pref_nightread_clear_all">Clear all night versions</string>
     <string name="pref_nightread_clear_nothing">Nothing to clear</string>
     <!-- Yakuyomi: combined translation + night reading (Settings › Translation / Night reading, queue, reader) -->
+    <string name="pref_translation_night_manual_mode">Manual translation &amp; night pages</string>
+    <string name="pref_translation_night_manual_separate">Separate: pages show as soon as they are translated; night pages are made separately</string>
+    <string name="pref_translation_night_manual_combined">Combined: each page is shown once its translation and night page are both ready</string>
+    <string name="pref_translation_night_manual_mode_summary">%s. Applies to the translate button, multi-select, \"Translate this chapter\" in the reader and translate-on-download</string>
+    <string name="pref_translation_live_night">Also make night pages during live translation</string>
+    <string name="pref_translation_live_night_summary">Each page is shown once its translation and night page are both ready, in day mode too. Uses more battery</string>
+    <string name="pref_night_link_needs_models">Download the night-reading models first</string>
+    <string name="pref_night_link_needs_live">Turn on live translation first</string>
+    <string name="pref_night_link_translation_off">Translation is turned off</string>
+    <string name="pref_nightread_dim_pending">Dim pages without a night page</string>
+    <string name="pref_nightread_dim_pending_summary">In night mode, pages whose night page isn\'t ready yet are shown darker until it is. Display only, files are not changed</string>
+    <string name="pref_nightread_dim_standard">Dimming for Standard</string>
+    <string name="pref_nightread_dim_more">Dimming for More</string>
+    <string name="pref_nightread_dim_value_summary">How much darker the page is shown</string>
     <string name="queue_chip_with_night">+ Night</string>
     <string name="translation_status_translating_with_night">Translating + night pages</string>
     <string name="reader_translating_with_night_progress">Translating + night pages %1$d/%2$d</string>

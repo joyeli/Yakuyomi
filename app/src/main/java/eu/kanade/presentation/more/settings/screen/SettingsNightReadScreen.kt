@@ -1,7 +1,9 @@
 package eu.kanade.presentation.more.settings.screen
 
 import android.text.format.Formatter
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -15,12 +17,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.util.fastMap
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import dev.icerock.moko.resources.StringResource
 import eu.kanade.domain.source.interactor.GetSourcesWithFavoriteCount
 import eu.kanade.presentation.category.visualName
 import eu.kanade.presentation.more.settings.Preference
+import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
+import eu.kanade.presentation.more.settings.widget.TrailingWidgetBuffer
 import eu.kanade.presentation.more.settings.widget.TriStateListDialog
 import eu.kanade.tachiyomi.data.nightread.NightConcurrency
 import eu.kanade.tachiyomi.data.nightread.NightLevel
@@ -46,6 +53,7 @@ import kotlinx.coroutines.withContext
 import tachiyomi.domain.category.interactor.GetCategories
 import tachiyomi.domain.translation.service.TranslationPreferences
 import tachiyomi.i18n.MR
+import tachiyomi.presentation.core.components.material.DISABLED_ALPHA
 import tachiyomi.presentation.core.i18n.pluralStringResource
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.collectAsState
@@ -61,8 +69,9 @@ private typealias NightItem = Preference.PreferenceItem<out Any, out Any>
  * 與翻譯只共用偵測器。分工：「其他」頁的快捷開關＝同一個 pref 的鏡像；閱讀器的懸浮鈕與設定面板＝顯示開關與檔位；
  * 本頁分兩組：
  *  - **顯示（即時）**：填黑程度（標準／更多，[NightLevel]）。兩檔在產生時一次備齊，這個值只決定顯示哪一檔，與閱讀器
- *    懸浮鈕同步。
- *  - **產生（只影響之後產生的頁）**：自動產生的範圍、略過彩色頁、亮度。
+ *    懸浮鈕同步。另有「沒有夜讀版的頁先壓暗」與兩檔各自的壓暗程度（只影響閱讀器顯示，不寫檔）。
+ *  - **產生（只影響之後產生的頁）**：自動產生、合併處理兩項（[nightLinkItems]，與 設定 › 翻譯 共用同一個偏好）、
+ *    自動產生的範圍、略過彩色頁、亮度。
  * 另有「背景處理」（電池最佳化的說明、目前狀態與系統請求，不自動跳提示；[backgroundGroup]）與「儲存空間」（夜讀版佔用、清除
  * 已讀的話／全部；總開關關著也顯示；[storageGroup]）。
  *
@@ -189,6 +198,15 @@ object SettingsNightReadScreen : SearchableSettings {
                 }
             },
         )
+
+        // 合併處理兩項（與 設定 › 翻譯 共用同一個偏好物件；總開關關時回 null，但那時整頁本來就縮起來）。
+        val nightLink = nightLinkItems(prefs)
+
+        // 沒有夜讀版的頁先壓暗（只影響顯示）：開關＋兩檔各自的壓暗值（變暗 %，0–90、間隔 5；存值可能來自備份，讀出來夾一次）。
+        val dimPending by prefs.nightDimPending.collectAsState()
+        val dimStandard by prefs.nightDimStandard.collectAsState()
+        val dimMore by prefs.nightDimMore.collectAsState()
+        val dimValueSummary = stringResource(MR.strings.pref_nightread_dim_value_summary)
 
         // 舊版存值（三檔時代的 l1、更早的 protect／aggressive）換成對應的 l2／l3，清單才勾得到（懸浮鈕本來就照
         // NightLevel.fromPref 讀）。
@@ -367,9 +385,28 @@ object SettingsNightReadScreen : SearchableSettings {
                         subtitle = fillSummary,
                         subtitleProvider = { v, e -> fillSummary.format(e[NightLevel.fromPref(v).prefValue]) },
                     ),
+                    // 沒有夜讀版（目前檔位）的頁先壓暗：閱讀器顯示層的 ColorMatrix，不寫檔；兩檔各自的壓暗值只在開著時列出。
+                    // 改了不必重開章：閱讀器在夜讀模式下會重畫壓暗值有變的頁。
+                    Preference.PreferenceItem.SwitchPreference(
+                        preference = prefs.nightDimPending,
+                        title = stringResource(MR.strings.pref_nightread_dim_pending),
+                        subtitle = stringResource(MR.strings.pref_nightread_dim_pending_summary),
+                    ),
+                    dimSlider(
+                        value = dimStandard,
+                        title = stringResource(MR.strings.pref_nightread_dim_standard),
+                        subtitle = dimValueSummary,
+                        onChange = { prefs.nightDimStandard.set(it) },
+                    ).takeIf { dimPending },
+                    dimSlider(
+                        value = dimMore,
+                        title = stringResource(MR.strings.pref_nightread_dim_more),
+                        subtitle = dimValueSummary,
+                        onChange = { prefs.nightDimMore.set(it) },
+                    ).takeIf { dimPending },
                 ).toImmutableList(),
             ),
-            // —— 產生（只影響之後產生的頁）：重新產生舊版頁 + 自動產生 + 範圍 + 略過彩色頁 + 亮度 ——
+            // —— 產生（只影響之後產生的頁）：重新產生舊版頁 + 自動產生 + 合併處理兩項 + 範圍 + 略過彩色頁 + 亮度 ——
             Preference.PreferenceGroup(
                 title = stringResource(MR.strings.pref_nightread_group_generate),
                 preferenceItems = listOfNotNull<NightItem>(
@@ -379,6 +416,8 @@ object SettingsNightReadScreen : SearchableSettings {
                         title = stringResource(MR.strings.pref_translation_nightread),
                         subtitle = stringResource(MR.strings.pref_translation_nightread_summary),
                     ),
+                    nightLink?.manual,
+                    nightLink?.live,
                     Preference.PreferenceItem.TextPreference(
                         title = stringResource(MR.strings.pref_nightread_categories),
                         subtitle = getCategoriesLabel(
@@ -509,6 +548,28 @@ object SettingsNightReadScreen : SearchableSettings {
             modelsGroup,
         )
     }
+
+    /**
+     * 壓暗值滑桿（變暗 %，[DIM_MIN]–[DIM_MAX]、間隔 [DIM_STEP]；畫面亮度乘以 1 − 值÷100）。存值可能來自備份而越界，
+     * 顯示與寫入都夾一次（閱讀器讀出來也會夾）。
+     */
+    private fun dimSlider(value: Int, title: String, subtitle: String, onChange: (Int) -> Unit): NightItem {
+        val v = value.coerceIn(DIM_MIN, DIM_MAX)
+        return Preference.PreferenceItem.SliderPreference(
+            value = v,
+            valueRange = DIM_MIN..DIM_MAX,
+            // 19 個格點（0, 5, …, 90）＝兩端之間 17 個 step
+            steps = (DIM_MAX - DIM_MIN) / DIM_STEP - 1,
+            title = title,
+            subtitle = subtitle,
+            valueString = "$v%",
+            onValueChanged = { onChange(it.coerceIn(DIM_MIN, DIM_MAX)) },
+        )
+    }
+
+    private const val DIM_MIN = 0
+    private const val DIM_MAX = 90
+    private const val DIM_STEP = 5
 
     /**
      * 「背景處理」：螢幕關閉後系統可能凍結夜讀與翻譯佇列（電池最佳化）。只有說明＋目前狀態＋按鈕（跳系統的「允許在背景執行」
@@ -709,4 +770,136 @@ object SettingsNightReadScreen : SearchableSettings {
             ).toImmutableList(),
         )
     }
+}
+
+// ── 翻譯＋夜讀合併處理的兩項設定（2026-10-08）：設定 › 翻譯 與 設定 › 夜讀 共用 ──
+
+/** [nightLinkItems] 的結果：[manual]＝「手動翻譯與夜讀版」、[live]＝「即時翻譯時一併產生夜讀版」。 */
+internal data class NightLinkItems(
+    val manual: Preference.PreferenceItem<out Any, out Any>,
+    val live: Preference.PreferenceItem<out Any, out Any>,
+)
+
+/**
+ * 合併處理的兩項：「手動翻譯與夜讀版」（[TranslationPreferences.nightManualMode]，分開／合併）與「即時翻譯時一併產生夜讀版」
+ * （[TranslationPreferences.liveTranslateNight]）。兩個設定頁放的是**同一個偏好物件**，改一邊另一邊自然跟著變；
+ * 顯示與停用規則也只寫在這裡一份：
+ *  - 夜讀總開關關 → 回 null（兩項都不顯示）。
+ *  - 否則兩項都顯示；不能用時畫成停用的列並把原因寫在副標，優先序見 [nightLinkBlocker]（翻譯功能已關閉 ＞ 需先開啟即時翻譯
+ *    ＞ 需先下載夜讀模型；「需先開啟即時翻譯」只對即時那項）。
+ * 改這兩項沒有任何副作用（不重排、不重繪、不改已排的項），只影響之後排入的章。
+ */
+@Composable
+internal fun nightLinkItems(prefs: TranslationPreferences): NightLinkItems? {
+    val nightEnabled by prefs.nightReadEnabled.collectAsState()
+    val translationOn by prefs.translationMasterEnabled.collectAsState()
+    val liveOn by prefs.liveTranslate.collectAsState()
+    val liveNight by prefs.liveTranslateNight.collectAsState()
+    val manualMode by prefs.nightManualMode.collectAsState()
+    val modelsReady = rememberNightModelsReady(enabled = nightEnabled)
+    // 認不得的存值（例如備份還原帶來的）改存 separate：消費端本來就當 separate，這裡只是讓對話框勾得到
+    LaunchedEffect(manualMode) {
+        if (manualMode != TranslationPreferences.NIGHT_MANUAL_SEPARATE &&
+            manualMode != TranslationPreferences.NIGHT_MANUAL_COMBINED
+        ) {
+            prefs.nightManualMode.set(TranslationPreferences.NIGHT_MANUAL_SEPARATE)
+        }
+    }
+    if (!nightEnabled) return null
+
+    val manualTitle = stringResource(MR.strings.pref_translation_night_manual_mode)
+    val manualBlocker = nightLinkBlocker(translationOn = translationOn, liveOn = null, modelsReady = modelsReady)
+    val manual: Preference.PreferenceItem<out Any, out Any> = if (manualBlocker != null) {
+        disabledPreferenceItem(title = manualTitle, reason = stringResource(manualBlocker), checked = null)
+    } else {
+        val separateLabel = stringResource(MR.strings.pref_translation_night_manual_separate)
+        val manualSummary = stringResource(MR.strings.pref_translation_night_manual_mode_summary)
+        Preference.PreferenceItem.ListPreference(
+            preference = prefs.nightManualMode,
+            entries = persistentMapOf(
+                TranslationPreferences.NIGHT_MANUAL_SEPARATE to separateLabel,
+                TranslationPreferences.NIGHT_MANUAL_COMBINED to
+                    stringResource(MR.strings.pref_translation_night_manual_combined),
+            ),
+            title = manualTitle,
+            subtitle = manualSummary,
+            // 認不得的值當 separate（同消費端），上面的 LaunchedEffect 改存之前那一幀也不會印出 null
+            subtitleProvider = { v, e -> manualSummary.format(e[v] ?: separateLabel) },
+        )
+    }
+
+    val liveTitle = stringResource(MR.strings.pref_translation_live_night)
+    val liveBlocker = nightLinkBlocker(translationOn = translationOn, liveOn = liveOn, modelsReady = modelsReady)
+    val live: Preference.PreferenceItem<out Any, out Any> = if (liveBlocker != null) {
+        disabledPreferenceItem(title = liveTitle, reason = stringResource(liveBlocker), checked = liveNight)
+    } else {
+        Preference.PreferenceItem.SwitchPreference(
+            preference = prefs.liveTranslateNight,
+            title = liveTitle,
+            subtitle = stringResource(MR.strings.pref_translation_live_night_summary),
+        )
+    }
+    return NightLinkItems(manual = manual, live = live)
+}
+
+/**
+ * 合併處理那兩項不能用的原因（null＝能用）。優先序：翻譯功能已關閉 ＞ 需先開啟即時翻譯 ＞ 需先下載夜讀模型。
+ * [liveOn]＝null 表示這項不需要即時翻譯（手動那項）；[modelsReady]＝null 表示還在檢查，先當成齊（免得一閃而過的停用）。
+ */
+internal fun nightLinkBlocker(translationOn: Boolean, liveOn: Boolean?, modelsReady: Boolean?): StringResource? = when {
+    !translationOn -> MR.strings.pref_night_link_translation_off
+    liveOn == false -> MR.strings.pref_night_link_needs_live
+    modelsReady == false -> MR.strings.pref_night_link_needs_models
+    else -> null
+}
+
+/**
+ * 夜讀模型（偵測器＋人物分割至少一顆）齊不齊：與佇列合併處理的閘門同一個判準（`TranslationEngineConfig.detectorResolvable`
+ * 與 `charSegResolvable`），在 IO 查。下載結束（不是每個進度刻度）或模型資料夾內容變了（`filesRevision`）就重查；
+ * [enabled]＝false（夜讀總開關關、兩項不顯示）時不查。回 null＝還沒查完。
+ */
+@Composable
+private fun rememberNightModelsReady(enabled: Boolean): Boolean? {
+    val context = LocalContext.current
+    val modelDownloadManager = remember { Injekt.get<ModelDownloadManager>() }
+    val downloadState by modelDownloadManager.state.collectAsState()
+    val filesRevision by modelDownloadManager.filesRevision.collectAsState()
+    val settledState = downloadState.takeUnless { it is ModelDownloadManager.State.Running }
+    val ready by produceState<Boolean?>(initialValue = null, enabled, settledState, filesRevision) {
+        if (!enabled) return@produceState
+        value = withContext(Dispatchers.IO) {
+            TranslationEngineConfig.detectorResolvable(context) && TranslationEngineConfig.charSegResolvable(context)
+        }
+    }
+    return ready
+}
+
+/**
+ * 「顯示但停用」的列。本 repo 的 `Preference.enabled = false` 是**隱藏**（`StatusWrapper` 的 AnimatedVisibility），
+ * 沒有灰掉的狀態；合併處理兩項不能用時要看得到原因，所以畫成不能點、半透明的同一列（[checked] 非 null＝開關那項，
+ * 照目前存值畫一個不能動的 Switch）。
+ */
+private fun disabledPreferenceItem(
+    title: String,
+    reason: String,
+    checked: Boolean?,
+): Preference.PreferenceItem<out Any, out Any> = Preference.PreferenceItem.CustomPreference(title = title) {
+    val widget: (@Composable () -> Unit)? = if (checked == null) {
+        null
+    } else {
+        {
+            Switch(
+                checked = checked == true,
+                onCheckedChange = null,
+                modifier = Modifier.padding(start = TrailingWidgetBuffer),
+            )
+        }
+    }
+    TextPreferenceWidget(
+        modifier = Modifier.alpha(DISABLED_ALPHA),
+        title = title,
+        subtitle = reason,
+        widget = widget,
+        // onPreferenceClick＝null：整列不能點（clickable(enabled = false) 也會帶上 disabled 語意）
+    )
 }

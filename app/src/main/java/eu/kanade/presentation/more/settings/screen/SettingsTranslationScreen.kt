@@ -171,6 +171,10 @@ object SettingsTranslationScreen : SearchableSettings {
         // 全域翻譯總開關：關閉時整頁只剩「快速上手 + 啟用翻譯」兩項、其餘（顯示進階 + 所有組）全部隱藏（自動翻譯一律不做）。
         val masterEnabled by prefs.translationMasterEnabled.collectAsState()
 
+        // 翻譯＋夜讀合併處理兩項（與 設定 › 夜讀 共用同一個偏好物件與同一套顯示／停用規則，見 nightLinkItems）：
+        // 夜讀總開關關 → null（兩項都不顯示）；缺夜讀模型、即時翻譯關 → 顯示但停用並寫出原因。
+        val nightLink = nightLinkItems(prefs)
+
         // 即時翻譯分類過濾。
         val getCategories = remember { Injekt.get<GetCategories>() }
         val allCategories by getCategories.subscribe().collectAsState(initial = emptyList())
@@ -393,6 +397,8 @@ object SettingsTranslationScreen : SearchableSettings {
                             }
                         },
                     ),
+                    // 手動翻譯（含下載時翻譯）要不要一併產生夜讀版：分開／合併
+                    nightLink?.manual,
                     Preference.PreferenceItem.SwitchPreference(
                         preference = prefs.liveTranslate,
                         title = stringResource(MR.strings.pref_translation_live),
@@ -415,6 +421,8 @@ object SettingsTranslationScreen : SearchableSettings {
                             }
                         },
                     ),
+                    // 即時翻譯時一併產生夜讀版（即時翻譯關時停用）
+                    nightLink?.live,
                     Preference.PreferenceItem.MultiSelectListPreference(
                         preference = prefs.translationSourcesExclude,
                         entries = librarySources,

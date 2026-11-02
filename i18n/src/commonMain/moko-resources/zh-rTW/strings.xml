@@ -1400,7 +1400,7 @@
     <string name="rerender_none">沒有可重繪的已翻章節</string>
     <!-- Yakuyomi：夜讀 -->
     <string name="pref_translation_nightread">自動產生夜讀版</string>
-    <string name="pref_translation_nightread_summary">章下載完（有開翻譯就翻完後）自動產生每頁變暗的夜讀版；沒翻譯的本子也適用（需人物分割模型；慢，每頁數秒）</string>
+    <string name="pref_translation_nightread_summary">自動產生每頁變暗的夜讀版：章下載完而沒有排翻譯時，以及翻譯完成、過程中卻沒有一併產生夜讀版時（「手動翻譯與夜讀版」選分開處理，或即時翻譯沒開「即時翻譯時一併產生夜讀版」）。沒翻譯的本子也適用（需人物分割模型；慢，每頁數秒）</string>
     <string name="reader_nightread_chapter_started">已排入產生這話的夜讀版</string>
     <string name="nightread_archive_unsupported">夜讀版只支援鬆散圖夾，已略過壓縮檔／EPUB 章節</string>
     <string name="action_nightread">產生夜讀版</string>
@@ -1521,6 +1521,20 @@
     <string name="pref_nightread_clear_all">清除全部夜讀版</string>
     <string name="pref_nightread_clear_nothing">沒有可清除的檔案</string>
     <!-- Yakuyomi：翻譯＋夜讀合併處理（設定 › 翻譯／夜讀、佇列、閱讀器） -->
+    <string name="pref_translation_night_manual_mode">手動翻譯與夜讀版</string>
+    <string name="pref_translation_night_manual_separate">分開處理：翻好就顯示，夜讀版另外產生</string>
+    <string name="pref_translation_night_manual_combined">合併處理：每頁的翻譯和夜讀版都好了才顯示</string>
+    <string name="pref_translation_night_manual_mode_summary">%s。適用於章節列的翻譯鈕、多選翻譯、閱讀器的「開始翻譯這話」，以及下載時翻譯</string>
+    <string name="pref_translation_live_night">即時翻譯時一併產生夜讀版</string>
+    <string name="pref_translation_live_night_summary">每頁的翻譯和夜讀版都好了才顯示，白天也一樣；比較耗電</string>
+    <string name="pref_night_link_needs_models">需先下載夜讀模型</string>
+    <string name="pref_night_link_needs_live">需先開啟即時翻譯</string>
+    <string name="pref_night_link_translation_off">翻譯功能已關閉</string>
+    <string name="pref_nightread_dim_pending">沒有夜讀版的頁先壓暗</string>
+    <string name="pref_nightread_dim_pending_summary">夜讀模式下，夜讀版還沒好的頁先壓暗顯示，好了再換上；只影響顯示，不改檔案</string>
+    <string name="pref_nightread_dim_standard">「標準」的壓暗程度</string>
+    <string name="pref_nightread_dim_more">「更多」的壓暗程度</string>
+    <string name="pref_nightread_dim_value_summary">頁面顯示時變暗多少</string>
     <string name="queue_chip_with_night">＋夜讀</string>
     <string name="translation_status_translating_with_night">翻譯＋夜讀中</string>
     <string name="reader_translating_with_night_progress">翻譯＋夜讀中 %1$d/%2$d</string>
