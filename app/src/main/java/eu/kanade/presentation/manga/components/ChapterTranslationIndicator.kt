@@ -134,7 +134,7 @@ fun ChapterTranslationIndicator(
 }
 
 /**
- * 章節列的夜讀版狀態（[eu.kanade.tachiyomi.ui.manga.MangaViewModel] 從佇列 NIGHT 項 + 「已有夜讀版」算好，
+ * 章節列的夜讀版狀態（[eu.kanade.tachiyomi.ui.manga.MangaViewModel] 從佇列的合併工作、NIGHT 項 + 「已有夜讀版」算好，
  * 放在 ChapterList.Item.nightStatus；夜讀總開關關或未下載＝HIDDEN）。
  */
 enum class ChapterNightStatus {
@@ -145,6 +145,12 @@ enum class ChapterNightStatus {
     DONE, // 已有夜讀版（實心月亮主色）
     UPDATABLE, // 已有夜讀版、但有頁是舊規則產生的（實心月亮＋右下「更新」徽章；點＝重新產生舊版頁）
     ERROR, // 失敗（紅）
+
+    /**
+     * 這章的夜讀版由翻譯＋夜讀的合併工作一起產生（排隊中、或這一輪正在一併產生）：靜態灰色月亮（同 QUEUED 外觀），
+     * 點了不動作、長按出說明。進度只在翻譯指示器上轉（一個合併工作只有一個轉圈、一個進度）。
+     */
+    COMBINED,
 }
 
 /**
@@ -152,6 +158,7 @@ enum class ChapterNightStatus {
  * 產生中顯示環形進度；排隊中不觸發回呼（已在佇列、再排只會被去重）；NONE 即一般夜讀鈕。
  * UPDATABLE（app 更新改了夜讀規則、這章有舊版頁）：實心月亮右下疊「更新」徽章（第三色），長按出說明；點一下照樣排入，
  * 產生端只重做舊版頁。
+ * COMBINED（合併工作一起產生）：灰色月亮、點了不動作、長按出說明。
  */
 @Composable
 fun ChapterNightIndicator(
@@ -229,6 +236,29 @@ fun ChapterNightIndicator(
                             )
                         }
                     }
+                }
+            }
+        }
+        ChapterNightStatus.COMBINED -> {
+            // 合併工作會一起產生夜讀版：灰色月亮（同排隊中），點了不動作（不用 disable：灰上再灰會看不見），長按出說明
+            val description = stringResource(MR.strings.nightread_chapter_status_combined)
+            TooltipBox(
+                positionProvider = rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+                tooltip = { PlainTooltip { Text(description) } },
+                state = rememberTooltipState(),
+                focusable = false,
+            ) {
+                IconButton(
+                    onClick = {},
+                    enabled = enabled,
+                    modifier = modifier.size(40.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.DarkMode,
+                        contentDescription = description,
+                        modifier = Modifier.size(26.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                    )
                 }
             }
         }

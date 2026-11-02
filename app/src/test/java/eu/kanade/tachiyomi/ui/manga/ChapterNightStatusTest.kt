@@ -8,8 +8,9 @@ import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.manga.model.Manga
 
 /**
- * 章節列夜讀指示器的狀態優先序（[nightStatusOf]）：總開關關或未下載一律不畫；佇列裡的夜讀項（產生中、排隊中、失敗）
- * 蓋過「可更新」——已在處理的章不再提示更新；不在佇列時有舊版頁＝可更新、否則已有；沒有夜讀版＝一般月亮鈕。
+ * 章節列夜讀指示器的狀態優先序（[nightStatusOf]）：總開關關或未下載一律不畫；合併工作會一起產生夜讀版＝COMBINED；
+ * 佇列裡的夜讀項（產生中、排隊中、失敗）蓋過「可更新」——已在處理的章不再提示更新；不在佇列時有舊版頁＝可更新、
+ * 否則已有；沒有夜讀版＝一般月亮鈕。
  */
 class ChapterNightStatusTest {
 
@@ -50,6 +51,27 @@ class ChapterNightStatusTest {
                     ChapterNightStatus.ERROR
             }
         }
+    }
+
+    @Test
+    fun `合併工作會一起產生夜讀版：COMBINED 蓋過夜讀項與磁碟狀態`() {
+        for (has in listOf(false, true)) {
+            for (outdated in listOf(false, true)) {
+                nightStatusOf(true, true, null, has, outdated, combined = true) shouldBe ChapterNightStatus.COMBINED
+                for (s in TranslationItem.Status.entries) {
+                    nightStatusOf(true, true, item(s), has, outdated, combined = true) shouldBe
+                        ChapterNightStatus.COMBINED
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `合併工作也蓋不過總開關關、未下載、做不了夜讀`() {
+        nightStatusOf(false, true, null, false, false, combined = true) shouldBe ChapterNightStatus.HIDDEN
+        nightStatusOf(true, false, null, false, false, combined = true) shouldBe ChapterNightStatus.HIDDEN
+        nightStatusOf(true, true, null, false, false, unsupported = true, combined = true) shouldBe
+            ChapterNightStatus.HIDDEN
     }
 
     @Test

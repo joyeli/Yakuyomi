@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.ui.manga
 
 import eu.kanade.presentation.manga.components.ChapterNightStatus
 import eu.kanade.tachiyomi.data.download.model.Download
+import eu.kanade.tachiyomi.data.translation.NightLink
 import eu.kanade.tachiyomi.data.translation.model.TranslationItem
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
@@ -41,6 +42,25 @@ class ChapterListTranslationStateTest {
         done: Int = 0,
         total: Int = 0,
     ) = TranslationItem(manga = manga, chapter = chapter(id), status = status, done = done, total = total, kind = kind)
+
+    /** 翻譯＋夜讀的合併工作（翻譯項帶合併意圖；[nightActive]＝這一輪正在一併產生夜讀版）。 */
+    private fun combinedJob(
+        id: Long,
+        status: TranslationItem.Status,
+        nightActive: Boolean = status == TranslationItem.Status.TRANSLATING,
+        done: Int = 0,
+        total: Int = 0,
+        link: NightLink = NightLink.AUTO,
+    ) = TranslationItem(
+        manga = manga,
+        chapter = chapter(id),
+        status = status,
+        done = done,
+        total = total,
+        kind = TranslationItem.Kind.TRANSLATE,
+        nightLink = link,
+        nightActive = nightActive,
+    )
 
     private fun obs(
         queue: List<TranslationItem> = emptyList(),
@@ -121,6 +141,88 @@ class ChapterListTranslationStateTest {
         listOf(item(1L, nightUnsupported = true), item(2L, nightUnsupported = true))
             .withTranslationState(o)
             .map { it.nightStatus } shouldBe listOf(ChapterNightStatus.HIDDEN, ChapterNightStatus.HIDDEN)
+    }
+
+    @Test
+    fun `合併工作排隊中或一併產生中：夜讀指示器 COMBINED、不帶進度，翻譯指示器帶狀態與進度`() {
+        for (link in listOf(NightLink.AUTO, NightLink.EXPLICIT)) {
+            val queued = listOf(item(1L, nightOnDisk = true))
+                .withTranslationState(obs(queue = listOf(combinedJob(1L, TranslationItem.Status.QUEUE, link = link))))
+                .single()
+            queued.nightStatus shouldBe ChapterNightStatus.COMBINED
+            queued.nightProgress shouldBe null
+            queued.translationStatus shouldBe TranslationItem.Status.QUEUE
+
+            val running = listOf(item(1L))
+                .withTranslationState(
+                    obs(
+                        queue = listOf(
+                            combinedJob(1L, TranslationItem.Status.TRANSLATING, done = 6, total = 18, link = link),
+                        ),
+                    ),
+                )
+                .single()
+            running.nightStatus shouldBe ChapterNightStatus.COMBINED
+            running.nightProgress shouldBe null
+            running.translationStatus shouldBe TranslationItem.Status.TRANSLATING
+            running.translationProgress shouldBe 33
+        }
+    }
+
+    @Test
+    fun `合併工作的章另外有夜讀項：仍是 COMBINED（一個工作只有一個轉圈）`() {
+        val queue = listOf(
+            combinedJob(1L, TranslationItem.Status.TRANSLATING, done = 2, total = 10),
+            queued(1L, TranslationItem.Status.TRANSLATING, TranslationItem.Kind.NIGHT, done = 3, total = 10),
+        )
+        val r = listOf(item(1L)).withTranslationState(obs(queue = queue)).single()
+        r.nightStatus shouldBe ChapterNightStatus.COMBINED
+        r.nightProgress shouldBe null
+        r.translationProgress shouldBe 20
+    }
+
+    @Test
+    fun `只翻譯的輪（這一輪沒開夜讀階段）：夜讀指示器照磁碟`() {
+        val o = obs(queue = listOf(combinedJob(1L, TranslationItem.Status.TRANSLATING, nightActive = false)))
+        listOf(item(1L)).withTranslationState(o).single().nightStatus shouldBe ChapterNightStatus.NONE
+        listOf(item(1L, nightOnDisk = true)).withTranslationState(o).single().nightStatus shouldBe
+            ChapterNightStatus.DONE
+        // 同章另外有夜讀項：照夜讀項
+        val withNight = obs(
+            queue = listOf(
+                combinedJob(1L, TranslationItem.Status.TRANSLATING, nightActive = false),
+                queued(1L, TranslationItem.Status.QUEUE, TranslationItem.Kind.NIGHT),
+            ),
+        )
+        listOf(item(1L)).withTranslationState(withNight).single().nightStatus shouldBe ChapterNightStatus.QUEUED
+    }
+
+    @Test
+    fun `合併工作失敗（ERROR）：夜讀指示器照磁碟，翻譯指示器是失敗`() {
+        val o = obs(queue = listOf(combinedJob(1L, TranslationItem.Status.ERROR, nightActive = false)))
+        val r = listOf(item(1L, nightOnDisk = true)).withTranslationState(o).single()
+        r.nightStatus shouldBe ChapterNightStatus.DONE
+        r.translationStatus shouldBe TranslationItem.Status.ERROR
+        listOf(item(2L)).withTranslationState(
+            obs(queue = listOf(combinedJob(2L, TranslationItem.Status.ERROR, nightActive = false))),
+        ).single().nightStatus shouldBe ChapterNightStatus.NONE
+    }
+
+    @Test
+    fun `合併工作但夜讀總開關關：夜讀指示器不畫`() {
+        val o = obs(
+            queue = listOf(combinedJob(1L, TranslationItem.Status.QUEUE)),
+            nightEnabled = false,
+        )
+        val r = listOf(item(1L)).withTranslationState(o).single()
+        r.nightStatus shouldBe ChapterNightStatus.HIDDEN
+        r.translationStatus shouldBe TranslationItem.Status.QUEUE
+    }
+
+    @Test
+    fun `沒有合併意圖的翻譯項：夜讀指示器照磁碟`() {
+        val o = obs(queue = listOf(combinedJob(1L, TranslationItem.Status.QUEUE, link = NightLink.NONE)))
+        listOf(item(1L)).withTranslationState(o).single().nightStatus shouldBe ChapterNightStatus.NONE
     }
 
     @Test

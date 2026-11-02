@@ -1521,7 +1521,10 @@
     <string name="pref_nightread_clear_all">清除全部夜讀版</string>
     <string name="pref_nightread_clear_nothing">沒有可清除的檔案</string>
     <!-- Yakuyomi：翻譯＋夜讀合併處理（設定 › 翻譯／夜讀、佇列、閱讀器） -->
+    <string name="queue_chip_with_night">＋夜讀</string>
     <string name="translation_status_translating_with_night">翻譯＋夜讀中</string>
+    <string name="nightread_chapter_status_combined">夜讀版跟翻譯一起產生</string>
+    <string name="nightread_status_waiting_combined">等「翻譯＋夜讀」的那話做完才開始</string>
 
     <!-- Yakuyomi：補上之前漏掉繁中對應的翻譯功能字串（設繁中卻顯示英文的修正）。 -->
     <string name="action_translate">翻譯</string>

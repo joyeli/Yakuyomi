@@ -37,6 +37,7 @@ import eu.kanade.tachiyomi.data.download.model.Download
 import eu.kanade.tachiyomi.data.nightread.NightPages
 import eu.kanade.tachiyomi.data.track.EnhancedTracker
 import eu.kanade.tachiyomi.data.track.TrackerManager
+import eu.kanade.tachiyomi.data.translation.CombinedNight
 import eu.kanade.tachiyomi.data.translation.TranslateTrigger
 import eu.kanade.tachiyomi.data.translation.TranslationCache
 import eu.kanade.tachiyomi.data.translation.TranslationEngineConfig
@@ -1569,9 +1570,11 @@ sealed class ChapterList {
 
 /**
  * 章節列夜讀指示器的狀態（純函式，JVM 測試見 ChapterNightStatusTest）：夜讀總開關關 / 未下載 / 這章做不了夜讀
- * （[unsupported]：壓縮檔章等）→ HIDDEN（不畫）；佇列有該章 NIGHT 項 → 依其狀態（產生中、排隊中、失敗都蓋過「可更新」：
- * 已在處理的章不必再提示）；否則看有沒有夜讀版（本 session 完成或 `.yakuyomi/` 裡有完成標記 std／三檔 l1 或舊版單檔，
- * 見 [TranslationManager.nightSummary]）→ 有舊規則產生的頁（[outdated]）＝UPDATABLE、否則 DONE；沒有 → NONE。
+ * （[unsupported]：壓縮檔章等）→ HIDDEN（不畫）；這章的翻譯項是會一併產生夜讀版的合併工作（[combined]）→ COMBINED
+ * （同章另有夜讀項也一樣：夜讀版由合併工作做，章節列只轉翻譯那格）；佇列有該章 NIGHT 項 → 依其狀態（產生中、排隊中、
+ * 失敗都蓋過「可更新」：已在處理的章不必再提示）；否則看有沒有夜讀版（本 session 完成或 `.yakuyomi` 子夾裡有完成標記
+ * std／三檔 l1 或舊版單檔，見 [TranslationManager.nightSummary]）→ 有舊規則產生的頁（[outdated]）＝UPDATABLE、否則 DONE；
+ * 沒有 → NONE。
  */
 internal fun nightStatusOf(
     nightEnabled: Boolean,
@@ -1580,8 +1583,10 @@ internal fun nightStatusOf(
     hasNightPages: Boolean,
     outdated: Boolean,
     unsupported: Boolean = false,
+    combined: Boolean = false,
 ): ChapterNightStatus = when {
     !nightEnabled || !downloaded || unsupported -> ChapterNightStatus.HIDDEN
+    combined -> ChapterNightStatus.COMBINED
     queued?.status == TranslationItem.Status.TRANSLATING -> ChapterNightStatus.RENDERING
     queued?.status == TranslationItem.Status.QUEUE -> ChapterNightStatus.QUEUED
     queued?.status == TranslationItem.Status.ERROR -> ChapterNightStatus.ERROR
@@ -1604,6 +1609,8 @@ internal data class TranslationObservation(
  * [ChapterList.Item.nightUnsupported]），不讀這一項先前套上去的值，所以同一個 [obs] 套幾次結果都一樣，誰最後寫誰就對：
  * 掃磁碟那條在寫入當下拿最新的 [obs] 重套，不會被掃描開頭的舊快照蓋回去；session 集合清掉時合併值也跟著退回。
  * 翻譯指示器只反映翻譯/重繪項、夜讀指示器只反映 NIGHT 項：同章可同時有兩種項，各自顯示、互不遮蓋。
+ * 例外是翻譯＋夜讀的合併工作（[combinedJob]）：一個工作只有一個轉圈——翻譯指示器照它的狀態與完整輸出進度轉，
+ * 夜讀指示器畫靜態的 COMBINED、不帶進度（同章另有夜讀項也一樣）。工作結束後夜讀指示器照磁碟顯示。
  */
 internal fun List<ChapterList.Item>.withTranslationState(obs: TranslationObservation): List<ChapterList.Item> {
     val (nightQueue, translationQueue) = obs.queue.partition { it.kind == TranslationItem.Kind.NIGHT }
@@ -1613,6 +1620,7 @@ internal fun List<ChapterList.Item>.withTranslationState(obs: TranslationObserva
         val t = byId[item.id]
         val n = nightById[item.id]
         val hasNight = item.nightOnDisk || item.id in obs.nightDoneIds
+        val combined = obs.nightEnabled && combinedJob(t)
         item.copy(
             translationStatus = t?.status,
             translationProgress = if (t != null && t.total > 0) t.done * 100 / t.total else 0,
@@ -1625,9 +1633,18 @@ internal fun List<ChapterList.Item>.withTranslationState(obs: TranslationObserva
                 hasNight,
                 item.nightOutdated,
                 item.nightUnsupported,
+                combined = combined,
             ),
-            // 夜讀項進度 0..1（頁 done/total）；沒在佇列 / total 未知 → null（指示器畫不定轉圈）
-            nightProgress = n?.takeIf { it.total > 0 }?.let { it.done.toFloat() / it.total },
+            // 夜讀項進度 0..1（頁 done/total）；沒在佇列 / total 未知 / 合併工作（進度在翻譯指示器上）→ null
+            nightProgress = if (combined) null else n?.takeIf { it.total > 0 }?.let { it.done.toFloat() / it.total },
         )
     }
 }
+
+/**
+ * [item] 是會一併產生這章夜讀版的合併工作：翻譯項帶合併意圖，而且排隊中、或這一輪正在一併產生
+ * （[CombinedNight.covers]；只翻譯的輪與失敗項不算）。夜讀總開關由呼叫端另外看。
+ */
+private fun combinedJob(item: TranslationItem?): Boolean =
+    item != null && item.kind != TranslationItem.Kind.NIGHT &&
+        CombinedNight.covers(item.nightLink, item.status, item.nightActive)

@@ -307,6 +307,7 @@ private fun TranslationQueueContent(
             // 兩個 pool 各自的暫停/繼續（與每本暫停獨立）：翻譯／重繪一顆、夜讀一顆，各在「該類有項 且 該類總開關開」
             // 時才顯示（總開關關著 resume 是 no-op、鈕會是死的）。使用者靠這兩顆自己調度佇列先挑哪邊（佇列挑章不做自動
             // 優先權）；CPU 讓路由 TranslationManager 的 nightGovernor 自動處理（翻譯在跑時夜讀自動降為一次一頁、低優先權）。
+            // 翻譯＋夜讀的合併工作是翻譯項：只有翻譯那顆暫停得了它；佇列裡沒有夜讀項時夜讀那顆不出現。
             val hasTranslateItems = masterEnabled && items.any { it.kind != TranslationItem.Kind.NIGHT }
             val hasNightItems = nightEnabled && items.any { it.kind == TranslationItem.Kind.NIGHT }
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -389,6 +390,7 @@ private fun TranslationQueueContent(
                                 MangaGroupCard(
                                     group = group,
                                     paused = group.key in pausedMangas,
+                                    nightEnabled = nightEnabled,
                                     expanded = false,
                                     selected = group.id == selectedGroupId,
                                     showExpandIcon = false,
@@ -410,6 +412,7 @@ private fun TranslationQueueContent(
                     endContent = {
                         DetailPane(
                             group = groups.firstOrNull { it.id == selectedGroupId },
+                            nightEnabled = nightEnabled,
                             onCancelChapter = { ch -> viewModel.cancelChapter(ch) },
                             onPauseChapter = { ch -> viewModel.pauseChapter(ch) },
                             onResumeChapter = { ch -> viewModel.resumeChapter(ch) },
@@ -425,6 +428,7 @@ private fun TranslationQueueContent(
                                 modifier = Modifier.longPressDraggableHandle(),
                                 group = group,
                                 paused = group.key in pausedMangas,
+                                nightEnabled = nightEnabled,
                                 expanded = group.id in expandedIds,
                                 onToggleExpand = {
                                     if (group.id in expandedIds) {
@@ -460,6 +464,7 @@ private fun TranslationQueueContent(
 private fun MangaGroupCard(
     group: MangaGroup,
     paused: Boolean,
+    nightEnabled: Boolean,
     expanded: Boolean,
     onToggleExpand: () -> Unit,
     onClickCover: () -> Unit,
@@ -481,6 +486,9 @@ private fun MangaGroupCard(
     val method = group.chapters.firstOrNull { it.method.isNotBlank() }?.method
     // 夜讀組 → 沒有去字法可顯示/可改，控制列改放「夜讀」靜態標籤（一組只有一種 pool，不會混）。
     val allNight = group.night
+    // 翻譯＋夜讀的合併工作：這組有翻譯項會一併產生夜讀版 → 去字法晶片旁加「＋夜讀」靜態標籤（哪幾話見展開的章列）。
+    // 合併工作只在翻譯組裡（一張卡、一個進度），沒有另外的夜讀卡。
+    val withNight = !allNight && group.chapters.any { showsWithNight(it, nightEnabled) }
 
     Column(
         modifier = modifier
@@ -517,7 +525,7 @@ private fun MangaGroupCard(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = groupSubtitle(group, paused, translating, errors),
+                    text = groupSubtitle(group, paused, translating, errors, nightEnabled),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -529,6 +537,10 @@ private fun MangaGroupCard(
                     if (method != null) {
                         MethodChip(method = method, editable = true, onSetMethod = onSetMethod)
                         Spacer(Modifier.width(4.dp))
+                        if (withNight) {
+                            WithNightLabel()
+                            Spacer(Modifier.width(4.dp))
+                        }
                     } else if (allNight) {
                         NightKindLabel()
                         Spacer(Modifier.width(4.dp))
@@ -562,6 +574,7 @@ private fun MangaGroupCard(
                 group.chapters.forEach { ch ->
                     ChapterRow(
                         item = ch,
+                        nightEnabled = nightEnabled,
                         textStyle = MaterialTheme.typography.bodySmall,
                         startPadding = 12.dp,
                         onCancel = { onCancelChapter(ch) },
@@ -581,6 +594,7 @@ private fun MangaGroupCard(
 @Composable
 private fun ChapterRow(
     item: TranslationItem,
+    nightEnabled: Boolean,
     textStyle: androidx.compose.ui.text.TextStyle,
     startPadding: androidx.compose.ui.unit.Dp,
     onCancel: () -> Unit,
@@ -594,7 +608,7 @@ private fun ChapterRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = statusLine(item),
+            text = statusLine(item, nightEnabled),
             style = textStyle,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
@@ -632,6 +646,7 @@ private fun ChapterRow(
 @Composable
 private fun DetailPane(
     group: MangaGroup?,
+    nightEnabled: Boolean,
     onCancelChapter: (TranslationItem) -> Unit,
     onPauseChapter: (TranslationItem) -> Unit,
     onResumeChapter: (TranslationItem) -> Unit,
@@ -664,6 +679,7 @@ private fun DetailPane(
         items(group.chapters, key = { "${it.chapter.id}:${it.kind}" }) { ch ->
             ChapterRow(
                 item = ch,
+                nightEnabled = nightEnabled,
                 textStyle = MaterialTheme.typography.bodyMedium,
                 startPadding = 16.dp,
                 onCancel = { onCancelChapter(ch) },
@@ -689,13 +705,17 @@ private fun GroupActionButton(
     }
 }
 
-/** 摺疊狀態的副標：（全是夜讀項時先標「夜讀」）翻譯中那話 + 頁進度、剩 N 話、失敗數、已暫停。 */
+/**
+ * 摺疊狀態的副標：（全是夜讀項時先標「夜讀」）翻譯中那話 + 頁進度、剩 N 話、失敗數、已暫停。
+ * 正在跑的那話是翻譯＋夜讀的合併工作（這一輪一併產生夜讀版）→ 「翻譯＋夜讀中 X/Y」（X＝兩樣都好了的頁數）。
+ */
 @Composable
 private fun groupSubtitle(
     group: MangaGroup,
     paused: Boolean,
     translating: TranslationItem?,
     errors: Int,
+    nightEnabled: Boolean,
 ): String = buildString {
     if (group.night) {
         append(stringResource(MR.strings.queue_kind_nightread))
@@ -705,7 +725,11 @@ private fun groupSubtitle(
         // 夜讀組不是在翻譯：進行中的文案用「產生中」
         append(
             stringResource(
-                if (group.night) MR.strings.nightread_status_rendering else MR.strings.translation_status_translating,
+                when {
+                    group.night -> MR.strings.nightread_status_rendering
+                    combinedRunning(translating, nightEnabled) -> MR.strings.translation_status_translating_with_night
+                    else -> MR.strings.translation_status_translating
+                },
             ),
         )
         if (translating.total > 0) append(" ${translating.done}/${translating.total}")
@@ -852,6 +876,20 @@ private fun NightKindLabel() {
     )
 }
 
+/**
+ * 合併處理的靜態標籤「＋夜讀」：翻譯項會一併產生夜讀版（[showsWithNight]）。放在去字法晶片旁，樣式同 [NightKindLabel]。
+ * 夜讀總開關關、或這一輪只翻譯（夜讀階段沒開）時不顯示。
+ */
+@Composable
+private fun WithNightLabel() {
+    Text(
+        text = stringResource(MR.strings.queue_chip_with_night),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(end = 4.dp),
+    )
+}
+
 /** 去字方法原始字串 → 友善標籤（對齊 MangaScreen/ReaderPageActionsDialog 的 2 門別命名）。 */
 @Composable
 private fun methodLabel(raw: String): String = when (raw) {
@@ -863,21 +901,38 @@ private fun methodLabel(raw: String): String = when (raw) {
 /** 可選的去字方法原始字串，順序＝2 門別 快速去字 / AI 去字（顯示名走 [methodLabel]）。 */
 private val METHOD_IDS = listOf("boxfill", "auto_whole")
 
+/**
+ * 翻譯項要顯示「＋夜讀」：帶合併意圖、夜讀總開關開，而且不是「這一輪只翻譯」（TRANSLATING 卻沒開夜讀階段：
+ * 閘門沒過，例如夜讀模型缺、不在夜讀範圍，或夜讀段中途放棄）。夜讀項、重繪項恆為 false。
+ */
+private fun showsWithNight(item: TranslationItem, nightEnabled: Boolean): Boolean =
+    item.kind != TranslationItem.Kind.NIGHT && item.withNight && nightEnabled &&
+        !(item.status == TranslationItem.Status.TRANSLATING && !item.nightActive)
+
+/** 這項正在跑翻譯＋夜讀的合併輪（TRANSLATING、這一輪開了夜讀階段、夜讀總開關開）。 */
+private fun combinedRunning(item: TranslationItem, nightEnabled: Boolean): Boolean =
+    item.kind != TranslationItem.Kind.NIGHT && item.withNight && item.nightActive && nightEnabled &&
+        item.status == TranslationItem.Status.TRANSLATING
+
 @Composable
-private fun statusLine(item: TranslationItem): String {
+private fun statusLine(item: TranslationItem, nightEnabled: Boolean): String {
     val chapter = item.chapter.name
+    val combined = combinedRunning(item, nightEnabled)
     val status = when {
         // 單章暫停：QUEUE 但被 hold 住（TRANSLATING 被停下回 QUEUE 後也走這）
         item.paused && item.status != TranslationItem.Status.ERROR ->
             stringResource(MR.strings.queue_manga_paused)
+        // 夜讀項排著、但有翻譯＋夜讀的合併工作正在跑：等它做完才開始，取代「排隊中」
+        item.status == TranslationItem.Status.QUEUE && item.waitingForCombined ->
+            stringResource(MR.strings.nightread_status_waiting_combined)
         item.status == TranslationItem.Status.QUEUE -> stringResource(MR.strings.translation_status_queued)
         item.status == TranslationItem.Status.TRANSLATING -> {
-            // 夜讀項不是在翻譯：進行中的文案用「產生中」
+            // 夜讀項不是在翻譯：進行中的文案用「產生中」；合併輪＝「翻譯＋夜讀中」（X＝兩樣都好了的頁數）
             val running = stringResource(
-                if (item.kind == TranslationItem.Kind.NIGHT) {
-                    MR.strings.nightread_status_rendering
-                } else {
-                    MR.strings.translation_status_translating
+                when {
+                    item.kind == TranslationItem.Kind.NIGHT -> MR.strings.nightread_status_rendering
+                    combined -> MR.strings.translation_status_translating_with_night
+                    else -> MR.strings.translation_status_translating
                 },
             )
             if (item.total > 0) "$running ${item.done}/${item.total}" else running
@@ -885,10 +940,13 @@ private fun statusLine(item: TranslationItem): String {
         else -> stringResource(MR.strings.translation_status_error)
     }
     // 夜讀項在章列多帶一個「夜讀」標籤：同章可能同時有翻譯項與夜讀項，沒標籤分不出哪列是哪個。
-    return if (item.kind == TranslationItem.Kind.NIGHT) {
-        "$chapter • ${stringResource(MR.strings.queue_kind_nightread)} • $status"
-    } else {
-        "$chapter • $status"
+    // 合併工作的翻譯項帶「＋夜讀」（這話翻譯時一併產生夜讀版）；狀態已寫「翻譯＋夜讀中」時不重複。
+    return when {
+        item.kind == TranslationItem.Kind.NIGHT ->
+            "$chapter • ${stringResource(MR.strings.queue_kind_nightread)} • $status"
+        showsWithNight(item, nightEnabled) && !combined ->
+            "$chapter • ${stringResource(MR.strings.queue_chip_with_night)} • $status"
+        else -> "$chapter • $status"
     }
 }
 
