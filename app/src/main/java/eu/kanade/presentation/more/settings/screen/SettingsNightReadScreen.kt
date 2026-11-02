@@ -385,7 +385,7 @@ object SettingsNightReadScreen : SearchableSettings {
                         subtitle = fillSummary,
                         subtitleProvider = { v, e -> fillSummary.format(e[NightLevel.fromPref(v).prefValue]) },
                     ),
-                    // 沒有夜讀版（目前檔位）的頁先壓暗：閱讀器顯示層的 ColorMatrix，不寫檔；兩檔各自的壓暗值只在開著時列出。
+                    // 沒有夜讀版（目前檔位）的頁先壓暗：閱讀器在頁圖上疊一層半透明黑的前景（ReaderPageImageView.setDisplayDim），不寫檔；兩檔各自的壓暗值只在開著時列出。
                     // 改了不必重開章：閱讀器在夜讀模式下會重畫壓暗值有變的頁。
                     Preference.PreferenceItem.SwitchPreference(
                         preference = prefs.nightDimPending,

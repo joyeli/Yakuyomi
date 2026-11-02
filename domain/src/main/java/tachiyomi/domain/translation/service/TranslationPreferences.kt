@@ -175,7 +175,7 @@ class TranslationPreferences(
     val liveTranslateNight = preferenceStore.getBoolean("translation_live_night", false)
 
     /**
-     * 夜讀模式下，還沒有夜讀版（目前檔位）的頁先壓暗顯示（預設開）。**只影響顯示**（閱讀器的 ColorMatrix），絕不寫檔；
+     * 夜讀模式下，還沒有夜讀版（目前檔位）的頁先壓暗顯示（預設開）。**只影響顯示**（閱讀器在頁圖上疊一層半透明黑的前景），絕不寫檔；
      * 夜讀版做好、換上後就不再壓暗。分開模式的章、從沒產生過夜讀版的章、彩頁略過的頁都適用。
      */
     val nightDimPending = preferenceStore.getBoolean("nightread_dim_pending", true)

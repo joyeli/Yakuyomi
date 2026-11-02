@@ -39,7 +39,8 @@ internal interface NightPageSource {
  * - **查找**＝[NightPages.resolveName]：兩檔格式（std／more）優先，其次 2026-10-01 的三檔格式（l1…l3），再其次舊版
  *   單檔；都沒有 → 頁檔。已產生的章不必重做。
  * - **壓暗（q2）**：有效夜讀模式、「沒有夜讀版的頁先壓暗」開、送的不是夜讀檔 → 記下倍率 `1 − 目前檔位的壓暗值/100`
- *   （標準、更多各自一個值），holder 解碼後用 [displayDim] 取來套在畫面上（ColorMatrix）。**只影響顯示、絕不寫檔**。
+ *   （標準、更多各自一個值），holder 解碼後用 [displayDim] 取來套在畫面上（頁圖上疊一層半透明黑的前景，
+ *   `ReaderPageImageView.setDisplayDim`）。**只影響顯示、絕不寫檔**。
  * - **合併處理的 hold（q3）**：[chapterId] 這章的章層級 hold 生效（[TranslationManager.isHoldActive]），而且這頁有 hold 記號
  *   （`.yakuyomi` 子夾內的 `<頁檔名>.pairhold` 或 `.pairhold-temp`）、原圖素材在、還沒有夜讀版、這個 loader 沒放行過它 →
  *   **白天與夜讀模式都送原圖素材**（`<base>.orig.<副檔名>`），夜讀模式再照上面壓暗。hold 生效的章每次解碼前重列一次
