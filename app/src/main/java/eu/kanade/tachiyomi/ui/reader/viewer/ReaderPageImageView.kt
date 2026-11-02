@@ -1,10 +1,12 @@
 package eu.kanade.tachiyomi.ui.reader.viewer
 
 import android.content.Context
+import android.graphics.Color
 import android.graphics.PointF
 import android.graphics.RectF
 import android.graphics.drawable.Animatable
 import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.util.AttributeSet
 import android.view.GestureDetector
@@ -44,6 +46,7 @@ import okio.BufferedSource
 import tachiyomi.core.common.util.system.ImageUtil
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import kotlin.math.roundToInt
 
 /**
  * A wrapper view for showing page image.
@@ -92,11 +95,17 @@ open class ReaderPageImageView @JvmOverloads constructor(
     open fun onImageLoaded() {
         onImageLoaded?.invoke()
         background = pageBackground
+        // Yakuyomi：圖畫出來了 → 套這張圖的壓暗（跟背景同一刻，換圖期間不閃，見 [setDisplayDim]）
+        imageReady = true
+        applyDisplayDim(pendingDim)
     }
 
     @CallSuper
     open fun onImageLoadError(error: Throwable?) {
         onImageLoadError?.invoke(error)
+        // Yakuyomi：載不出來 → 顯示錯誤畫面，不壓暗
+        pendingDim = 1f
+        applyDisplayDim(1f)
     }
 
     @CallSuper
@@ -184,6 +193,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
     fun setImage(drawable: Drawable, config: Config, restore: ZoomState? = null) {
         this.config = config
         cancelCoilRequest()
+        imageReady = false // Yakuyomi：新圖載好前不換壓暗（見 setDisplayDim）
         if (drawable is Animatable) {
             pendingRestore = null
             prepareAnimatedImageView()
@@ -199,6 +209,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
     fun setImage(source: BufferedSource, isAnimated: Boolean, config: Config, restore: ZoomState? = null) {
         this.config = config
         cancelCoilRequest()
+        imageReady = false // Yakuyomi：新圖載好前不換壓暗（見 setDisplayDim）
         if (isAnimated) {
             pendingRestore = null
             prepareAnimatedImageView()
@@ -215,7 +226,42 @@ open class ReaderPageImageView @JvmOverloads constructor(
         coilRequest = null
     }
 
+    /** Yakuyomi：目前畫在畫面上的顯示壓暗倍率（[applyDisplayDim]；1＝沒有壓暗、沒有前景遮罩）。 */
+    private var displayDim = 1f
+
+    /** Yakuyomi：目前這張圖要的壓暗倍率（[setDisplayDim]；圖載好時才套上，見 [imageReady]）。 */
+    private var pendingDim = 1f
+
+    /**
+     * Yakuyomi：目前這張圖載好了沒（[setImage] 時清掉、[onImageLoaded] 時設）。換圖期間畫面上是空白的 SSIV 加上舊背景，這時就
+     * 拿掉壓暗會閃一下沒壓暗的舊背景（自動背景是白色時＝夜讀模式的白閃），所以新倍率等圖真的畫出來才套。
+     */
+    private var imageReady = false
+
+    /**
+     * Yakuyomi：夜讀模式下還沒有夜讀版的頁先壓暗（只影響顯示、絕不寫檔）。[multiplier] 1＝不壓暗；其他＝在整個 view 上蓋一層
+     * 不透明度 `1 − multiplier` 的黑色前景（對不透明的畫面等於 RGB 乘 [multiplier]；透明處的底色也一起變暗，夜讀模式下反而
+     * 合理）。holder 在每次 setImage 之後的 UI 執行緒呼叫（倍率由 loader 決定，見 `NightPageStreams.displayDim`）；這張圖已經
+     * 載好就馬上套，還沒就等 [onImageLoaded]（跟自動背景同一刻換，換圖期間維持舊的壓暗）。
+     *
+     * 不用硬體層＋色彩濾鏡：硬體層是整個 view 大小的離屏緩衝，條漫長頁一頁就幾十 MB 的 GPU 記憶體，超過材質上限的頁還建不出
+     * 層、整頁不壓暗。前景只是多畫一個矩形，沒有這兩個問題。
+     */
+    fun setDisplayDim(multiplier: Float) {
+        pendingDim = multiplier.coerceIn(0f, 1f)
+        if (imageReady) applyDisplayDim(pendingDim)
+    }
+
+    private fun applyDisplayDim(m: Float) {
+        if (m == displayDim) return
+        displayDim = m
+        foreground = if (m >= 1f) null else ColorDrawable(Color.argb(((1f - m) * 255f).roundToInt(), 0, 0, 0))
+    }
+
     fun recycle() = pageView?.let {
+        pendingDim = 1f
+        imageReady = false
+        applyDisplayDim(1f)
         cancelCoilRequest()
         pendingRestore = null
         when (it) {
