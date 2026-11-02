@@ -10,6 +10,7 @@ import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView.SCALE_TYPE_
 import eu.kanade.presentation.util.formattedMessage
 import eu.kanade.tachiyomi.databinding.ReaderErrorBinding
 import eu.kanade.tachiyomi.source.model.Page
+import eu.kanade.tachiyomi.ui.reader.loader.NightPageStreams
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
@@ -164,6 +165,8 @@ class PagerDoublePageHolder(
                 withUIContext {
                     setImage(source, isAnimated, soloConfig, restore)
                     if (!isAnimated) pageBackground = background
+                    // 夜讀模式下還沒有夜讀版的頁先壓暗（只影響顯示）：倍率是 loader 剛才開檔時決定的
+                    setDisplayDim(NightPageStreams.displayDim(first))
                     removeErrorLayout()
                 }
             } else {
@@ -190,16 +193,20 @@ class PagerDoublePageHolder(
                     }
                     wides to merged
                 }
+                // 併成一張圖：兩頁各自的壓暗倍率取較暗（較小）的那個，整張一起壓
+                val dim = minOf(NightPageStreams.displayDim(first), NightPageStreams.displayDim(secondPage))
                 withUIContext {
                     if (wides.isNotEmpty()) {
                         detectedFull = true
                         // 回報重配：true＝本 holder 會被 recreate（不顯示）；false＝沒拆成 → fallback 顯示併圖、不留白。
                         if (!viewer.onFullPagesDetected(wides)) {
                             setImage(BitmapDrawable(resources, fallbackBitmap), fillConfig, restore)
+                            setDisplayDim(dim)
                             removeErrorLayout()
                         }
                     } else {
                         setImage(BitmapDrawable(resources, fallbackBitmap), fillConfig, restore)
+                        setDisplayDim(dim)
                         removeErrorLayout()
                     }
                 }

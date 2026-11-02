@@ -17,6 +17,8 @@ import tachiyomi.presentation.core.i18n.stringResource
  *
  * - [loading]＝true → 顯示「引擎載入中…」（優先；引擎在背景載 ~100MB ONNX，讓使用者知道延遲是掛載模型而非卡死）。
  * - [translating]＝true → 顯示「翻譯中 X/Y」（[done]/[total]）；false → 顯示「翻譯排隊中」。
+ * - [withNight]＝這章是翻譯＋夜讀的合併工作、這一輪正在一併產生夜讀版 → 翻譯中改顯示「翻譯＋夜讀中 X/Y」
+ *   （[done]＝兩樣都好了的頁數，與懸浮鈕進度環同一個數）；排隊中、引擎載入中的文字不變。
  * - 半透明圓角底、`labelSmall` 小字、緊湊內距；放在角落不擋頁面、也不攔觸控
  *   （[Surface] 不帶 onClick、無 clickable modifier ⇒ 點擊穿透到底下的 viewer，照常切換選單）。
  * - 與切換式 chrome（app bars / 頁碼）獨立：這是常駐狀態，選單收起時也照顯示。
@@ -30,11 +32,15 @@ fun ReaderLiveTranslateIndicator(
     total: Int,
     loading: Boolean = false,
     modifier: Modifier = Modifier,
+    withNight: Boolean = false,
 ) {
     val text = when {
         // 引擎正在載入（~100MB ONNX）→ 優先顯示，讓使用者知道延遲是在掛載模型（非卡死）。
         loading -> stringResource(MR.strings.reader_engine_loading)
         // 翻譯中且已知頁數 → 帶進度；total 還沒回報（剛開始）時退化成不帶數字、避免顯示「0/0」。
+        translating && withNight && total > 0 ->
+            stringResource(MR.strings.reader_translating_with_night_progress, done, total)
+        translating && withNight -> stringResource(MR.strings.reader_translating_with_night)
         translating && total > 0 -> stringResource(MR.strings.reader_translating_progress, done, total)
         translating -> stringResource(MR.strings.reader_translating)
         else -> stringResource(MR.strings.reader_translating_queued)

@@ -128,11 +128,15 @@ class ChapterLoader(
         // 下載 + 完成後重載進此已下載路徑（reload 後章變已下載 → 此處才包裝）。
         // TranslatingPageLoader 需 manga/source/downloadProvider 解析下載章目錄與逐頁檔（查 manifest + 換頁）、
         // 並需 translationManager 把整章排入受管理佇列（背景翻、清單顯示翻譯中、可暫停/取消/重試）。
-        return if (shouldTranslateLive(chapter, isDownloaded)) {
+        val loader = if (shouldTranslateLive(chapter, isDownloaded)) {
             TranslatingPageLoader(base, chapter, manga, source, downloadProvider, translationManager)
         } else {
             base
         }
+        // 合併處理（翻譯＋夜讀一條線）的 hold 以章為單位判斷：讓顯示端知道這是哪一章（即時翻譯 loader 的 nightStreams 就是
+        // 被包的那個，設一次兩邊都有）。壓縮檔章此時還不知道是壓縮檔，設了也無妨（之後 nightStreams 回 null、不會用到）。
+        (loader as? NightPageSource)?.nightStreams?.chapterId = chapter.chapter.id
+        return loader
     }
 
     /**

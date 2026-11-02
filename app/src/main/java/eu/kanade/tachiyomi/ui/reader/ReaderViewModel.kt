@@ -26,6 +26,8 @@ import eu.kanade.tachiyomi.data.nightread.NightPages
 import eu.kanade.tachiyomi.data.saver.Image
 import eu.kanade.tachiyomi.data.saver.ImageSaver
 import eu.kanade.tachiyomi.data.saver.Location
+import eu.kanade.tachiyomi.data.translation.NightPageEvent
+import eu.kanade.tachiyomi.data.translation.NightPageResult
 import eu.kanade.tachiyomi.data.translation.PageTranslator
 import eu.kanade.tachiyomi.data.translation.TranslateTrigger
 import eu.kanade.tachiyomi.data.translation.TranslationEngineConfig
@@ -39,6 +41,7 @@ import eu.kanade.tachiyomi.ui.reader.loader.DirectoryPageLoader
 import eu.kanade.tachiyomi.ui.reader.loader.DownloadPageLoader
 import eu.kanade.tachiyomi.ui.reader.loader.HttpPageLoader
 import eu.kanade.tachiyomi.ui.reader.loader.NightPageSource
+import eu.kanade.tachiyomi.ui.reader.loader.NightPageStreams
 import eu.kanade.tachiyomi.ui.reader.loader.TranslatingPageLoader
 import eu.kanade.tachiyomi.ui.reader.model.InsertPage
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
@@ -324,6 +327,9 @@ class ReaderViewModel @JvmOverloads constructor(
     private val nightDownloadAskedIds: MutableSet<Long> = ConcurrentHashMap.newKeySet()
     private val nightDownloadRequestedIds: MutableSet<Long> = ConcurrentHashMap.newKeySet()
 
+    /** 上一份「合併處理 hold 生效中的章」（[TranslationManager.holdChapters]），用來算哪些章剛放行。主執行緒存取。 */
+    private var lastHoldChapters: Set<Long> = emptySet()
+
     init {
         // To save state
         state.map { it.viewerChapters?.currChapter }
@@ -353,26 +359,16 @@ class ReaderViewModel @JvmOverloads constructor(
             .launchIn(viewModelScope)
 
         // 即時翻譯進度：把「正在讀的章 id」與翻譯佇列 [TranslationManager.queueState] 併流，
-        // 找出佇列裡 chapter.id 對得上當前章的那一項 → 映成 reader 內角落小指示器的進度（QUEUE/TRANSLATING）。
-        // 兩個來源任一變動都會重算（換章、佇列前進、開始/結束翻譯），找不到（沒在排隊/翻譯）→ null（不顯示）。
+        // 找出佇列裡 chapter.id 對得上當前章的翻譯／重繪項 → 映成 reader 內角落小指示器的進度（QUEUE/TRANSLATING；
+        // 翻譯＋夜讀的合併工作帶 withNight，見 [liveTranslateProgressOf]）。來源任一變動都會重算（換章、佇列前進、
+        // 開始/結束翻譯、夜讀總開關），找不到（沒在排隊/翻譯）或失敗 → null（不顯示）。
         combine(
             // 只關心「當前章 id」這一個維度，避免每翻一頁（state 其他欄位變）都重跑佇列比對。
             state.map { it.currentChapter?.chapter?.id }.distinctUntilChanged(),
             translationManager.queueState,
-        ) { currentChapterId, queue ->
-            if (currentChapterId == null) return@combine null
-            // 夜讀項不是翻譯：不算即時翻進度（與 MangaViewModel 章列指示器一致），否則同章排著夜讀會誤亮「翻譯中」。
-            val item = queue.firstOrNull { it.chapter.id == currentChapterId && it.kind != TranslationItem.Kind.NIGHT }
-                ?: return@combine null
-            when (item.status) {
-                // QUEUE＝排隊中（尚未開始、done/total 還沒意義）；TRANSLATING＝翻譯中、帶 done/total 進度。
-                // ERROR 不顯示（reader 內只報「進行中」狀態；失敗在章節清單/佇列頁處理）。
-                TranslationItem.Status.QUEUE ->
-                    LiveTranslateProgress(done = item.done, total = item.total, queued = true)
-                TranslationItem.Status.TRANSLATING ->
-                    LiveTranslateProgress(done = item.done, total = item.total, queued = false)
-                TranslationItem.Status.ERROR -> null
-            }
+            nightReadEnabled,
+        ) { currentChapterId, queue, nightEnabled ->
+            liveTranslateProgressOf(queue, currentChapterId, nightEnabled)
         }
             .distinctUntilChanged()
             .onEach { progress -> mutableState.update { it.copy(liveTranslateProgress = progress) } }
@@ -411,27 +407,18 @@ class ReaderViewModel @JvmOverloads constructor(
             }
             .launchIn(viewModelScope)
 
-        // 當前章在夜讀佇列的進度（排隊或產生中；ERROR 不算）→ 懸浮鈕的進度環、長按選單「產生」鈕的顯示條件。
-        // paused＝三層暫停任一層 hold 住（單章、這本的夜讀組、夜讀 pool）：提示改說「已暫停」，不顯示卡住的 0/0。
+        // 當前章的夜讀進度（夜讀項排隊或產生中；ERROR 不算——讓產生鈕成為 reader 內的重試入口）→ 懸浮鈕的進度環、長按選單
+        // 「產生」鈕的顯示條件。這章沒有夜讀項、但翻譯項是翻譯＋夜讀的合併工作 → 照合併工作（combined；進度與角落指示器
+        // 同一個數）。paused＝三層暫停任一層 hold 住（夜讀項看夜讀那邊、合併工作看翻譯那邊）：提示改說「已暫停」，
+        // 不顯示卡住的 0/0。見 [nightProgressOf]。
         combine(
             translationManager.queueState,
             state.map { it.viewerChapters?.currChapter?.chapter?.id }.distinctUntilChanged(),
-            translationManager.isNightPaused,
+            combine(translationManager.isTranslatePaused, translationManager.isNightPaused) { t, n -> t to n },
             translationManager.pausedMangas,
-        ) { queue, id, poolPaused, pausedMangas ->
-            if (id == null) return@combine null
-            val item = queue.firstOrNull {
-                // 失敗項留佇列但不算「進行中」：讓產生鈕成為 reader 內的重試入口（enqueueNight 對 ERROR 回 QUEUE）
-                it.kind == TranslationItem.Kind.NIGHT && it.chapter.id == id &&
-                    it.status != TranslationItem.Status.ERROR
-            } ?: return@combine null
-            NightProgress(
-                done = item.done,
-                total = item.total,
-                running = item.status == TranslationItem.Status.TRANSLATING,
-                paused = item.status == TranslationItem.Status.QUEUE &&
-                    (poolPaused || item.paused || item.poolKey in pausedMangas),
-            )
+            nightReadEnabled,
+        ) { queue, id, (translatePaused, nightPaused), pausedMangas, nightEnabled ->
+            nightProgressOf(queue, id, nightEnabled, translatePaused, nightPaused, pausedMangas)
         }
             .distinctUntilChanged()
             .onEach { progress -> mutableState.update { it.copy(nightProgress = progress) } }
@@ -440,10 +427,12 @@ class ReaderViewModel @JvmOverloads constructor(
         // 產生中的章每做完一頁（done 變了）就讓那章 loader 的檔名快取失效：快取可能是某頁還只有 std 時列的（更多與標準相同、
         // 或還沒重做到），重新產生後多出 more，不失效的話選「更多」仍讀 std（錯檔位）；下面的 nightChapterDone 只在整章成功
         // 時才發，暫停或出錯就一直停在錯的檔位。只失效、不重畫：下次解碼重列一次（每頁 6–25 s 才一次，列目錄便宜）。
+        // 翻譯＋夜讀的合併工作這一輪正在一併產生（nightActive）時也算（逐頁事件 nightPageEvents 那條另外會失效）。
         translationManager.queueState
             .map { queue ->
                 queue.filter {
-                    it.kind == TranslationItem.Kind.NIGHT && it.status == TranslationItem.Status.TRANSLATING
+                    it.status == TranslationItem.Status.TRANSLATING &&
+                        (it.kind == TranslationItem.Kind.NIGHT || (it.withNight && it.nightActive))
                 }.associate { it.chapter.id to it.done }
             }
             .distinctUntilChanged()
@@ -454,6 +443,53 @@ class ReaderViewModel @JvmOverloads constructor(
                     .filter { it.chapter.id in running.keys }
                     .forEach { (it.pageLoader as? NightPageSource)?.nightStreams?.index?.invalidate() }
             }
+            .launchIn(viewModelScope)
+
+        // 夜讀每一頁的結果確定（做好／彩頁略過／失敗；一般夜讀項與合併工作都有）→ 只重畫**那一頁**（修「夜讀逐頁做好卻不換、
+        // 要等整章做完」）。合併處理 hold 中的頁也靠這條放行：那頁的 hold 記號已被佇列刪掉，重畫時送夜讀版或譯圖。
+        translationManager.nightPageEvents
+            .onEach { event -> onNightPageEvent(event) }
+            .launchIn(viewModelScope)
+
+        // 合併處理：一般 loader（手動或下載時翻譯的合併處理正在跑、這章沒包即時翻譯 loader）不會自己換譯圖，畫面上停在翻譯落地前
+        // 解碼的原圖。這頁若被 hold，把它記成「顯示原圖」：章層級放行時 [reloadHeldPages] 才會把它重畫成譯圖（即時翻譯 loader
+        // 自己做同一件事）。章層級 hold 沒生效時什麼都不做。
+        translationManager.donePageEvents
+            .onEach { (chapterId, pageName) -> onTranslatedPageLanded(chapterId, pageName) }
+            .launchIn(viewModelScope)
+
+        // 合併處理的章層級 hold 失效（夜讀總開關關、翻譯總開關關、夜讀段放棄、取消、做完收尾）→ 重畫那章目前還在顯示原圖素材
+        // （hold 中）的頁，換上譯圖。章層級 hold 新生效時不動畫面（已顯示的譯圖黏著放行，見 NightPageStreams）。
+        translationManager.holdChapters
+            .onEach { now ->
+                val lost = lastHoldChapters - now
+                lastHoldChapters = now
+                if (lost.isNotEmpty()) reloadHeldPages(lost)
+            }
+            .launchIn(viewModelScope)
+
+        // 行程重開、佇列還沒從磁碟還原完時，看不出哪些章在 hold：有 hold 記號的頁先一律送原圖（NightPageStreams）。還原完 →
+        // 不在 hold 的章裡那些頁重畫成譯圖（還在 hold 的章照舊等夜讀）。
+        viewModelScope.launch {
+            translationManager.restoreSettled.first { it }
+            val chapters = state.value.viewerChapters ?: return@launch
+            val held = translationManager.holdChapters.value
+            val released = listOfNotNull(chapters.currChapter, chapters.prevChapter, chapters.nextChapter)
+                .mapNotNullTo(HashSet()) { it.chapter.id?.takeIf { id -> id !in held } }
+            if (released.isNotEmpty()) reloadHeldPages(released)
+        }
+
+        // 「沒有夜讀版的頁先壓暗」開關與兩個壓暗值改了 → 夜讀模式開著時只重畫壓暗倍率會變的頁（壓暗只在顯示層，不寫檔）。
+        // 跳過初始值；連續拖動滑桿只算最後一下。
+        combine(
+            translationPreferences.nightDimPending.changes(),
+            translationPreferences.nightDimStandard.changes(),
+            translationPreferences.nightDimMore.changes(),
+        ) { pending, standard, more -> Triple(pending, standard, more) }
+            .distinctUntilChanged()
+            .drop(1)
+            .debounce(NIGHT_TIER_DEBOUNCE)
+            .onEach { if (nightEffective.value) reloadChangedNightPages(dimChanged = true) }
             .launchIn(viewModelScope)
 
         // 夜讀版剛做完的章若是 curr/prev/next 之一 → 讓那章 loader 的檔名快取失效、當前章重算狀態；夜讀模式開著就重畫
@@ -900,6 +936,10 @@ class ReaderViewModel @JvmOverloads constructor(
     fun onPageSelected(page: ReaderPage, visible: List<ReaderPage>? = listOf(page)) {
         // 夜讀換檔位的「這頁沒差異」提示看的是畫面上看得到的頁（分割頁的半頁＝parent 那個檔）
         visibleNightPages = visible?.map { (it as? InsertPage)?.parent ?: it }
+
+        // 夜讀／合併處理的選頁補換（同即時翻譯 gotcha #10）：這頁該送的（夜讀版、壓暗、hold 放行後的譯圖）跟上次實際送的
+        // 不同 → 重畫一次。分割頁的半頁看 parent（兩半同一個檔）。
+        refreshNightOnSelect((page as? InsertPage)?.parent ?: page)
 
         // InsertPage doesn't change page progress
         if (page is InsertPage) {
@@ -1361,13 +1401,7 @@ class ReaderViewModel @JvmOverloads constructor(
             s.nightAvailability == NightAvailability.UNSUPPORTED -> {
                 if (!promptOnlineNight(OnlineNightPrompt.Trigger.EXPLICIT)) eventChannel.trySend(Event.NightUnsupported)
             }
-            s.nightProgress != null -> eventChannel.trySend(
-                when {
-                    s.nightProgress.paused -> Event.NightQueuePaused
-                    !s.nightProgress.running -> Event.NightQueued
-                    else -> Event.NightGenerating(done = s.nightProgress.done, total = s.nightProgress.total)
-                },
-            )
+            s.nightProgress != null -> eventChannel.trySend(nightProgressEvent(s.nightProgress))
             else -> mutableState.update {
                 it.copy(dialog = Dialog.NightGenerateConfirm(legacy = s.nightAvailability == NightAvailability.LEGACY))
             }
@@ -1383,6 +1417,11 @@ class ReaderViewModel @JvmOverloads constructor(
     fun startChapterNightRender(force: Boolean = false) {
         closeDialog()
         if (!translationPreferences.nightReadEnabled.get()) return
+        // 這章的夜讀版已由翻譯＋夜讀的合併工作在做（排隊中或這一輪正在一併產生）→ 不另排，報它的狀態
+        state.value.nightProgress?.takeIf { it.combined }?.let {
+            eventChannel.trySend(nightProgressEvent(it))
+            return
+        }
         val manga = manga ?: return
         val readerChapter = getCurrentChapter() ?: return
         val domainChapter = readerChapter.chapter.toDomainChapter() ?: return
@@ -1398,6 +1437,13 @@ class ReaderViewModel @JvmOverloads constructor(
                 eventChannel.send(Event.NightUnsupported)
             }
         }
+    }
+
+    /** 夜讀進度（[NightProgress]，夜讀項或合併工作）→ 點了不可用的檔位、或要產生夜讀版時給的提示。 */
+    private fun nightProgressEvent(progress: NightProgress): Event = when {
+        progress.paused -> Event.NightQueuePaused
+        !progress.running -> Event.NightQueued
+        else -> Event.NightGenerating(done = progress.done, total = progress.total)
     }
 
     /**
@@ -1509,6 +1555,108 @@ class ReaderViewModel @JvmOverloads constructor(
     }
 
     /**
+     * 夜讀一頁的結果確定（[TranslationManager.nightPageEvents]；做好、彩頁略過、失敗都發，一般夜讀項與合併工作都有）：章是
+     * curr/prev/next 之一時，讓那章 loader 的檔名快取失效、把這頁記成已放行（合併處理：這頁兩樣都好了），然後在「有效夜讀模式、
+     * 或這個結果放行了這頁的 hold 記號（[NightPageEvent.held]）、或這頁現在還在顯示 hold 中的原圖素材」時重畫**這一頁**。
+     * 白天的分開模式不重畫（畫面不會變）。當前章第一次有夜讀版時順便重算懸浮鈕的檔位狀態（不必等整章做完才能切檔位）。
+     * 在 IO 找頁（頁檔名 → index 可能要取名字）。
+     */
+    private fun onNightPageEvent(event: NightPageEvent) {
+        val chapters = state.value.viewerChapters ?: return
+        val chapter = listOfNotNull(chapters.currChapter, chapters.prevChapter, chapters.nextChapter)
+            .firstOrNull { it.chapter.id == event.chapterId } ?: return
+        val streams = (chapter.pageLoader as? NightPageSource)?.nightStreams ?: return
+        viewModelScope.launchIO {
+            try {
+                streams.index.invalidate()
+                val index = streams.indexOfPage(event.pageName) ?: return@launchIO
+                val wasHeld = streams.served(index)?.kind == NightPageStreams.Served.HELD_ORIGINAL
+                streams.releasePage(index)
+                if (nightEffective.value || event.held || wasHeld) {
+                    chapter.pages?.firstOrNull { it.index == index }?.reload()
+                }
+                if (event.result == NightPageResult.DONE &&
+                    getCurrentChapter()?.chapter?.id == event.chapterId &&
+                    state.value.nightAvailability != NightAvailability.READY
+                ) {
+                    refreshNightAvailability(chapter)
+                }
+            } catch (e: Throwable) {
+                if (e is CancellationException) throw e
+                logcat(LogPriority.WARN, e) { "夜讀逐頁重畫失敗" }
+            }
+        }
+    }
+
+    /**
+     * 翻譯佇列有一頁落地（[TranslationManager.donePageEvents]）：章是 curr/prev/next 之一時，在 IO 先把這頁的「已放行」拿掉
+     * （新的一代，[NightPageStreams.unreleasePage]；即時翻譯 loader 也要，它只處理還登記著的頁）。不是即時翻譯 loader 時，再判
+     * 這頁會不會被 hold（[NightPageStreams.wouldHold]，章層級 hold 沒生效就不會）；會就把它記成「顯示原圖」
+     * （[NightPageStreams.markShowingOriginal]）。
+     */
+    private fun onTranslatedPageLanded(chapterId: Long, pageName: String) {
+        val chapters = state.value.viewerChapters ?: return
+        val chapter = listOfNotNull(chapters.currChapter, chapters.prevChapter, chapters.nextChapter)
+            .firstOrNull { it.chapter.id == chapterId } ?: return
+        val streams = (chapter.pageLoader as? NightPageSource)?.nightStreams ?: return
+        val live = chapter.pageLoader is TranslatingPageLoader // 即時翻譯 loader 自己判 hold
+        viewModelScope.launchIO {
+            try {
+                val index = streams.indexOfPage(pageName) ?: return@launchIO
+                streams.unreleasePage(index)
+                if (live) return@launchIO
+                if (streams.wouldHold(index)) streams.markShowingOriginal(index)
+            } catch (e: Throwable) {
+                if (e is CancellationException) throw e
+                logcat(LogPriority.WARN, e) { "判斷合併處理 hold 失敗" }
+            }
+        }
+    }
+
+    /**
+     * 合併處理的章層級 hold 失效（[TranslationManager.holdChapters] 少了 [chapterIds]）：curr/prev/next 裡這些章上次送
+     * hold 中原圖素材的頁（[NightPageStreams.heldPages]，含「翻譯落地前解碼、畫面上其實是原圖」的頁）重畫——這次解碼章層級
+     * hold 已失效，送的是譯圖（或夜讀版），並把這頁記成已放行（黏著）。只看記憶體、不做 IO。
+     */
+    private fun reloadHeldPages(chapterIds: Set<Long>) {
+        val chapters = state.value.viewerChapters ?: return
+        listOfNotNull(chapters.currChapter, chapters.prevChapter, chapters.nextChapter)
+            .filter { it.chapter.id in chapterIds }
+            .forEach { chapter ->
+                val held = (chapter.pageLoader as? NightPageSource)?.nightStreams?.heldPages().orEmpty().toSet()
+                if (held.isEmpty()) return@forEach
+                chapter.pages?.filter { it.index in held }?.forEach { it.reload() }
+            }
+    }
+
+    /**
+     * 選頁補換：這頁該送的（夜讀版、壓暗、合併處理放行後的譯圖）跟上次實際送的不同就重畫一次（[NightPageStreams.needsRefresh]）。
+     * 白天、這章沒有 hold 時不列目錄。在 IO 判斷。
+     */
+    private fun refreshNightOnSelect(page: ReaderPage) {
+        val streams = runCatching { (page.chapter.pageLoader as? NightPageSource)?.nightStreams }.getOrNull() ?: return
+        viewModelScope.launchIO {
+            val stale = try {
+                streams.needsRefresh(page.index)
+            } catch (e: Throwable) {
+                if (e is CancellationException) throw e
+                logcat(LogPriority.WARN, e) { "選頁補換夜讀版判斷失敗" }
+                false
+            }
+            if (stale) page.reload()
+        }
+    }
+
+    /**
+     * 單頁操作（「翻譯這頁」「重繪這頁」）不 hold：成功後把這頁在 loader 記成已放行，接著的重畫直接送新圖——即使這章正在合併
+     * 處理、這頁還留著 hold 記號（夜讀版之後由合併工作這一輪收尾的補掃或下一輪補做，做好時照常換上）。
+     */
+    private fun releasePageHold(page: ReaderPage) {
+        val p = (page as? InsertPage)?.parent ?: page
+        runCatching { (p.chapter.pageLoader as? NightPageSource)?.nightStreams?.releasePage(p.index) }
+    }
+
+    /**
      * 解析 [chapter] 的章節夾（頁圖所在的鬆散資料夾）：本機來源目錄章＝[DirectoryPageLoader.file]；
      * 已下載章（含即時翻包裝 [TranslatingPageLoader]）＝下載夾（與 [reRenderPage] 同源）。線上／封存章 → null。
      * 夜讀版存在章節夾的 `.yakuyomi/` 下，所以這是夜讀查找的根。
@@ -1567,31 +1715,36 @@ class ReaderViewModel @JvmOverloads constructor(
         nightTier
             .drop(1)
             .debounce(NIGHT_TIER_DEBOUNCE)
-            .onEach { if (nightEffective.value) reloadChangedNightPages() }
+            .onEach { if (nightEffective.value) reloadChangedNightPages(dimChanged = false) }
             .launchIn(viewModelScope)
     }
 
     /**
-     * 換檔位後只重畫真的會變的頁：對 curr/prev/next 三章，請 loader 重列一次 `.yakuyomi/`、逐頁比「上次實際送出的檔」與
-     * 「新檔位下會送的檔」（[eu.kanade.tachiyomi.ui.reader.loader.NightPageStreams.pagesToReload]），只 reload 不同的頁
-     * （標準↔更多在 47 頁裡約一半（25 頁）會變；沒變的頁不重新解碼、也不閃）。畫面上看得到的頁（[visibleNightPages]：雙頁對開＝
-     * 兩頁）**全都**沒變 → 發 [Event.NightTierNoDifference] 讓懸浮鈕短暫提示，免得使用者以為鈕壞了；條漫不確定看得到
-     * 哪幾頁，不發。
+     * 換檔位（或改壓暗設定，[dimChanged]）後只重畫真的會變的頁：對 curr/prev/next 三章，請 loader 重列一次 `.yakuyomi/`、逐頁比
+     * 「上次實際送出的狀態」與「新設定下會送的狀態」（夜讀檔名、壓暗倍率——標準與更多的壓暗值不同，沒有夜讀版的頁換檔位也會變；
+     * [eu.kanade.tachiyomi.ui.reader.loader.NightPageStreams.pagesToReload]），只 reload 不同的頁（標準↔更多在 47 頁裡約一半
+     * （25 頁）會變；沒變的頁不重新解碼、也不閃）。沒有 nightStreams 的章（線上、壓縮檔）只有壓暗會變：改壓暗設定、或換檔位時
+     * 壓暗開著 → 整章重畫。換檔位時畫面上看得到的頁（[visibleNightPages]：雙頁對開＝兩頁）**全都**沒變 → 發
+     * [Event.NightTierNoDifference] 讓懸浮鈕短暫提示，免得使用者以為鈕壞了；條漫不確定看得到哪幾頁，不發；改壓暗設定時也不發。
      */
-    private fun reloadChangedNightPages() {
+    private fun reloadChangedNightPages(dimChanged: Boolean) {
         val chapters = state.value.viewerChapters ?: return
         val visible = visibleNightPages
         viewModelScope.launchIO {
             var visibleChanged: Boolean? = null
             for (chapter in listOfNotNull(chapters.currChapter, chapters.prevChapter, chapters.nextChapter)) {
-                val streams = (chapter.pageLoader as? NightPageSource)?.nightStreams ?: continue
                 val pages = chapter.pages ?: continue
-                val changed = try {
-                    streams.pagesToReload(pages)
-                } catch (e: Throwable) {
-                    if (e is CancellationException) throw e
-                    logcat(LogPriority.WARN, e) { "比對夜讀檔位失敗，整章重畫" }
-                    pages
+                val streams = (chapter.pageLoader as? NightPageSource)?.nightStreams
+                val changed = if (streams == null) {
+                    if (dimChanged || translationPreferences.nightDimPending.get()) pages else emptyList()
+                } else {
+                    try {
+                        streams.pagesToReload(pages)
+                    } catch (e: Throwable) {
+                        if (e is CancellationException) throw e
+                        logcat(LogPriority.WARN, e) { "比對夜讀檔位失敗，整章重畫" }
+                        pages
+                    }
                 }
                 changed.forEach { it.reload() }
                 val mine = visible?.filter { it.chapter === chapter }.orEmpty()
@@ -1600,7 +1753,7 @@ class ReaderViewModel @JvmOverloads constructor(
                     visibleChanged = (visibleChanged ?: false) || hit
                 }
             }
-            if (visibleChanged == false && state.value.nightAvailability == NightAvailability.READY) {
+            if (!dimChanged && visibleChanged == false && state.value.nightAvailability == NightAvailability.READY) {
                 eventChannel.send(Event.NightTierNoDifference)
             }
         }
@@ -1840,7 +1993,10 @@ class ReaderViewModel @JvmOverloads constructor(
                 val hadNight = translationManager.chapterHasNightBeforePage(chapterDir)
                 val ok = pageTranslator.reRenderPage(chapterDir, pageFileName, method)
                 // 補排夜讀放在 finish 前：finish 會等 UI 收事件，使用者這時退出 reader 的話後面的程式碼不會跑
-                if (ok) requeueNightAfterPage(manga, chapter, hadNight)
+                if (ok) {
+                    requeueNightAfterPage(manga, chapter, hadNight)
+                    releasePageHold(page) // 單頁操作不 hold：重畫直接送新圖
+                }
                 finish(ok)
             } catch (e: Throwable) {
                 if (e is CancellationException) throw e
@@ -1925,6 +2081,7 @@ class ReaderViewModel @JvmOverloads constructor(
                 when (pageTranslator.translateSinglePage(chapterDir, pageFileName, method)) {
                     PageTranslator.SinglePageResult.TRANSLATED -> {
                         requeueNightAfterPage(manga, chapter, hadNight) // finish 前：見 reRenderPage
+                        releasePageHold(page) // 單頁操作不 hold：重畫直接送新圖
                         finish(true)
                     }
                     PageTranslator.SinglePageResult.NOT_TRANSLATED -> finish(false)
@@ -2116,17 +2273,21 @@ class ReaderViewModel @JvmOverloads constructor(
     /**
      * 當前章在翻譯佇列中的進度快照（給 reader 內角落小指示器）。
      * [queued]＝true 表示僅排隊中（尚未開始翻、[done]/[total] 還未生效）；false＝翻譯中（[done]/[total] 有效）。
+     * [withNight]＝這章是翻譯＋夜讀的合併工作（排隊中、或這一輪正在一併產生夜讀版）：翻譯中顯示「翻譯＋夜讀中」，
+     * [done]＝兩樣都好了的頁數（與懸浮鈕進度環同一個數）。
      */
     @Immutable
     data class LiveTranslateProgress(
         val done: Int,
         val total: Int,
         val queued: Boolean,
+        val withNight: Boolean = false,
     )
 
     /**
-     * 當前章在夜讀佇列的進度快照（[running]＝產生中、false＝排隊中，[done]/[total] 還沒意義時都是 0）。
-     * [paused]＝排隊中且被暫停 hold 住（單章、這本的夜讀組或夜讀 pool）。
+     * 當前章的夜讀進度快照（[running]＝產生中、false＝排隊中，[done]/[total] 還沒意義時都是 0）。
+     * [paused]＝排隊中且被暫停 hold 住（夜讀項：單章、這本的夜讀組或夜讀 pool；合併工作：單章、這本的翻譯組或翻譯 pool）。
+     * [combined]＝這章沒有夜讀項，夜讀版由翻譯＋夜讀的合併工作一起產生：[done]＝兩樣都好了的頁數（與角落指示器同一個數）。
      */
     @Immutable
     data class NightProgress(
@@ -2134,6 +2295,7 @@ class ReaderViewModel @JvmOverloads constructor(
         val total: Int,
         val running: Boolean,
         val paused: Boolean = false,
+        val combined: Boolean = false,
     ) {
         /**
          * 懸浮鈕進度環：null＝不畫（排隊中、暫停中：沒在動，畫一個停住的環像卡死）；[Float.NaN]＝不定進度（剛開跑、

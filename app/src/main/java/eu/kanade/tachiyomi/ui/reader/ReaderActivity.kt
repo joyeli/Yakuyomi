@@ -432,6 +432,8 @@ class ReaderActivity : BaseActivity() {
                             .align(Alignment.TopStart)
                             .statusBarsPadding()
                             .padding(8.dp),
+                        // 翻譯＋夜讀的合併工作：「翻譯＋夜讀中 X/Y」（X＝兩樣都好了的頁數，與懸浮鈕進度環同一個數）
+                        withNight = progress.withNight,
                     )
                 }
             }

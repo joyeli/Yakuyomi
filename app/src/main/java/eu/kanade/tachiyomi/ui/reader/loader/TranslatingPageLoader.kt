@@ -201,19 +201,41 @@ internal class TranslatingPageLoader(
      *
      * 事件當下不在 [tracked] 的頁（holder 還沒綁）＝跳過；之後該頁 holder 綁定時 [handleDownloadedPage] 的即時
      * manifest 檢查會補上（已翻→直接換）。故 push + 綁定即時檢查涵蓋所有情況。
+     *
+     * 合併處理（翻譯＋夜讀一條線）時，這頁翻好但夜讀版還沒好會被 hold（[holdsPage]）：不換，畫面維持原圖；等這頁的夜讀結果事件
+     * 到了，由 ReaderViewModel 重畫（那時送的才是夜讀版或譯圖）。
      */
     private fun startQueueObserver() {
         scope.launch {
             translationManager.donePageEvents.collect { (chapterId, name) ->
                 if (chapterId != chapter.chapter.id) return@collect
                 if (chapterDir == null) return@collect
+                // 這頁又落地了一次（新的一代）：之前的「已放行」不再算數，重新可被 hold（見 NightPageStreams.unreleasePage）
+                nightStreams?.let { s ->
+                    runCatching { s.indexOfPage(name) }.getOrNull()?.let(s::unreleasePage)
+                }
                 val page = synchronized(tracked) {
                     val hit = tracked.entries.firstOrNull { (_, p) -> pageFiles.getOrNull(p.index)?.name == name }
                     if (hit != null) tracked.remove(hit.key)
                     hit?.value
                 }
-                page?.let { swapToFile(it) }
+                page?.let { if (!holdsPage(it)) swapToFile(it) }
             }
+        }
+    }
+
+    /**
+     * 合併處理：這頁現在解碼會被 hold（翻好了、夜讀版還沒好，見 [NightPageStreams.wouldHold]）→ true，並把畫面上的狀態記成
+     * 「顯示原圖」（[NightPageStreams.markShowingOriginal]：畫面上是翻譯落地前解碼的原圖），章層級放行時 ReaderViewModel 才知道
+     * 要重畫它。沒有 nightStreams、章層級 hold 沒生效 → false（照舊換譯圖）。IO（hold 生效時會重列 `.yakuyomi`）。
+     */
+    private fun holdsPage(page: ReaderPage): Boolean {
+        val streams = nightStreams ?: return false
+        return try {
+            streams.wouldHold(page.index).also { held -> if (held) streams.markShowingOriginal(page.index) }
+        } catch (e: Exception) {
+            logcat(LogPriority.WARN, e) { "判斷合併處理 hold 失敗，照舊換譯圖" }
+            false
         }
     }
 
@@ -257,10 +279,10 @@ internal class TranslatingPageLoader(
         // 之後若沒有新 emission（尤其正在看的頁 / 章末頁），這頁就一直停在原圖。登記在先 → 之後任何 emission 都看得到它。
         synchronized(tracked) { tracked[page.index] = page }
         // 登記後立即查一次：涵蓋「登記前就已翻好」（page-level resume / 重繪後 / 佇列搶先翻好）與「登記瞬間剛翻好」。
-        // 命中就原子地從 tracked 取出再換（與觀察者互斥、同頁不重複換）。
+        // 命中就原子地從 tracked 取出再換（與觀察者互斥、同頁不重複換）。合併處理 hold 中的頁不換（等夜讀結果事件）。
         if (pageTranslator.isPageTranslated(dir, pageFile.name.orEmpty())) {
             val hit = synchronized(tracked) { tracked.remove(page.index) }
-            if (hit != null) swapToFile(page)
+            if (hit != null && !holdsPage(page)) swapToFile(page)
         }
     }
 
@@ -304,17 +326,22 @@ internal class TranslatingPageLoader(
      * 為何需要：被預載的相鄰頁（典型＝第 2 頁）若在 **off-screen / 預載期間** 翻好，它的 reloadFlow 變更不一定被當下
      * 那個（off-screen）holder 重 decode（換頁的 reload 在「當前頁」最可靠——baseline 的第 1 頁正是靠這條）。於是它變成
      * 當前頁時仍卡原圖。這裡在「剛變當前頁」對它補一次 reload()：此刻 holder 在螢幕上、collector 可靠 → 換上譯圖。
-     * 未翻好的頁不動（維持原圖；之後在當前頁翻好時的就地 reload 仍會換）。
+     * 未翻好的頁不動（維持原圖；之後在當前頁翻好時的就地 reload 仍會換）。合併處理 hold 中的頁也不動（見 [holdsPage]）。
+     * 查 manifest 是 IO，在本 loader 的 IO scope 非同步做（以前直接在主執行緒讀檔）。
      */
     fun refreshSelected(page: ReaderPage) {
         if (isRecycled) return
         if (synchronized(selectedSwapped) { page.index in selectedSwapped }) return
-        ensureResolved()
-        val dir = chapterDir ?: return
-        val pageFile = pageFiles.getOrNull(page.index) ?: return
-        if (pageTranslator.isPageTranslated(dir, pageFile.name.orEmpty())) {
+        // 查 manifest、判 hold 都是 IO：放到本 loader 的 IO scope（呼叫端在主執行緒）
+        scope.launch {
+            ensureResolved()
+            val dir = chapterDir ?: return@launch
+            val pageFile = pageFiles.getOrNull(page.index) ?: return@launch
+            if (!pageTranslator.isPageTranslated(dir, pageFile.name.orEmpty())) return@launch
+            // 合併處理 hold 中的頁不換、也不記「換過」：放行之後（夜讀結果事件、章層級放行）由 ReaderViewModel 重畫
+            if (holdsPage(page)) return@launch
             synchronized(tracked) { tracked.remove(page.index) }
-            synchronized(selectedSwapped) { selectedSwapped.add(page.index) }
+            if (!synchronized(selectedSwapped) { selectedSwapped.add(page.index) }) return@launch
             swapToFile(page)
         }
     }

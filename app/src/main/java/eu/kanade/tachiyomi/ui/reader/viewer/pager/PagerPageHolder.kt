@@ -7,6 +7,7 @@ import androidx.core.view.isVisible
 import eu.kanade.presentation.util.formattedMessage
 import eu.kanade.tachiyomi.databinding.ReaderErrorBinding
 import eu.kanade.tachiyomi.source.model.Page
+import eu.kanade.tachiyomi.ui.reader.loader.NightPageStreams
 import eu.kanade.tachiyomi.ui.reader.model.InsertPage
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
@@ -193,6 +194,8 @@ class PagerPageHolder(
                 if (!isAnimated) {
                     pageBackground = background
                 }
+                // 夜讀模式下還沒有夜讀版的頁先壓暗（只影響顯示）：倍率是 loader 剛才開檔時決定的（分割頁用 parent 的）
+                setDisplayDim(NightPageStreams.displayDim(page))
                 removeErrorLayout()
             }
         } catch (e: Throwable) {
