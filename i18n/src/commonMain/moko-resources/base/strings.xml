@@ -1740,4 +1740,5 @@
     <string name="reader_translating_with_night">Translating + night pages</string>
     <string name="nightread_chapter_status_combined">Night pages are made together with the translation</string>
     <string name="nightread_status_waiting_combined">Starts after the chapter being translated with night pages is done</string>
+    <string name="reader_night_after_download">This chapter is downloading. Its translation and night pages are made after the download</string>
 </resources>

@@ -15,7 +15,8 @@ class OnlineChapterFlowTest {
         nightEnabled: Boolean = true,
         asked: Boolean = false,
         requested: Boolean = false,
-    ) = OnlineNightPrompt.decide(trigger, online, nightEnabled, asked, requested)
+        liveNightCovers: Boolean = false,
+    ) = OnlineNightPrompt.decide(trigger, online, nightEnabled, asked, requested, liveNightCovers)
 
     @Test
     fun `不是線上章或夜讀總開關關著：照原本的路走`() {
@@ -43,6 +44,32 @@ class OnlineChapterFlowTest {
         decide(Trigger.EXPLICIT, requested = true) shouldBe Action.DOWNLOADING
         decide(Trigger.EXPLICIT, asked = true, requested = true) shouldBe Action.DOWNLOADING
         decide(Trigger.NIGHT_ON, requested = true) shouldBe Action.SKIP
+    }
+
+    @Test
+    fun `即時翻譯會一併產生夜讀版：兩種觸發都不問（問過、按過下載也一樣）`() {
+        Trigger.entries.forEach { t ->
+            decide(t, liveNightCovers = true) shouldBe Action.LIVE_COVERED
+            decide(t, asked = true, liveNightCovers = true) shouldBe Action.LIVE_COVERED
+            decide(t, requested = true, liveNightCovers = true) shouldBe Action.LIVE_COVERED
+            decide(t, asked = true, requested = true, liveNightCovers = true) shouldBe Action.LIVE_COVERED
+        }
+    }
+
+    @Test
+    fun `即時翻譯會一併產生夜讀版，但不是線上章或夜讀總開關關著：仍照原本的路走`() {
+        Trigger.entries.forEach { t ->
+            decide(t, online = false, liveNightCovers = true) shouldBe Action.NONE
+            decide(t, nightEnabled = false, liveNightCovers = true) shouldBe Action.NONE
+        }
+    }
+
+    @Test
+    fun `即時翻譯不會一併產生夜讀版：照常問`() {
+        decide(Trigger.NIGHT_ON, liveNightCovers = false) shouldBe Action.ASK
+        decide(Trigger.EXPLICIT, liveNightCovers = false) shouldBe Action.ASK
+        decide(Trigger.NIGHT_ON, asked = true, liveNightCovers = false) shouldBe Action.SKIP
+        decide(Trigger.EXPLICIT, requested = true, liveNightCovers = false) shouldBe Action.DOWNLOADING
     }
 
     @Test

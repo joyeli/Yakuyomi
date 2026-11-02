@@ -336,6 +336,10 @@ class ReaderActivity : BaseActivity() {
                     ReaderViewModel.Event.NightQueuePaused -> {
                         toast(stringResource(MR.strings.nightread_queue_paused))
                     }
+                    ReaderViewModel.Event.NightAfterLiveDownload -> {
+                        // 線上章：即時翻譯會下載這話並一併產生夜讀版，不問要不要下載
+                        toast(stringResource(MR.strings.reader_night_after_download))
+                    }
                     ReaderViewModel.Event.NightTierNoDifference -> {
                         nightNoDifferenceHint++
                     }

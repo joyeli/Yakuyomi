@@ -5,8 +5,9 @@ package eu.kanade.tachiyomi.ui.reader
 //  - [OnlineDownloadPoll]：按了下載之後，每次輪詢該繼續等、重載這一話，還是放棄（即時翻譯的線上路徑也用這個）。
 
 /**
- * 線上章要夜讀時該怎麼辦（`ReaderViewModel`）。線上章沒有章節夾、夜讀版做不了；以前只提示「需先下載」，現在改成問一次要不要下載，
+ * 線上章要夜讀時該怎麼辦（`ReaderViewModel`）。線上章沒有章節夾、夜讀版做不了：問一次要不要下載，
  * 按「下載」就下載成鬆散資料夾、下載完排入夜讀、重載這一話（保留頁碼），夜讀版做好就照常換上。
+ * 即時翻譯會自己下載這話、而且會一併產生夜讀版時不問（[Action.LIVE_COVERED]）：不下載就做不了，跟即時翻譯一樣直接下載。
  */
 object OnlineNightPrompt {
 
@@ -31,15 +32,31 @@ object OnlineNightPrompt {
 
         /** 什麼都不做（開夜讀模式時這話已經問過、或已經在下載）。 */
         SKIP,
+
+        /**
+         * 不問：即時翻譯會自己下載這話，而且這本「即時翻譯時一併產生夜讀版」適用——下載完排入的就是翻譯＋夜讀的合併工作。
+         * 呼叫端確保即時翻譯的線上路徑有觸發；明確要夜讀版時提示「下載完會一併翻譯並產生夜讀版」，打開夜讀模式時什麼都不顯示。
+         */
+        LIVE_COVERED,
     }
 
     /**
      * [online]＝這話目前是線上章（閱讀器用的是網路載入器）；[nightEnabled]＝夜讀總開關；[asked]＝這次閱讀已經問過這話；
-     * [requested]＝這話已經按過「下載」（下載中或剛下載完、還沒重載）。
+     * [requested]＝這話已經按過「下載」（下載中或剛下載完、還沒重載）；
+     * [liveNightCovers]＝即時翻譯會下載這話並一併產生夜讀版（即時翻譯的 gate 與「即時翻譯時一併產生夜讀版」都過）。
+     * 判斷順序：不是線上章或夜讀關著最先；接著即時＋夜讀適用就不問（不管問過沒有、按過下載沒有）。
      */
-    fun decide(trigger: Trigger, online: Boolean, nightEnabled: Boolean, asked: Boolean, requested: Boolean): Action =
+    fun decide(
+        trigger: Trigger,
+        online: Boolean,
+        nightEnabled: Boolean,
+        asked: Boolean,
+        requested: Boolean,
+        liveNightCovers: Boolean = false,
+    ): Action =
         when {
             !nightEnabled || !online -> Action.NONE
+            liveNightCovers -> Action.LIVE_COVERED
             requested -> if (trigger == Trigger.EXPLICIT) Action.DOWNLOADING else Action.SKIP
             trigger == Trigger.NIGHT_ON && asked -> Action.SKIP
             else -> Action.ASK

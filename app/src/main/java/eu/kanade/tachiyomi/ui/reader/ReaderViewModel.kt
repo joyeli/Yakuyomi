@@ -315,9 +315,10 @@ class ReaderViewModel @JvmOverloads constructor(
 
     /**
      * 已觸發過「線上即時翻（下載 + 重載）」的章 id：每章只觸發一次，避免重複進同一章（換頁回到同章 / 重載後）
-     * 重複下載。在 [onCurrentChapterActivated]（單一 viewModelScope coroutine、序列化）下存取，免額外鎖。
+     * 重複下載。除了 [onCurrentChapterActivated]，線上章要夜讀而即時翻譯會一併產生夜讀版時（[promptOnlineNight]）也會在 IO
+     * 進來補觸發，可能兩個協程同時進來 → 並行安全的集合，[maybeTriggerOnlineLiveTranslate] 過完 gate 才原子地 add 去重。
      */
-    private val onlineTriggeredChapterIds = mutableSetOf<Long>()
+    private val onlineTriggeredChapterIds: MutableSet<Long> = ConcurrentHashMap.newKeySet()
 
     /**
      * 線上章的夜讀（[OnlineNightPrompt]）：[nightDownloadAskedIds]＝這次閱讀已經問過「要先下載嗎？」的章（打開夜讀模式時
@@ -387,7 +388,8 @@ class ReaderViewModel @JvmOverloads constructor(
             .drop(1)
             .onEach { on ->
                 reloadLoadedPages()
-                // 在線上章打開夜讀模式：這話沒有夜讀版、也做不了，問一次要不要先下載（[OnlineNightPrompt]）
+                // 在線上章打開夜讀模式：這話沒有夜讀版、也做不了，問一次要不要先下載；即時翻譯會下載並一併產生夜讀版時
+                // 不問（[OnlineNightPrompt]、[promptOnlineNight]）
                 if (on) promptOnlineNight(OnlineNightPrompt.Trigger.NIGHT_ON)
             }
             .launchIn(viewModelScope)
@@ -685,7 +687,8 @@ class ReaderViewModel @JvmOverloads constructor(
     /**
      * 線上（未下載）章的即時翻入口：判斷「是否該對這條線上章即時翻」（gate 與 [ChapterLoader.shouldTranslateLive]
      * 對齊：開關 + 引擎就緒 + 分類 + 尚未翻好 + 確為線上未下載），符合則觸發 [triggerOnlineLiveTranslate]。
-     * 每章只觸發一次（[onlineTriggeredChapterIds]）。
+     * 每章只觸發一次（[onlineTriggeredChapterIds]）。呼叫端：[onCurrentChapterActivated]（主執行緒），以及線上章要夜讀而
+     * 即時翻譯會一併產生時的 [promptOnlineNight]（IO）。
      */
     private suspend fun maybeTriggerOnlineLiveTranslate(chapter: ReaderChapter) {
         val manga = manga ?: return
@@ -1389,8 +1392,9 @@ class ReaderViewModel @JvmOverloads constructor(
     }
 
     /**
-     * 懸浮鈕上點了**不可用**的檔位（這章沒有可切檔位的夜讀版）：不支援的章提示要先下載；正在產生就報進度；否則跳確認框
-     * 「為這一話產生夜讀版？」（確認後 [startChapterNightRender]）。
+     * 懸浮鈕上點了**不可用**的檔位（這章沒有可切檔位的夜讀版）：不支援的章提示要先下載（線上章：問要不要下載，或即時翻譯
+     * 會一併產生時只提示）；正在產生（夜讀項或翻譯＋夜讀的合併工作）就報進度；否則跳確認框「為這一話產生夜讀版？」
+     * （確認後 [startChapterNightRender]）。
      */
     fun requestChapterNightRender() {
         val s = state.value
@@ -1447,38 +1451,83 @@ class ReaderViewModel @JvmOverloads constructor(
     }
 
     /**
-     * 線上章要夜讀（[OnlineNightPrompt]）：該問就跳「這話要先下載才能產生夜讀版，要下載嗎？」（[Dialog.NightDownloadConfirm]），
-     * 已經按過「下載」就提示下載中。回傳是否處理了（false＝不是線上章、或夜讀總開關關著：呼叫端照原本的路走）。
-     * 打開夜讀模式（[OnlineNightPrompt.Trigger.NIGHT_ON]）時若有別的對話框開著（例如從閱讀設定面板打開），先不問、也不算
-     * 問過——不蓋掉使用者正在用的面板；之後點灰色的檔位鈕會再問。主執行緒呼叫。
+     * 線上章要夜讀（[OnlineNightPrompt]）。回傳是否處理了（false＝不是線上章、或夜讀總開關關著：呼叫端照原本的路走，
+     * 例如提示「需先下載」）；是線上章就回 true，接著在 viewModelScope 上判斷（要在 IO 查即時翻譯的條件）：
+     *  - 即時翻譯會下載這話、而且會一併產生夜讀版（[liveNightCoversOnline]）→ **不問**：不下載就做不了，跟即時翻譯一樣直接
+     *    下載。補一次 [maybeTriggerOnlineLiveTranslate]（章才剛開、自動路徑還沒跑到時由這裡觸發；觸發過就不重複）；明確要
+     *    夜讀版時提示「下載完會一併翻譯並產生夜讀版」（[Event.NightAfterLiveDownload]），打開夜讀模式時什麼都不顯示。
+     *  - 其餘照 [OnlineNightPrompt.decide]：該問就跳「這話要先下載才能產生夜讀版，要下載嗎？」（[Dialog.NightDownloadConfirm]），
+     *    已經按過「下載」就提示下載中。打開夜讀模式（[OnlineNightPrompt.Trigger.NIGHT_ON]）時若有別的對話框開著（例如從閱讀
+     *    設定面板打開），先不問、也不算問過——不蓋掉使用者正在用的面板；之後點灰色的檔位鈕會再問。
+     * 判斷期間使用者換了話（或這話已重載成已下載）→ 什麼都不做。主執行緒呼叫。
      */
     private fun promptOnlineNight(trigger: OnlineNightPrompt.Trigger): Boolean {
         val chapter = getCurrentChapter() ?: return false
         val id = chapter.chapter.id ?: return false
-        val action = OnlineNightPrompt.decide(
-            trigger = trigger,
-            online = chapter.pageLoader is HttpPageLoader,
-            nightEnabled = translationPreferences.nightReadEnabled.get(),
-            asked = id in nightDownloadAskedIds,
-            requested = id in nightDownloadRequestedIds,
-        )
-        return when (action) {
-            OnlineNightPrompt.Action.NONE -> false
-            OnlineNightPrompt.Action.SKIP -> true
-            OnlineNightPrompt.Action.DOWNLOADING -> {
-                eventChannel.trySend(Event.NightDownloadWaiting)
-                true
+        if (chapter.pageLoader !is HttpPageLoader || !translationPreferences.nightReadEnabled.get()) return false
+        viewModelScope.launch {
+            val covers = try {
+                withIOContext { liveNightCoversOnline(chapter) }
+            } catch (e: Throwable) {
+                if (e is CancellationException) throw e
+                logcat(LogPriority.WARN, e) { "線上夜讀：判斷即時翻譯是否一併產生夜讀版失敗，照常詢問" }
+                false
             }
-            OnlineNightPrompt.Action.ASK -> {
-                if (trigger == OnlineNightPrompt.Trigger.NIGHT_ON && state.value.dialog != null) return true
-                nightDownloadAskedIds += id
-                mutableState.update { it.copy(dialog = Dialog.NightDownloadConfirm) }
-                true
+            if (getCurrentChapter() !== chapter) return@launch
+            val action = OnlineNightPrompt.decide(
+                trigger = trigger,
+                online = chapter.pageLoader is HttpPageLoader,
+                nightEnabled = translationPreferences.nightReadEnabled.get(),
+                asked = id in nightDownloadAskedIds,
+                requested = id in nightDownloadRequestedIds,
+                liveNightCovers = covers,
+            )
+            when (action) {
+                OnlineNightPrompt.Action.NONE, OnlineNightPrompt.Action.SKIP -> Unit
+                OnlineNightPrompt.Action.LIVE_COVERED -> {
+                    logcat { "線上夜讀：即時翻譯會下載並一併產生夜讀版，不詢問 ${chapter.chapter.url} trigger=$trigger" }
+                    withIOContext { maybeTriggerOnlineLiveTranslate(chapter) }
+                    if (trigger == OnlineNightPrompt.Trigger.EXPLICIT) eventChannel.send(Event.NightAfterLiveDownload)
+                }
+                OnlineNightPrompt.Action.DOWNLOADING -> eventChannel.send(Event.NightDownloadWaiting)
+                OnlineNightPrompt.Action.ASK -> {
+                    if (trigger == OnlineNightPrompt.Trigger.NIGHT_ON && state.value.dialog != null) return@launch
+                    nightDownloadAskedIds += id
+                    mutableState.update { it.copy(dialog = Dialog.NightDownloadConfirm) }
+                }
             }
         }
+        return true
     }
 
-    /** 長按選單在線上章的「為這一話產生夜讀版」：同點灰色檔位鈕，問要不要先下載。 */
+    /**
+     * 線上章 [chapter] 由即時翻譯下載、而且下載完排入的會是翻譯＋夜讀的合併工作（所以不必問要不要下載）：網路載入器、
+     * 翻譯總開關與即時翻譯開著、引擎就緒（key＋模型）、即時翻譯的分類／來源範圍允許（同 [maybeTriggerOnlineLiveTranslate]
+     * 的 gate），而且 [TranslationManager.liveNightApplies]（夜讀總開關、「即時翻譯時一併產生夜讀版」、夜讀模型、夜讀範圍）。
+     * 這話已經下載好、卻不是即時翻譯觸發的（線上路徑不會再跑）→ false（照常詢問；按「下載」會直接排夜讀並重載）。在 IO 呼叫。
+     */
+    private suspend fun liveNightCoversOnline(chapter: ReaderChapter): Boolean {
+        if (chapter.pageLoader !is HttpPageLoader) return false
+        val manga = manga ?: return false
+        val loader = loader ?: return false
+        val chapterId = chapter.chapter.id ?: return false
+        if (!translationPreferences.translationMasterEnabled.get()) return false
+        if (!translationPreferences.liveTranslate.get()) return false
+        if (!loader.engineReady()) return false
+        if (!loader.autoTranslateAllowed()) return false
+        if (!translationManager.liveNightApplies(manga)) return false
+        if (chapterId in onlineTriggeredChapterIds) return true
+        return !downloadManager.isChapterDownloaded(
+            chapter.chapter.name,
+            chapter.chapter.scanlator,
+            chapter.chapter.url,
+            manga.title,
+            manga.source,
+            skipCache = true,
+        )
+    }
+
+    /** 長按選單在線上章的「為這一話產生夜讀版」：同點灰色檔位鈕，問要不要先下載（即時翻譯會一併產生時只提示）。 */
     fun requestOnlineChapterNight() {
         closeDialog()
         if (!promptOnlineNight(OnlineNightPrompt.Trigger.EXPLICIT)) eventChannel.trySend(Event.NightUnsupported)
@@ -2386,6 +2435,12 @@ class ReaderViewModel @JvmOverloads constructor(
 
         /** 這章在夜讀佇列裡、但被暫停 hold 住（點了不可用的檔位）。 */
         data object NightQueuePaused : Event
+
+        /**
+         * 線上章要夜讀、而即時翻譯會下載這話並一併產生夜讀版（點了灰色檔位鈕、或長按「為這一話產生夜讀版」）：
+         * 提示這話下載中、下載完會一併翻譯並產生夜讀版（不跳下載確認框）。
+         */
+        data object NightAfterLiveDownload : Event
 
         /** 換了檔位、當前頁卻沒變（這頁在這一檔跟上一檔一樣）：懸浮鈕短暫提示。 */
         data object NightTierNoDifference : Event
