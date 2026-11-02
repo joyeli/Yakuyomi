@@ -20,6 +20,11 @@ import kotlinx.coroutines.withTimeoutOrNull
  *  - [CombinedNight.PagePlan.NIGHT]：取線位 → 直接送夜讀段。
  *  - [CombinedNight.PagePlan.TRANSLATE]：取線位 → 取翻譯併發閘（[translateDepth]）→ [translate] → 定案的頁送夜讀段。
  *
+ * **提早送夜讀**（軌道 B2 的 S3／S4，[sendEarly]）：[translate] 在譯圖編碼好、落地之前就可以把這頁送進夜讀段（呼叫端把編碼好
+ * 的位元組與素材交給夜讀），落地照常在 [translate] 裡做完才回傳。這樣送出的頁 [translate] 回 SETTLED 時不再送一次；回失敗時
+ * 夜讀段那頁會被呼叫端當成過期丟掉（夜讀換檔前等落地，落地沒成功就不換），q4 等它離開夜讀段才算。落地都在 [translate] 裡，
+ * 所以 [afterTranslatePhase] 之前等完所有翻譯＝等完所有落地，跟以前一樣。
+ *
  * **線位**（[slotCount]）：每頁從取線位佔到完整輸出（夜讀結果確定）或確定不往下走（翻譯失敗、讀不出來、過期、夜讀段關了）。
  * 翻譯因此最多領先夜讀「線位數 − 夜讀同時頁數」頁，被 hold 著等夜讀的頁數有上限。每個取過線位的頁恰好放一次（[releaseSlot]
  * 冪等）；夜讀段關掉時被它佔著的線位立刻全部放掉；主迴圈取線位前、等線位時、取到後都看 [jobStop]，所以不會卡死。
@@ -126,6 +131,12 @@ class CombinedLine<P : Any>(
     private val unreliable = HashSet<P>()
     private val nightFailedPages = HashSet<P>()
     private val nightSkippedPages = HashSet<P>()
+
+    /** 已經提早送夜讀（[sendEarly]）、[translate] 還沒回傳的頁。 */
+    private val early = HashSet<P>()
+
+    /** 提早送夜讀、翻譯卻沒定案（落地失敗）的頁：夜讀段會把它當過期丟掉，q4 等它離開夜讀段（[awaitEarlyFailedGone]）。 */
+    private val earlyFailed = HashSet<P>()
     private var nightDone = 0
     private var nightFailed = 0
     private var maxHeld = 0
@@ -139,6 +150,10 @@ class CombinedLine<P : Any>(
     /** 這一輪有夜讀段（[run] 帶了 [NightStage]）。 */
     @Volatile
     private var nightStarted = false
+
+    /** 這一輪的夜讀段（[sendEarly] 用）。 */
+    @Volatile
+    private var stage: NightStage<P>? = null
 
     /** 夜讀段被放棄（夜讀不要了、拋例外、自己提早結束）；被要求停而收工不算。 */
     @Volatile
@@ -166,6 +181,7 @@ class CombinedLine<P : Any>(
             for (p in pages) if (plans[p] == CombinedNight.PagePlan.DONE) output += p
             nightOpen = night != null
             nightStarted = night != null
+            stage = night
             reportLocked()
         }
         val nightJob = night?.let { n -> launch { runNight(n) } }
@@ -226,6 +242,33 @@ class CombinedLine<P : Any>(
         }
     }
 
+    /**
+     * 提早送夜讀（S3／S4）：從 [translate] 裡、譯圖編碼好之後呼叫（這頁佔著線位、[translate] 還沒回傳）。送出去了回 true；
+     * 夜讀段沒開（沒有夜讀段、放棄了、被要求停）、這頁已經在夜讀段或已經完整輸出、或夜讀段收不了 → false，呼叫端照舊等
+     * [translate] 回傳後由結果送。送出去之後的規則見類別說明「提早送夜讀」。
+     */
+    fun sendEarly(page: P): Boolean {
+        val night = stage ?: return false
+        checkNight()
+        val give = synchronized(lock) {
+            if (nightOpen && page in held && page !in inNight && page !in early && page !in output) {
+                inNight += page
+                early += page
+                true
+            } else {
+                false
+            }
+        }
+        if (!give) return false
+        if (runCatching { night.submit(page) }.getOrDefault(false)) return true
+        synchronized(lock) {
+            inNight -= page
+            early -= page
+        }
+        bump()
+        return false
+    }
+
     /** 一頁的夜讀結果確定（從夜讀 worker 呼叫）：算完整輸出、放線位。 */
     fun nightFinal(page: P, result: NightPageResult) {
         synchronized(lock) {
@@ -256,11 +299,24 @@ class CombinedLine<P : Any>(
     }
 
     private fun onTranslated(p: P, outcome: TranslateOutcome, night: NightStage<P>?) {
+        val wasEarly = synchronized(lock) {
+            early.remove(p).also { e ->
+                if (e && outcome != TranslateOutcome.SETTLED &&
+                    outcome != TranslateOutcome.SETTLED_FRESH
+                ) {
+                    earlyFailed += p
+                }
+            }
+        }
         when (outcome) {
             TranslateOutcome.SETTLED -> {
                 synchronized(lock) { settled += p }
-                checkNight()
-                handToNight(p, night)
+                if (wasEarly) {
+                    settleEarly(p)
+                } else {
+                    checkNight()
+                    handToNight(p, night)
+                }
             }
             TranslateOutcome.SETTLED_FRESH -> {
                 synchronized(lock) { settled += p }
@@ -276,6 +332,19 @@ class CombinedLine<P : Any>(
             }
             TranslateOutcome.NOT_RUN -> releaseSlot(p)
         }
+        if (wasEarly) bump()
+    }
+
+    /**
+     * 提早送出的頁翻譯定案了：夜讀段還在做它（或已經有結果）→ 什麼都不做，結果照樣由夜讀段回報。夜讀段回報過期了
+     * （不在夜讀段、也沒完整輸出）而且還開著 → 線位已放，收尾補掃再送。夜讀段關了：放棄 → 落地即完整輸出（同 [handToNight]
+     * 收不了的情況；放棄時這頁還不在 settled，所以沒被一起算進去）；被要求停 → 只放線位（這頁的夜讀下一輪做）。
+     */
+    private fun settleEarly(p: P) {
+        val (stillNight, done) = synchronized(lock) { (p in inNight) to (p in output) }
+        if (stillNight || done) return
+        if (nightOpen) return
+        if (nightAbandoned) settleWithoutNight(p) else releaseSlot(p)
     }
 
     /**
@@ -405,6 +474,8 @@ class CombinedLine<P : Any>(
 
     /** q4 與補掃（翻譯階段結束之後，夜讀段還開著時）。 */
     private suspend fun tail(night: NightStage<P>) {
+        // 提早送夜讀、落地卻失敗的頁還在夜讀段手上（它會被當成過期丟掉）：等它離開，q4 才送得進去
+        if (!awaitEarlyFailedGone()) return
         val manifestNow = runCatching { manifestPages() }.getOrDefault(emptySet())
         val (failedInOrder, unreliableNow) = synchronized(lock) {
             pages.filter { it in failed } to HashSet(unreliable)
@@ -444,6 +515,17 @@ class CombinedLine<P : Any>(
             log("sweep #$sweeps picks=${picks.size} requested=$requested")
             picks.forEach { submitTail(it, night) }
             lastPicked = picks.isNotEmpty()
+        }
+    }
+
+    /** 等提早送夜讀、落地卻失敗的頁都離開夜讀段（[earlyFailed]）。被要求停、夜讀段關了 → false。 */
+    private suspend fun awaitEarlyFailedGone(): Boolean {
+        while (true) {
+            val seen = signal.value
+            if (jobStop() || !nightAlive()) return false
+            val waiting = synchronized(lock) { earlyFailed.count { it in inNight } }
+            if (waiting == 0) return true
+            withTimeoutOrNull(POLL_MS) { signal.first { it != seen } }
         }
     }
 

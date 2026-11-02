@@ -236,6 +236,12 @@ object NightTextBoxes {
     private fun validQuads(quads: List<List<List<Float>>>): List<List<List<Float>>> =
         quads.filter { q -> q.size == 4 && q.all { it.size >= 2 } }
 
+    /**
+     * 合併輪交接給夜讀的文字框（`PageTranslator` 的 handOffEarly，S4）：跟 [pick] 從素材 json 或文字框檔讀到的一樣過濾
+     * （[quads] 是素材會存的那份，各文字區依序攤平）。
+     */
+    fun usableQuads(quads: List<List<List<Float>>>): List<List<List<Float>>> = validQuads(quads)
+
     // —— 清理 ——
 
     /**

@@ -248,6 +248,9 @@ class PageTranslator(private val context: Context) {
      *   原檔沒存成就不 hold（這頁直接顯示譯圖）。落地失敗、或落地期間不再要 hold 時剛寫的記號（與可刪的暫存原圖）收掉。
      *   預設 false＝只翻譯。
      * @param onHoldKept 合併處理：這頁落地完、hold 記號留著（頁名, 記號檔名）。
+     * @param onEncoded 合併處理（軌道 B2 的 S3／S4）：這頁譯圖編碼好、落地之前呼叫一次（只在這頁的落地會存素材時：保留素材或
+     *   只存夜讀素材）。回傳非 null＝已把位元組與素材交給夜讀段，落地完要回報給它（[NightHandoff.land]／[NightHandoff.landFailed]）；
+     *   交接本身歸夜讀那邊（它關）。預設 null＝不交接。
      */
     private class ChapterRun(
         val chapterDir: UniFile,
@@ -261,6 +264,15 @@ class PageTranslator(private val context: Context) {
         val onPageDone: (pageName: String) -> Unit,
         val holdOn: () -> Boolean = { false },
         val onHoldKept: (pageName: String, marker: String) -> Unit = { _, _ -> },
+        val onEncoded: (
+            (
+                name: String,
+                encoded: EncodedPage,
+                analysis: PageAnalysis,
+                width: Int,
+                height: Int,
+            ) -> NightHandoff<Bitmap>?
+        )? = null,
     ) {
         val stateMutex = Mutex()
         var processed = startProcessed
@@ -384,104 +396,143 @@ class PageTranslator(private val context: Context) {
             outcome = when (val r = engineService.translatePage(bmp, run.method)) {
                 is PageResult.Translated -> {
                     val keepThisPage = run.keepMaterials && r.analysis != null
-                    // 落地整段在頁鎖內（只擋同一頁；別頁照樣並發）：存原檔 → 覆蓋頁檔 → 存素材 → 記清單 → 刪記號。
-                    val landed = lock.withLock {
-                        // 引擎跑的這段時間裡，同一頁被 reader「翻譯這頁」落地了（頁檔現在是譯圖、原檔已存）
-                        // → 不再蓋一次：再存原檔會存到譯圖。
-                        if (name in readDonePages(chapterDir)) return@withLock false
-                        // 合併處理：這頁落地要不要 hold（每頁現算：夜讀段關了之後落地的頁直接顯示譯圖）
-                        val hold = run.holdOn()
-                        // 保留素材（或 hold）：原檔位元組要在頁檔被譯圖覆蓋**之前**原樣複製出去（覆蓋後就沒有了）。
-                        // 複製失敗不擋翻譯，[saveMaterials] 會退回舊做法（把解碼後的原圖存成有損 WebP）；
-                        // hold 則不成立。
-                        val saved = if (keepThisPage || hold) {
-                            saveOriginalBytes(chapterDir, img)
-                        } else {
-                            null
-                        }
-                        // 原檔存成了才寫 hold 記號：保留素材的原圖是正式素材（事後不刪），否則是 hold 用的暫存
-                        val holdMarker = if (hold && saved != null) {
-                            writeHoldMarker(chapterDir, name, tempOriginal = !keepThisPage)
-                        } else {
-                            if (hold) TraceLog.log("page", "$name hold skipped: no original")
-                            null
-                        }
-                        try {
-                            writeBackOrRestore(img, r.page, saved) // 各頁寫各自檔、並發
-                            r.page.recycle() // 譯圖已落檔、後面用不到 → 立即回收（跨頁併發下少堆一張 bitmap，降記憶體峰值）
-                            // 成品頁換了 → 舊夜讀版（若有，如先手動產生再翻譯）作廢；翻完由開關開著的夜讀佇列補做。
-                            invalidateNightPage(chapterDir.findFile(MATERIALS_DIR), name)
-                            TraceLog.log("page", "$name translated.done")
-                            // 保留重繪素材（best-effort、不擋翻譯）：遮罩＋文字區；原圖那份上面已原樣複製，
-                            // 沒複製成才用 bmp（剛解碼的原圖；引擎不 mutate 輸入、回新 bitmap）補一份有損 WebP。
-                            val matErr = if (keepThisPage) {
-                                saveMaterials(
-                                    chapterDir,
-                                    name,
-                                    bmp,
-                                    r.analysis!!,
-                                    run.method,
-                                    saved != null,
-                                )
-                            } else if (run.nightOnly && r.analysis != null) {
-                                saveNightMaterials(
-                                    chapterDir,
-                                    img,
-                                    name,
-                                    r.analysis!!,
-                                    bmp.width,
-                                    bmp.height,
-                                )
+                    val nightOnlyThisPage = !keepThisPage && run.nightOnly && r.analysis != null
+                    // 先在記憶體裡編碼（頁檔、素材夾都還沒碰）：編碼失敗＝這頁失敗、什麼都沒寫。譯圖編完就用不到 → 立即回收
+                    // （跨頁併發下少堆一張 bitmap，降記憶體峰值）。
+                    val outW = r.page.width
+                    val outH = r.page.height
+                    val encoded = try {
+                        encodePage(img, r.page)
+                    } finally {
+                        r.page.recycle()
+                    }
+                    // 合併輪（S3／S4）：位元組與素材先交給夜讀段，夜讀跟下面的落地並行；夜讀換檔前等落地回報。
+                    val handoff = if (keepThisPage || nightOnlyThisPage) {
+                        run.onEncoded?.invoke(name, encoded, r.analysis!!, outW, outH)
+                    } else {
+                        null
+                    }
+                    // 落地回報給夜讀（頁鎖內記、鎖外發：發在 onPageDone 之後，閱讀器先知道這頁翻好、才收到夜讀結果）
+                    var landedStamp: Pair<Long, Long>? = null
+                    var materialsExact = false
+                    try {
+                        // 落地整段在頁鎖內（只擋同一頁；別頁照樣並發）：存原檔 → 覆蓋頁檔 → 存素材 → 記清單 → 刪記號。
+                        val landed = lock.withLock {
+                            // 引擎跑的這段時間裡，同一頁被 reader「翻譯這頁」落地了（頁檔現在是譯圖、原檔已存）
+                            // → 不再蓋一次：再存原檔會存到譯圖。
+                            if (name in readDonePages(chapterDir)) return@withLock false
+                            // 合併處理：這頁落地要不要 hold（每頁現算：夜讀段關了之後落地的頁直接顯示譯圖）
+                            val hold = run.holdOn()
+                            // 保留素材（或 hold）：原檔位元組要在頁檔被譯圖覆蓋**之前**原樣複製出去（覆蓋後就沒有了）。
+                            // 複製失敗不擋翻譯，[saveMaterials] 會退回舊做法（把解碼後的原圖存成有損 WebP）；
+                            // hold 則不成立。
+                            val saved = if (keepThisPage || hold) {
+                                saveOriginalBytes(chapterDir, img)
                             } else {
                                 null
                             }
-                            run.stateMutex.withLock {
-                                run.promptTokens += r.stats.promptTokens
-                                run.completionTokens += r.stats.completionTokens
-                                // 素材存失敗（如 SD/SAF 不支援 .yakuyomi 子夾）不再無聲 → 首次失敗寫進該話錯誤檔，供 adb-less 診斷。
-                                if (matErr != null && !run.materialsFailed) {
-                                    run.materialsFailed = true
-                                    run.errors.appendLine("(materials)\t$matErr")
+                            // 原檔存成了才寫 hold 記號：保留素材的原圖是正式素材（事後不刪），否則是 hold 用的暫存
+                            val holdMarker = if (hold && saved != null) {
+                                writeHoldMarker(chapterDir, name, tempOriginal = !keepThisPage)
+                            } else {
+                                if (hold) TraceLog.log("page", "$name hold skipped: no original")
+                                null
+                            }
+                            try {
+                                writeEncodedOrRestore(img, encoded, saved) // 各頁寫各自檔、並發
+                                // 交接給夜讀的頁：記下剛寫好的頁檔 (mtime, size)，夜讀換檔前拿它做過期檢查
+                                if (handoff != null) {
+                                    landedStamp = runCatching { img.lastModified() to img.length() }.getOrNull()
                                 }
-                                run.translated++
+                                // 成品頁換了 → 舊夜讀版（若有，如先手動產生再翻譯）作廢；翻完由開關開著的夜讀佇列補做。
+                                invalidateNightPage(chapterDir.findFile(MATERIALS_DIR), name)
+                                TraceLog.log("page", "$name translated.done")
+                                // 保留重繪素材（best-effort、不擋翻譯）：遮罩＋文字區；原圖那份上面已原樣複製，
+                                // 沒複製成才用 bmp（剛解碼的原圖；引擎不 mutate 輸入、回新 bitmap）補一份有損 WebP。
+                                val matErr = if (keepThisPage) {
+                                    saveMaterials(
+                                        chapterDir,
+                                        name,
+                                        bmp,
+                                        r.analysis!!,
+                                        run.method,
+                                        saved != null,
+                                        onNightMaterials = { materialsExact = it },
+                                    )
+                                } else if (nightOnlyThisPage) {
+                                    saveNightMaterials(
+                                        chapterDir,
+                                        img,
+                                        name,
+                                        r.analysis!!,
+                                        bmp.width,
+                                        bmp.height,
+                                        onNightMaterials = { materialsExact = it },
+                                    )
+                                } else {
+                                    null
+                                }
+                                run.stateMutex.withLock {
+                                    run.promptTokens += r.stats.promptTokens
+                                    run.completionTokens += r.stats.completionTokens
+                                    // 素材存失敗（如 SD/SAF 不支援 .yakuyomi 子夾）不再無聲 → 首次失敗寫進該話錯誤檔，供 adb-less 診斷。
+                                    if (matErr != null && !run.materialsFailed) {
+                                        run.materialsFailed = true
+                                        run.errors.appendLine("(materials)\t$matErr")
+                                    }
+                                    run.translated++
+                                    run.done.add(name)
+                                    run.done.addAll(commitManifest(chapterDir, run.done))
+                                }
+                                // 這頁進了清單 → 進行中記號用不到了（記號只對還沒進清單的頁有意義）。
+                                saved?.marker?.let { m -> runCatching { m.delete() } }
+                                if (holdMarker != null && !run.holdOn()) {
+                                    // 落地這段時間裡不再要 hold（工作被取消、夜讀總開關關、夜讀段放棄）：
+                                    // 佇列那邊清 hold 檔時可能還沒看到這個記號 → 這裡自己收掉（含暫存原圖）
+                                    dropPageHold(chapterDir, name, holdMarker, saved)
+                                } else if (holdMarker != null) {
+                                    run.onHoldKept(name, holdMarker)
+                                } else if (hold && saved != null) {
+                                    // 原圖只是為了 hold 暫存的，記號卻寫不出來：沒有任何流程會再收它 → 現在刪
+                                    // （保留素材的原圖是正式素材，不刪）
+                                    if (!keepThisPage) dropTempOriginal(chapterDir, name)
+                                }
+                                true
+                            } catch (t: Throwable) {
+                                // 落地失敗（頁檔已由 writeBackOrRestore 寫回原檔、或沒進清單）：剛寫的 hold
+                                // 記號收掉，暫存原圖能刪就刪（還在中斷復原要用的就留著，見 [dropPageHold]）。
+                                holdMarker?.let { dropPageHold(chapterDir, name, it, saved) }
+                                throw t
+                            }
+                        }
+                        if (landed) {
+                            // 推「這頁翻好了」事件 → 即時翻 loader 直接重畫該頁（不靠輪詢 manifest／queueState，
+                            // 後者是 conflated StateFlow + 慢的檔案讀 → 某頁常要等後面頁的 emit 才被順便比中、更新延遲）。
+                            run.onPageDone(name)
+                            if (handoff != null) {
+                                val st = landedStamp
+                                if (st !=
+                                    null
+                                ) {
+                                    handoff.land(st.first, st.second, materialsExact)
+                                } else {
+                                    handoff.landFailed()
+                                }
+                            }
+                            PageOutcome.LANDED
+                        } else {
+                            TraceLog.log("page", "$name landed by another path meanwhile, drop ours")
+                            run.stateMutex.withLock {
+                                run.promptTokens += r.stats.promptTokens // 這次的 token 還是花了
+                                run.completionTokens += r.stats.completionTokens
                                 run.done.add(name)
-                                run.done.addAll(commitManifest(chapterDir, run.done))
                             }
-                            // 這頁進了清單 → 進行中記號用不到了（記號只對還沒進清單的頁有意義）。
-                            saved?.marker?.let { m -> runCatching { m.delete() } }
-                            if (holdMarker != null && !run.holdOn()) {
-                                // 落地這段時間裡不再要 hold（工作被取消、夜讀總開關關、夜讀段放棄）：
-                                // 佇列那邊清 hold 檔時可能還沒看到這個記號 → 這裡自己收掉（含暫存原圖）
-                                dropPageHold(chapterDir, name, holdMarker, saved)
-                            } else if (holdMarker != null) {
-                                run.onHoldKept(name, holdMarker)
-                            } else if (hold && saved != null) {
-                                // 原圖只是為了 hold 暫存的，記號卻寫不出來：沒有任何流程會再收它 → 現在刪
-                                // （保留素材的原圖是正式素材，不刪）
-                                if (!keepThisPage) dropTempOriginal(chapterDir, name)
-                            }
-                            true
-                        } catch (t: Throwable) {
-                            // 落地失敗（頁檔已由 writeBackOrRestore 寫回原檔、或沒進清單）：剛寫的 hold
-                            // 記號收掉，暫存原圖能刪就刪（還在中斷復原要用的就留著，見 [dropPageHold]）。
-                            holdMarker?.let { dropPageHold(chapterDir, name, it, saved) }
-                            throw t
+                            PageOutcome.ALREADY_LANDED
                         }
-                    }
-                    if (landed) {
-                        // 推「這頁翻好了」事件 → 即時翻 loader 直接重畫該頁（不靠輪詢 manifest／queueState，
-                        // 後者是 conflated StateFlow + 慢的檔案讀 → 某頁常要等後面頁的 emit 才被順便比中、更新延遲）。
-                        run.onPageDone(name)
-                        PageOutcome.LANDED
-                    } else {
-                        r.page.recycle()
-                        TraceLog.log("page", "$name landed by another path meanwhile, drop ours")
-                        run.stateMutex.withLock {
-                            run.promptTokens += r.stats.promptTokens // 這次的 token 還是花了
-                            run.completionTokens += r.stats.completionTokens
-                            run.done.add(name)
-                        }
-                        PageOutcome.ALREADY_LANDED
+                    } finally {
+                        // 沒走到成功回報（別的路徑先落地、寫回失敗還原、例外、取消）：頁檔不是交出去的那份
+                        // → 夜讀當過期丟掉。已回報成功時這裡不作用（只認第一次回報）。
+                        handoff?.landFailed()
                     }
                 }
                 is PageResult.Skipped -> {
@@ -1136,7 +1187,10 @@ class PageTranslator(private val context: Context) {
 
     /** 夜讀一頁放行前的 heap 預估（只讀檔頭量尺寸，順手記下解碼的降採樣給 worker 用）。 */
     private fun nightEstimate(job: NightJob): Long {
-        val bounds = probeNightBounds(job.img) ?: throw IllegalStateException("頁圖解碼失敗")
+        // 交接的頁：尺寸就是交過來的（頁檔可能還在寫，不讀它），一定不降採樣
+        val bounds = job.handoff?.let { NightBounds(it.width, it.height, 1) }
+            ?: probeNightBounds(job.img)
+            ?: throw IllegalStateException("頁圖解碼失敗")
         job.bounds = bounds
         return NightConcurrency.estBytes(bounds.workPx, inpaintMask = job.hasMask)
     }
@@ -1323,6 +1377,11 @@ class PageTranslator(private val context: Context) {
         // 翻譯階段（與 translateChapter 同一份逐頁本體）。進度由 CombinedLine 報（完整輸出），這裡的計數不報。
         val pendingImages = images.filter { (it.name ?: "") !in done }
         lateinit var line: CombinedLine<String>
+        // S3／S4：這一輪交給夜讀段的譯圖（頁名 → 交接）。夜讀結果確定、過期時關掉並拿掉；夜讀段結束後全部關掉（見下面的 finally）。
+        val handoffs = ConcurrentHashMap<String, NightHandoff<Bitmap>>()
+        // 同一章裡素材檔名（去掉副檔名的 base）撞名的頁（`012.jpg` 與 `012.png` 共用 `012.json`／`012.mask.png`）：素材檔可能是
+        // 另一頁的，夜讀從檔案讀到的跟交接的不一定一樣 → 這種頁不交接，照舊等落地完從檔案讀
+        val sharedBase = names.groupBy { OriginalMaterial.base(it) }.values.filter { it.size > 1 }.flatten().toSet()
         val run = ChapterRun(
             chapterDir = chapterDir,
             method = method,
@@ -1335,6 +1394,13 @@ class PageTranslator(private val context: Context) {
             onPageDone = onPageDone,
             holdOn = { line.holdAllowed && night.nightWanted() },
             onHoldKept = { _, marker -> holds.observe(listOf(marker)) },
+            onEncoded = if (nightStart) {
+                { name, encoded, analysis, w, h ->
+                    handOffEarly(line, handoffs, sharedBase, name, encoded, analysis, w, h)
+                }
+            } else {
+                null
+            },
         )
         val imgByName = HashMap<String, UniFile>()
         images.forEach { f -> f.name?.let { imgByName[it] = f } }
@@ -1383,11 +1449,16 @@ class PageTranslator(private val context: Context) {
                 // 合併輪的編碼交給編碼執行緒（S5）；分開模式（一般夜讀項）照舊在 worker 上編碼
                 encoder = NightWorkers.encodePool,
                 onFinal = { name, result ->
+                    // 交接用完了（結果確定）：先關，之後補掃／q4 再送這頁時從檔案讀
+                    handoffs.remove(name)?.close()
                     val held = holds.release(name)
                     night.onPageFinal(name, result, held)
                     line.nightFinal(name, result)
                 },
-                onStale = { name -> line.nightStale(name) },
+                onStale = { name ->
+                    handoffs.remove(name)?.close()
+                    line.nightStale(name)
+                },
             )
         } else {
             null
@@ -1401,13 +1472,16 @@ class PageTranslator(private val context: Context) {
             object : CombinedLine.NightStage<String> {
                 override fun submit(page: String): Boolean {
                     val img = imgByName[page] ?: return false
-                    val translatedNow = page in landedNow
+                    // 提早送的頁（S3／S4）：交接在這時已經放進 handoffs，夜讀用它、不讀檔
+                    val handoff = handoffs[page]
+                    val translatedNow = handoff != null || page in landedNow
                     val job = NightJob(
                         img,
                         page,
                         hasMask = translatedNow || "${OriginalMaterial.base(page)}$MASK_SUFFIX" in scan.matFiles,
                         // 這一輪才落地的頁：文字框檔是剛寫的，renderNightPage 照名字再找
                         boxes = if (translatedNow) null else scan.matFiles[NightTextBoxes.fileName(page)],
+                        handoff = handoff,
                     )
                     return feed.offer(job)
                 }
@@ -1474,6 +1548,9 @@ class PageTranslator(private val context: Context) {
         val result = try {
             line.run(stage)
         } finally {
+            // 夜讀段已經結束（line.run 等它收完才回）：還留著的交接（送不進去、被要求停時沒做的頁）全部關掉、回收遮罩
+            handoffs.values.forEach { runCatching { it.close() } }
+            handoffs.clear()
             // 夜讀錯誤（翻譯錯誤已在翻譯階段結束時寫好；這裡只換 `(night)` 行）
             when {
                 chapter != null -> writeNightErrors(chapterDir, chapter.errors() + nightErrors.toList())
@@ -1496,14 +1573,73 @@ class PageTranslator(private val context: Context) {
     }
 
     /**
+     * 合併輪（軌道 B2 的 S3／S4）：一頁譯圖編碼好、落地之前（[translatePage] 經 [ChapterRun.onEncoded] 呼叫），把頁檔位元組、
+     * 文字框（素材 json 會存的那份，攤平、濾好）與二值化的去字遮罩（跟素材的遮罩檔同像素）包成 [NightHandoff]、放進 [handoffs]，
+     * 再提早送進夜讀段（[CombinedLine.sendEarly]）。回傳交接＝送出去了（落地完由 [translatePage] 回報給它；關它的是夜讀那邊）。
+     * 不交接（null，這頁照舊等落地完由翻譯結果送、夜讀從檔案讀）：素材檔名撞名的頁（[sharedBase]）、要降採樣的大頁（解碼要帶
+     * inSampleSize，遮罩也得照樣降採樣，見 [nightSample]）、遮罩跟譯圖尺寸不同、夜讀段沒開或收不了、建交接時出錯（只記 log，
+     * 不影響翻譯）。
+     */
+    private fun handOffEarly(
+        line: CombinedLine<String>,
+        handoffs: ConcurrentHashMap<String, NightHandoff<Bitmap>>,
+        sharedBase: Set<String>,
+        name: String,
+        encoded: EncodedPage,
+        analysis: PageAnalysis,
+        width: Int,
+        height: Int,
+    ): NightHandoff<Bitmap>? {
+        if (name in sharedBase || nightSample(width, height) != 1 || !line.isNightOpen) return null
+        if (analysis.mask.width != width || analysis.mask.height != height) return null
+        val handoff = try {
+            val quads = analysis.regions.flatMap { region ->
+                region.lines.map { l -> l.quad.map { p -> listOf(p.x, p.y) } }
+            }
+            // 編碼緩衝的容量常是內容的一倍上下；交接要留到這頁夜讀做完（約 10 s），所以複製成剛好大小（Java heap 是瓶頸）
+            val bytes = if (encoded.buf.size == encoded.length) encoded.buf else encoded.buf.copyOf(encoded.length)
+            NightHandoff(
+                bytes,
+                bytes.size,
+                width,
+                height,
+                NightTextBoxes.usableQuads(quads),
+                binarizeMask(analysis.mask),
+                Bitmap::recycle,
+            )
+        } catch (c: CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            logcat(LogPriority.WARN, t) { "合併輪交接建不起來 $name（這頁照舊等落地完再送夜讀）" }
+            return null
+        }
+        handoffs[name] = handoff
+        if (line.sendEarly(name)) {
+            TraceLog.log("combined", "$name handoff bytes=${encoded.length} quads=${handoff.quads.size}")
+            return handoff
+        }
+        handoffs.remove(name, handoff)
+        handoff.close()
+        return null
+    }
+
+    /**
      * 夜讀一頁的工作項：[bounds] 由 producer 放行前量好（估 heap），worker 解碼沿用同一個 inSampleSize。
      * [hasMask]：開跑時素材夾裡有這頁的去字遮罩檔（`<base>.mask.png`）＝譯後頁，重繪會多帶一份遮罩
      * （[NightConcurrency.estBytes] 的 inpaintMask）。只看檔名、不讀 json：頁已還原成原圖（不傳遮罩）時多估一點，
      * 舊版內嵌 base64 遮罩的頁少估約 1 B/px，都在估算的雜訊內。
      * [boxes]：開跑時素材夾裡這頁的夜讀文字框檔（[NightTextBoxes]，只存夜讀素材的譯後頁才有）；沒看到＝null，
      * [renderNightPage] 在沒有完整素材 json、而且這頁可能是開跑前後才翻好的時候（[NightTextBoxes.mayHaveLateBoxes]）再找一次。
+     * [handoff]：合併輪提早送的頁（S3／S4）——譯圖位元組、文字框與去字遮罩都在記憶體裡交過來，夜讀不讀頁檔與素材檔，換檔前等
+     * 落地回報（[NightHandoff]）。只有 inSampleSize＝1 的頁會交接。交接由合併輪關（結果確定、過期、夜讀段結束），這裡不關。
      */
-    private class NightJob(val img: UniFile, val name: String, val hasMask: Boolean, val boxes: UniFile?) {
+    private class NightJob(
+        val img: UniFile,
+        val name: String,
+        val hasMask: Boolean,
+        val boxes: UniFile?,
+        val handoff: NightHandoff<Bitmap>? = null,
+    ) {
         @Volatile
         var bounds: NightBounds? = null
 
@@ -1782,7 +1918,12 @@ class PageTranslator(private val context: Context) {
      *     這頁的夜讀版照樣能看、但會顯示「可更新」，重試時重做。
      * **本函式不 suspend**：效能探針的 `thr=` 量的是同一條執行緒。
      *
-     * **編碼**（軌道 B2 的 S5）：[NightChapter.encoder] 非 null 時改用 [NightReadRenderer.renderTiersOwning]，每檔交給編碼執行緒
+     * **交接的頁**（合併輪提早送的，[NightJob.handoff]，軌道 B2 的 S3／S4）：頁用交過來的位元組 `decodeByteArray` 解碼（同一組
+     * Options、inSampleSize＝1），文字框與去字遮罩用交過來的，不讀頁檔與素材檔；頁檔這時可能還在寫，開頭不記頁檔快照。換檔前
+     * （彩頁略過也是）等落地回報（[awaitHandoff]）：落地沒成功（頁檔不是這份位元組）→ 刪暫存、算過期，既有的夜讀檔不刪（落地
+     * 沒碰到頁檔）；素材沒照這份寫成 → 刪暫存、算過期（之後補掃從檔案重做）；成功 → 以落地記下的 (mtime, size) 當快照，照常做
+     * 3、5 的過期檢查。等的時候被要求停 → DROPPED。交接頁的遮罩不在這裡回收（借用，歸 [NightHandoff]）。
+     * **編碼**（S5）：[NightChapter.encoder] 非 null 時改用 [NightReadRenderer.renderTiersOwning]，每檔交給編碼執行緒
      * （[NightRound.write] 拿走 Bitmap），[NightRound.commit]／[NightRound.discard] 先等編碼做完；編碼失敗在換檔時才拋（照樣刪暫存、
      * 記錯）。
      */
@@ -1793,17 +1934,28 @@ class PageTranslator(private val context: Context) {
     ): NightPageOutcome {
         val img = job.img
         val name = job.name
+        val handoff = job.handoff
         val owning = chapter.encoder != null
         val round = NightRound(chapter.matDir, name, chapter.webpFmt, chapter.encoder?.let { NightPendingEncodes(it) })
+        // 交接頁的 debug 一次性比對（[NightHandoffCheck]）：搶到名額的頁記下交接那邊的雜湊，做完再從檔案做一次比
+        var handoffCheck: NightHandoffCheck.Record? = null
+        var handoffChecked = false
+        var landWaitMs = -1L
         try {
+            // 交接頁的落地已經確定失敗（寫回失敗還原、別的路徑先落地）：不必做，算過期（q4／補掃之後從檔案做）
+            if (handoff != null && handoff.landingNow() == NightHandoff.Wait.Failed) {
+                return handoffStale(chapter, name, "譯圖沒有落地，夜讀版留待之後重做")
+            }
             val bounds = job.bounds ?: probeNightBounds(img) ?: throw IllegalStateException("頁圖解碼失敗")
-            // 過期競態的前置快照：decode 前記成品頁 (mtime, size)，寫完後再比（見下）。
-            val stamp = img.lastModified() to img.length()
-            TraceLog.log("night", "$name decode.start")
+            // 過期競態的前置快照：decode 前記成品頁 (mtime, size)，寫完後再比（見下）。交接頁換檔前改用落地記下的。
+            val fileStamp = if (handoff == null) img.lastModified() to img.length() else null
+            TraceLog.log("night", "$name decode.start${if (handoff != null) " handoff" else ""}")
             // 逐頁效能探針（見 NightPerfProbe）：分辨 CPU 限速、記憶體回收與讓路。
             val probe = NightPerfProbe.start()
             val tDecode = SystemClock.elapsedRealtime()
-            val page = decodeForNight(img, bounds.sample) ?: throw IllegalStateException("頁圖解碼失敗")
+            val page =
+                (if (handoff != null) decodeHandoff(handoff, bounds.sample) else decodeForNight(img, bounds.sample))
+                    ?: throw IllegalStateException("頁圖解碼失敗")
             val decodeMs = SystemClock.elapsedRealtime() - tDecode
             val stats = NightReadStats()
             var extraCount = 0
@@ -1813,12 +1965,33 @@ class PageTranslator(private val context: Context) {
             var pickSource = NightTextBoxes.Source.NONE
             var translatingAtRead = false
             try {
+                if (handoff != null && NightHandoffCheck.claim()) {
+                    handoffCheck = NightHandoffCheck.Record(
+                        pageHash = NightShareCheck.bitmapHash(page),
+                        quads = handoff.quads,
+                        maskHash = handoffMaskHash(handoff),
+                    )
+                }
                 if (chapter.skipColor && isColorPage(page)) {
                     // 彩頁略過：不產生（reader 顯示原圖）、算作已處理（否則整章永遠「差幾頁」）。下次 resume 會再
                     // 量一次（解碼 + 取樣很便宜），不落任何標記檔。
                     // 這頁走到這裡＝它的夜讀版（若有）已不新鮮、被強制重做、或是舊規則產生的：照目前設定彩頁不該有夜讀版，
                     // 留著它就一直是舊版（章節列永遠「可更新」、一鍵更新也補不掉），所以一起刪掉（同作廢的順序）。
                     TraceLog.log("night", "$name SKIP colour page")
+                    if (handoff != null) {
+                        // 交接頁：判的是交過來的譯圖，落地沒成功的話頁上不是它 → 略過與否留待之後從檔案判
+                        val t0 = SystemClock.elapsedRealtime()
+                        val w = awaitHandoff(handoff, ticket)
+                        landWaitMs = SystemClock.elapsedRealtime() - t0
+                        when (w) {
+                            is NightHandoff.Wait.Landed -> Unit
+                            NightHandoff.Wait.Stopped -> {
+                                TraceLog.log("night", "$name DROPPED waiting for landing ${ticket.describe()}")
+                                return NightPageOutcome.DROPPED
+                            }
+                            else -> return handoffStale(chapter, name, handoffReason(w))
+                        }
+                    }
                     if (NightPages.hasAnyArtifact(chapter.namesAtStart, name)) {
                         deleteNightFiles(chapter.matDir, NightPages.artifactNames(name))
                     }
@@ -1826,58 +1999,71 @@ class PageTranslator(private val context: Context) {
                     chapter.pageFinal(name, NightPageResult.SKIPPED)
                     return NightPageOutcome.DONE
                 }
-                // 譯後頁：翻譯素材的原文行框併進偵測（補短譯文漏抓、拉大泡比值分母；無素材＝空），去字遮罩給「更多」的
-                // 孤島規則（nightread 規則版本 4；沒有素材也沒有遮罩檔／頁已還原成原圖＝null）。素材 json 只讀一次。
-                // 行框先看完整素材 json，沒有才看夜讀文字框檔（只存夜讀素材的頁，[saveNightMaterials]；先後與防過期見
-                // [NightTextBoxes.pick]）。遮罩怎麼帶見 [NightTextBoxes.maskUse]：文字框檔的頁要遮罩檔大小跟檔裡記的一樣；
-                // 文字框檔對不上這張頁（頁檔換過）或讀不出來＝同時寫的遮罩也拿不準，一起不帶。
-                // [translating]：讀素材之前翻譯在不在跑（[TranslationBusy]；記在頁檔快照之後）。在跑＝可能有頁正在落地、素材
-                // 讀完之後才寫好，換檔後要再查一次（[lateNightMaterials]）。
-                val translating = TranslationBusy.active.value > 0
-                val base = OriginalMaterial.base(name)
-                val materials = decodeMaterials(chapter.matDir, base)
-                var boxesFile: UniFile? = null
-                var boxes: NightTextBoxes.Boxes? = null
-                if (materials == null) {
-                    boxesFile = job.boxes
-                        ?: if (NightTextBoxes.mayHaveLateBoxes(translating, stamp.first, chapter.startedAt)) {
-                            findNightBoxes(chapter.matDir, name)
-                        } else {
-                            null
-                        }
-                    boxes = boxesFile?.let { readNightBoxes(it, name) }
-                    if (boxes == null && job.boxes != null) {
-                        // 開章快照的檔案句柄讀不出來（檔被刪掉重寫過，句柄指到舊的）→ 照名字再找一次
-                        boxesFile = findNightBoxes(chapter.matDir, name)
+                val extra: List<TextLine>
+                var inpaint: Bitmap? = null
+                var maskBorrowed = false
+                if (handoff != null) {
+                    // 交接頁：文字框與去字遮罩是記憶體裡那份（跟落地寫進素材的是同一份；沒照寫成的話換檔前當過期）
+                    pickSource = NightTextBoxes.Source.MATERIALS
+                    extraFrom = "HANDOFF"
+                    extra = nightExtraLines(handoff.quads, bounds.sample)
+                    inpaint = handoff.acquireMask()
+                    maskBorrowed = inpaint != null
+                } else {
+                    // 譯後頁：翻譯素材的原文行框併進偵測（補短譯文漏抓、拉大泡比值分母；無素材＝空），去字遮罩給「更多」的
+                    // 孤島規則（nightread 規則版本 4；沒有素材也沒有遮罩檔／頁已還原成原圖＝null）。素材 json 只讀一次。
+                    // 行框先看完整素材 json，沒有才看夜讀文字框檔（只存夜讀素材的頁，[saveNightMaterials]；先後與防過期見
+                    // [NightTextBoxes.pick]）。遮罩怎麼帶見 [NightTextBoxes.maskUse]：文字框檔的頁要遮罩檔大小跟檔裡記的一樣；
+                    // 文字框檔對不上這張頁（頁檔換過）或讀不出來＝同時寫的遮罩也拿不準，一起不帶。
+                    // [translating]：讀素材之前翻譯在不在跑（[TranslationBusy]；記在頁檔快照之後）。在跑＝可能有頁正在落地、
+                    // 素材讀完之後才寫好，換檔後要再查一次（[lateNightMaterials]）。
+                    val snap = checkNotNull(fileStamp)
+                    val translating = TranslationBusy.active.value > 0
+                    val base = OriginalMaterial.base(name)
+                    val materials = decodeMaterials(chapter.matDir, base)
+                    var boxesFile: UniFile? = null
+                    var boxes: NightTextBoxes.Boxes? = null
+                    if (materials == null) {
+                        boxesFile = job.boxes
+                            ?: if (NightTextBoxes.mayHaveLateBoxes(translating, snap.first, chapter.startedAt)) {
+                                findNightBoxes(chapter.matDir, name)
+                            } else {
+                                null
+                            }
                         boxes = boxesFile?.let { readNightBoxes(it, name) }
+                        if (boxes == null && job.boxes != null) {
+                            // 開章快照的檔案句柄讀不出來（檔被刪掉重寫過，句柄指到舊的）→ 照名字再找一次
+                            boxesFile = findNightBoxes(chapter.matDir, name)
+                            boxes = boxesFile?.let { readNightBoxes(it, name) }
+                        }
                     }
-                }
-                // 開章時看到過文字框檔、現在卻找不到也算「有、但拿不準」（遮罩一起不帶），不退回只存遮罩的舊頁那條
-                val boxesPresent = boxesFile != null || job.boxes != null
-                val pick = NightTextBoxes.pick(materials, boxes, boxesPresent, bounds.w, bounds.h, stamp.second)
-                pickSource = pick.source
-                translatingAtRead = translating
-                if (pick.source == NightTextBoxes.Source.STALE_BOXES) {
-                    val line = if (boxes == null) {
-                        "夜讀文字框檔讀不出來，文字框與遮罩都不帶"
-                    } else {
-                        "夜讀文字框檔與頁對不上（${boxes.width}x${boxes.height}/${boxes.pageBytes}B 對 " +
-                            "${bounds.w}x${bounds.h}/${stamp.second}B），文字框與遮罩都不帶"
+                    // 開章時看到過文字框檔、現在卻找不到也算「有、但拿不準」（遮罩一起不帶），不退回只存遮罩的舊頁那條
+                    val boxesPresent = boxesFile != null || job.boxes != null
+                    val pick = NightTextBoxes.pick(materials, boxes, boxesPresent, bounds.w, bounds.h, snap.second)
+                    pickSource = pick.source
+                    translatingAtRead = translating
+                    if (pick.source == NightTextBoxes.Source.STALE_BOXES) {
+                        val line = if (boxes == null) {
+                            "夜讀文字框檔讀不出來，文字框與遮罩都不帶"
+                        } else {
+                            "夜讀文字框檔與頁對不上（${boxes.width}x${boxes.height}/${boxes.pageBytes}B 對 " +
+                                "${bounds.w}x${bounds.h}/${snap.second}B），文字框與遮罩都不帶"
+                        }
+                        TraceLog.log("night", "$name $line")
+                        logcat(LogPriority.WARN) { "夜讀頁 $name $line" }
                     }
-                    TraceLog.log("night", "$name $line")
-                    logcat(LogPriority.WARN) { "夜讀頁 $name $line" }
+                    extraFrom = pick.source.name
+                    extra = nightExtraLines(pick.quads, bounds.sample)
+                    inpaint = nightInpaintMask(
+                        chapter.matDir,
+                        base,
+                        materials,
+                        NightTextBoxes.maskUse(pick, boxes, job.hasMask),
+                        bounds.sample,
+                        page,
+                    )
                 }
-                extraFrom = pick.source.name
-                val extra = nightExtraLines(pick.quads, bounds.sample)
                 extraCount = extra.size
-                val inpaint = nightInpaintMask(
-                    chapter.matDir,
-                    base,
-                    materials,
-                    NightTextBoxes.maskUse(pick, boxes, job.hasMask),
-                    bounds.sample,
-                    page,
-                )
                 inpaint?.let { inpaintDims = "${it.width}x${it.height}" }
                 val nets = ticket.nets
                 val shared = nets.shared
@@ -1888,7 +2074,7 @@ class PageTranslator(private val context: Context) {
                 // 引擎一次分析、產品兩檔（[NightLevel.engineTiers]＝L2、L3）依序交 ARGB_8888（>3.5 MPx 自動縮、輸出縮後
                 // 尺寸）。一般夜讀項（[owning]＝false）：sink 回傳後引擎就 recycle，所以在 sink 裡寫完；合併輪（true，S5）：
                 // sink 把 Bitmap 交給編碼執行緒（[NightRound.write] 拿走所有權）就回傳。page 與 inpaint 所有權不變：inpaint 在
-                // 這次呼叫（與 debug 比對）一結束就 recycle，page 下面自己 recycle。
+                // 這次呼叫（與 debug 比對）一結束就 recycle（交接頁的是借的，還回去），page 下面自己 recycle。
                 // 偵測與人物分割同時跑（S11，ticket.inferenceBranch：多緒組＝governor 的分支執行緒，FREE 組＝null 依序）；
                 // 兩邊的 checkpoint 可能在兩條執行緒上同時問。
                 val rendered = try {
@@ -1965,7 +2151,7 @@ class PageTranslator(private val context: Context) {
                     round.discard()
                     throw t
                 } finally {
-                    inpaint?.recycle()
+                    if (maskBorrowed) handoff?.releaseMask() else inpaint?.recycle()
                     // debug 比對的名額被這頁搶到、卻沒走到比對（放棄、例外、OOM）→ 還回去，之後借來的頁再比
                     if (shareCheck != null && !shareChecked) NightShareCheck.unclaim()
                 }
@@ -1976,6 +2162,31 @@ class PageTranslator(private val context: Context) {
                 }
             } finally {
                 page.recycle()
+            }
+            // 交接頁：換檔前等落地回報（編碼在編碼執行緒上同時跑）。落地成功、素材照這份寫成，才用落地記下的頁檔快照往下走。
+            val stamp = if (handoff == null) {
+                checkNotNull(fileStamp)
+            } else {
+                val t0 = SystemClock.elapsedRealtime()
+                val w = awaitHandoff(handoff, ticket)
+                landWaitMs = SystemClock.elapsedRealtime() - t0
+                when (w) {
+                    is NightHandoff.Wait.Landed -> if (w.landing.materialsExact) {
+                        w.landing.mtime to w.landing.size
+                    } else {
+                        round.discard()
+                        return handoffStale(chapter, name, "素材沒照交接寫成，夜讀版留待之後從檔案重做")
+                    }
+                    NightHandoff.Wait.Stopped -> {
+                        round.discard()
+                        TraceLog.log("night", "$name DROPPED waiting for landing ${ticket.describe()}")
+                        return NightPageOutcome.DROPPED
+                    }
+                    else -> {
+                        round.discard()
+                        return handoffStale(chapter, name, handoffReason(w))
+                    }
+                }
             }
             // 3. 過期競態：產生期間成品頁被覆寫（重翻／重繪／即時翻落地）→ 剛寫的夜讀版是舊畫面，且它的 mtime 晚於覆寫、
             // isFresh 會誤判新鮮；刪掉、記錯、不計 done，留待下次補做（覆寫端的 invalidateNightPage 可能搶在我們落地之前
@@ -2004,6 +2215,7 @@ class PageTranslator(private val context: Context) {
             // 5b. 素材讀完之後才寫好（同章翻譯並行：頁檔在記快照之前已被覆蓋，遮罩／文字框或完整素材 json 卻還沒寫完）→
             // 剛換好的夜讀版少了框（泡會維持灰底黑字），而且它比頁檔新、之後會一直被當成新鮮版。刪掉、留待下次補做。
             // 只在讀素材之前翻譯正在跑、而且當時沒拿到可用的框時才查（[NightTextBoxes.appearedLate]），平常不多列素材夾。
+            // 交接頁不會走到（框是交過來的，素材照它寫成才到這裡）。
             if (translatingAtRead &&
                 lateNightMaterials(chapter.matDir, name, pickSource, bounds.w, bounds.h, stamp.second)
             ) {
@@ -2019,7 +2231,7 @@ class PageTranslator(private val context: Context) {
             val scaled = stats.scaledTo?.let { "${it.first}x${it.second}" } ?: "-"
             val line = "detect=${stats.detectMs}ms mask=${stats.maskMs}ms render=${stats.renderMs}ms " +
                 "decode=${decodeMs}ms encode=${round.encodeMs}ms encWait=${round.encodeWaitMs}ms " +
-                "tiers=[${stats.tierMs.orEmpty()}] " +
+                "landWait=${if (landWaitMs < 0) "-" else "${landWaitMs}ms"} tiers=[${stats.tierMs.orEmpty()}] " +
                 "files=${round.written()} scaledTo=$scaled extraLines=$extraCount($extraFrom) inpaint=$inpaintDims"
             val perf = "${ticket.describe()} ${probe.finish(context)} stages=[${stats.stagesMs.orEmpty()}]"
             logcat { "夜讀 $name $line $perf" }
@@ -2027,6 +2239,11 @@ class PageTranslator(private val context: Context) {
             TraceLog.log("night", "$name perf $perf")
             chapter.pageDone(name, skip = false)
             chapter.pageFinal(name, NightPageResult.DONE)
+            // debug 一次性比對（交接）：這頁已經換好、宣告完成，再從檔案（頁檔、素材檔）照舊路徑做一次比（不寫檔）
+            handoffCheck?.let { rec ->
+                handoffChecked = true
+                verifyHandoff(job, ticket.nets, chapter, rec)
+            }
             return NightPageOutcome.DONE
         } catch (e: NcnnForwardAbortedException) {
             // 推論前／等鎖時放棄（暫停／取消，或讓路時不是最早那頁）：同重繪前放棄，丟回待做（page 已由 finally recycle；
@@ -2046,11 +2263,135 @@ class PageTranslator(private val context: Context) {
             round.discard()
             TraceLog.log("night", "$name EXCEPTION ${t.javaClass.simpleName}: ${t.message}")
             logcat(LogPriority.ERROR, t) { "夜讀頁例外（已隔離、續其他頁）$name" }
+            // 交接頁的落地沒成功（頁上不是交過來的譯圖）：這頁的結果不算數，當過期（翻譯失敗的頁之後由 q4 從原圖做）
+            if (handoff != null && awaitHandoff(handoff, ticket) !is NightHandoff.Wait.Landed) {
+                return handoffStale(chapter, name, "譯圖沒有落地，夜讀版留待之後重做")
+            }
             chapter.error("$name\t例外 ${t.javaClass.simpleName}: ${t.message}")
             chapter.pageFinal(name, NightPageResult.FAILED)
             return NightPageOutcome.DONE
+        } finally {
+            // 交接比對的名額被這頁搶到、卻沒走到比對（過期、放棄、例外、彩頁）→ 還回去，之後交接的頁再比
+            if (handoffCheck != null && !handoffChecked) NightHandoffCheck.unclaim()
         }
     }
+
+    /**
+     * 等交接頁的落地回報（[NightHandoff.awaitLanding]）：每 200 ms 看一次這頁要不要放棄（[NightTicket.keep]：暫停／取消）。
+     * 落地只是幾次寫檔，正常在重繪做完之前就回報了。
+     */
+    private fun awaitHandoff(handoff: NightHandoff<Bitmap>, ticket: NightTicket<NightNets>): NightHandoff.Wait =
+        handoff.awaitLanding(stop = { !ticket.keep() })
+
+    private fun handoffReason(w: NightHandoff.Wait): String =
+        if (w == NightHandoff.Wait.TimedOut) "等譯圖落地逾時，夜讀版留待之後重做" else "譯圖沒有落地，夜讀版留待之後重做"
+
+    /**
+     * 交接頁的結果不能用（落地沒成功、素材沒照交接寫成、等落地逾時）：記錯（[reason]）、不計 done、結果不算確定，跟過期一樣
+     * 留給合併輪收尾（翻譯成功的頁補掃從檔案重做；翻譯失敗的頁 q4 從原圖做）。這一輪的暫存呼叫端已刪；既有的夜讀檔不刪
+     * （落地沒成功時頁檔沒換，舊的夜讀版還是對的；成功時落地已經作廢過）。
+     */
+    private fun handoffStale(chapter: NightChapter, name: String, reason: String): NightPageOutcome {
+        TraceLog.log("night", "$name STALE handoff: $reason")
+        logcat(LogPriority.WARN) { "夜讀頁 $name 丟棄：$reason" }
+        chapter.error("$name\t$reason")
+        chapter.stale(name)
+        return NightPageOutcome.DONE
+    }
+
+    /** 交接頁的解碼：交過來的位元組、跟讀檔同一組 Options（[decodeForNight]）。交接已經關了 → null。OOM 照拋。 */
+    private fun decodeHandoff(handoff: NightHandoff<Bitmap>, sample: Int): Bitmap? {
+        val bytes = handoff.bytes ?: return null
+        val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+        return BitmapFactory.decodeByteArray(bytes, 0, handoff.length, opts)
+    }
+
+    /** 交接的去字遮罩的像素雜湊（debug 比對用；沒有遮罩＝`none`）。 */
+    private fun handoffMaskHash(handoff: NightHandoff<Bitmap>): String {
+        val m = handoff.acquireMask() ?: return "none"
+        return try {
+            NightShareCheck.bitmapHash(m)
+        } finally {
+            handoff.releaseMask()
+        }
+    }
+
+    /**
+     * debug 一次性比對（交接，軌道 B2）：[rec] 是這頁用交接做的（交過來的位元組解碼的頁、交過來的文字框與遮罩）；這裡照以前
+     * 的路徑從檔案再做一次——讀頁檔解碼、從素材檔挑文字框與遮罩（[NightTextBoxes.pick]／[nightInpaintMask]）、同一組模型重繪、
+     * 在這條執行緒上把兩檔照樣壓成無損 WebP——比頁的像素、文字框、遮罩，以及兩檔的位元組跟剛換好的夜讀檔（編碼執行緒寫的）。
+     * 紀錄 `verify2=same|diff`（只有雜湊與計數）。任何例外只記 `verify2=error`，不影響這頁。多花一次偵測＋分割＋重繪（手機約
+     * 10–15 s），只在 debug 建置、每個行程一次；頁已經宣告完成之後才做（不延後這頁顯示）。
+     */
+    private fun verifyHandoff(job: NightJob, nets: NightNets, chapter: NightChapter, rec: NightHandoffCheck.Record) {
+        val name = job.name
+        try {
+            val t0 = SystemClock.elapsedRealtime()
+            val page = decodeForNight(job.img, 1) ?: throw IllegalStateException("頁圖解碼失敗")
+            val fileSide = try {
+                val pageHash = NightShareCheck.bitmapHash(page)
+                val base = OriginalMaterial.base(name)
+                val materials = decodeMaterials(chapter.matDir, base)
+                val boxesFile = if (materials == null) findNightBoxes(chapter.matDir, name) else null
+                val boxes = boxesFile?.let { readNightBoxes(it, name) }
+                val pageBytes = job.img.length()
+                val pick = NightTextBoxes.pick(materials, boxes, boxesFile != null, page.width, page.height, pageBytes)
+                val mask = nightInpaintMask(
+                    chapter.matDir,
+                    base,
+                    materials,
+                    NightTextBoxes.maskUse(pick, boxes, job.hasMask),
+                    1,
+                    page,
+                )
+                try {
+                    val tiers = LinkedHashMap<String, String>()
+                    NightReadRenderer.renderTiers(
+                        page,
+                        detect = nets.detect,
+                        segment = { b -> nets.segmenter.segment(b) },
+                        base = chapter.base,
+                        extraLines = nightExtraLines(pick.quads, 1),
+                        inpaintMask = mask,
+                        tiers = NightLevel.engineTiers,
+                        inferenceBranch = null,
+                    ) { tier, bmp ->
+                        val key = NightLevel.ofTier(tier)?.fileKey ?: tier.key
+                        tiers[key] =
+                            bmp?.let { NightHandoffCheck.bytesHash(encodeNight(it, chapter.webpFmt)) } ?: "none"
+                    }
+                    NightHandoffCheck.FileSide(
+                        pageHash = pageHash,
+                        quadsSame = pick.quads == rec.quads,
+                        quadsFrom = pick.source.name,
+                        maskHash = mask?.let { NightShareCheck.bitmapHash(it) } ?: "none",
+                        tiers = tiers,
+                    )
+                } finally {
+                    mask?.recycle()
+                }
+            } finally {
+                page.recycle()
+            }
+            val written = NightLevel.entries.associate { level ->
+                val f = runCatching { chapter.matDir.findFile(NightPages.levelName(name, level)) }.getOrNull()
+                level.fileKey to (f?.let { readAll(it) }?.let { NightHandoffCheck.bytesHash(it) } ?: "none")
+            }
+            val verdict = NightHandoffCheck.verdict(rec, fileSide, written)
+            TraceLog.log(
+                "combined",
+                "$name verify2=${if (verdict.same) "same" else "diff"} took=${SystemClock.elapsedRealtime() - t0}ms " +
+                    verdict.summary,
+            )
+            if (!verdict.same) logcat(LogPriority.WARN) { "夜讀交接比對不同 $name" }
+        } catch (t: Throwable) {
+            TraceLog.log("combined", "$name verify2=error ${t.javaClass.simpleName}: ${t.message}")
+        }
+    }
+
+    /** 讀整個檔（debug 比對用；讀不到＝null）。 */
+    private fun readAll(f: UniFile): ByteArray? =
+        runCatching { context.contentResolver.openInputStream(f.uri)?.use { it.readBytes() } }.getOrNull()
 
     /**
      * debug 一次性比對（S1）：[shared] 是這頁用借來的偵測器做出來的偵測與兩檔；這裡用自己建的偵測器（同一個 `.param`、
@@ -2181,8 +2522,9 @@ class PageTranslator(private val context: Context) {
      * 失敗時 [discard] 刪掉這一輪的暫存（與換檔途中已改名的 more），不留半套。
      *
      * [encodes] 非 null（合併輪，軌道 B2 的 S5）：[write] 把「壓成無損 WebP」交給編碼執行緒就回傳，而且**拿走 Bitmap 的所有權**
-     * （壓完或交不出去都由這裡回收）；壓好的位元組先留在記憶體（每檔約 1 MB），[commit] 等編碼都做完、才寫暫存再換檔（寫檔
-     * 很快，重的是壓縮；暫存在換檔前才寫，完成標記 std 的修改時間就一定晚於呼叫端做完過期檢查的那一刻）。編碼失敗在 [commit]
+     * （壓完或交不出去都由這裡回收）；壓好的位元組先留在記憶體（每檔約 1 MB），[commit] 等編碼都做完、才寫暫存再換檔。暫存
+     * 留到換檔才寫是為了交接頁（S3）：夜讀可能比落地先做完，暫存若在頁檔寫好之前就寫了，換檔後完成標記（std）的修改時間會
+     * 早於頁檔，被當成不新鮮（[NightPages.isFresh]）；[commit] 在落地回報之後才被呼叫，所以一定晚於頁檔。編碼失敗在 [commit]
      * 拋出第一個（跟在這條執行緒上寫時拋的一樣）。[discard] 也先等編碼做完。
      * null（一般夜讀項，分開模式不變）：在呼叫執行緒上依序壓好、寫暫存才回傳，Bitmap 不歸這裡（引擎交完就回收）。
      */
@@ -2312,11 +2654,17 @@ class PageTranslator(private val context: Context) {
         val w = bounds.outWidth
         val h = bounds.outHeight
         if (w <= 0 || h <= 0) return null
+        val sample = nightSample(w, h)
+        if (sample > 1) TraceLog.log("night", "${img.name} ${w}x$h > 2xMAX_PIXELS -> inSampleSize=$sample")
+        return NightBounds(w, h, sample)
+    }
+
+    /** [probeNightBounds] 的降採樣規則：2 的冪、取最小能把解碼後像素數壓到 ≤ 2×[NightReadRenderer.MAX_PIXELS] 的值。 */
+    private fun nightSample(w: Int, h: Int): Int {
         val budget = 2L * NightReadRenderer.MAX_PIXELS
         var sample = 1
         while (((w + sample - 1L) / sample) * ((h + sample - 1L) / sample) > budget) sample *= 2
-        if (sample > 1) TraceLog.log("night", "${img.name} ${w}x$h > 2xMAX_PIXELS -> inSampleSize=$sample")
-        return NightBounds(w, h, sample)
+        return sample
     }
 
     /** 以 [probeNightBounds] 定好的 [sample] 解碼。開不了串流／解不出 → null；OOM 照拋（呼叫端單獨 catch）。 */
@@ -2501,7 +2849,7 @@ class PageTranslator(private val context: Context) {
     }
 
     /**
-     * 跟 [writeNightAtomic] 同樣的格式與品質把夜讀檔壓進記憶體（合併輪的編碼執行緒用）。壓不出來（含記憶體不足：
+     * 跟 [writeNightAtomic] 同樣的格式與品質把夜讀檔壓進記憶體（合併輪的編碼執行緒、debug 比對用）。壓不出來（含記憶體不足：
      * 同 [compressToFile] 收成失敗）→ 拋 [IllegalStateException]（訊息同 [writeNightAtomic] 寫檔失敗）。
      */
     private fun encodeNight(bmp: Bitmap, format: Bitmap.CompressFormat): ByteArray {
@@ -2846,6 +3194,22 @@ class PageTranslator(private val context: Context) {
      * PNG：不透明的圖先標成沒有 alpha，寫成 RGB 而不是 RGBA（引擎輸出的 bitmap 都帶 alpha 通道，檔案會白白大一截）。
      */
     private fun writeBack(file: UniFile, bmp: Bitmap) {
+        writeEncoded(file, encodePage(file, bmp))
+    }
+
+    /** 頁檔編碼好的內容：[buf] 的前 [length] 個位元組（[encodePage]；直接用編碼緩衝，寫頁檔時不再整份複製）。 */
+    private class EncodedPage(val buf: ByteArray, val length: Int)
+
+    /** 編碼用的位元組緩衝：直接拿內部陣列（[EncodedPage]），省一次整份複製。 */
+    private class PageBytes : java.io.ByteArrayOutputStream(1 shl 20) {
+        fun encoded() = EncodedPage(buf, count)
+    }
+
+    /**
+     * [writeBack] 的第一步：把 [bmp] 照頁檔 [file] 的格式（[WriteBackFormat]）編碼進記憶體。頁檔一個位元組都不碰；編碼失敗
+     * （記憶體不足、編碼器初始化失敗、尺寸超過格式上限）拋一般 IOException。
+     */
+    private fun encodePage(file: UniFile, bmp: Bitmap): EncodedPage {
         val format = WriteBackFormat.forFileName(file.name)
         // 編碼器遇到超過格式上限的尺寸會直接失敗：先擋（反正下面也是先編碼才開頁檔，這裡只是讓原因清楚）。
         if (!format.fits(bmp.width, bmp.height)) {
@@ -2864,17 +3228,25 @@ class PageTranslator(private val context: Context) {
         if (format == WriteBackFormat.PNG && bmp.hasAlpha() && runCatching { isOpaque(bmp) }.getOrDefault(false)) {
             bmp.setHasAlpha(false)
         }
-        val encoded = java.io.ByteArrayOutputStream(1 shl 20)
+        val encoded = PageBytes()
         // 編碼失敗（記憶體不足等）：頁檔還沒碰，原封不動
         if (!bmp.compress(fmt, WriteBackFormat.QUALITY, encoded)) {
             throw java.io.IOException("頁檔編碼失敗 ${file.name}")
         }
+        return encoded.encoded()
+    }
+
+    /**
+     * [writeBack] 的第二步：把 [encodePage] 編好的內容寫進頁檔 [file]（截斷寫，見 [writeBack]）。開了頁檔之後才失敗拋
+     * [PageWriteInterrupted]。
+     */
+    private fun writeEncoded(file: UniFile, encoded: EncodedPage) {
         val os = runCatching { openTruncating(file) }
             .onFailure { logcat(LogPriority.WARN, it) { "頁檔截斷寫開不了，退回一般寫入 ${file.name}" } }
             .getOrNull()
             ?: file.openOutputStream()
         try {
-            os.use { encoded.writeTo(it) }
+            os.use { it.write(encoded.buf, 0, encoded.length) }
         } catch (t: Throwable) {
             throw PageWriteInterrupted("頁檔寫到一半失敗 ${file.name}", t)
         }
@@ -2899,8 +3271,17 @@ class PageTranslator(private val context: Context) {
      * 沒有 [saved]（沒開保留素材，或原檔複製失敗）就只能原樣拋出，跟以前一樣。
      */
     private fun writeBackOrRestore(page: UniFile, bmp: Bitmap, saved: SavedOriginal?) {
+        restoreOnFailure(page, saved) { writeBack(page, bmp) }
+    }
+
+    /** 同 [writeBackOrRestore]，寫的是已經編碼好的內容（[translatePage]：先編碼、交給夜讀，再落地）。 */
+    private fun writeEncodedOrRestore(page: UniFile, encoded: EncodedPage, saved: SavedOriginal?) {
+        restoreOnFailure(page, saved) { writeEncoded(page, encoded) }
+    }
+
+    private inline fun restoreOnFailure(page: UniFile, saved: SavedOriginal?, write: () -> Unit) {
         try {
-            writeBack(page, bmp)
+            write()
         } catch (t: Throwable) {
             if (saved != null && restoreOriginalBytes(saved.file, page)) {
                 TraceLog.log("page", "${page.name} writeBack failed, original restored")
@@ -3299,6 +3680,9 @@ class PageTranslator(private val context: Context) {
      * - `$base.json`＝[PageMaterials]（去字法 + 各文字區四邊形/角度/onArt/原文/譯文/bbox）。
      *
      * 子夾放在 chapterDir 底下：reader 列頁只看頂層圖檔副檔名 → 自動忽略；也不動既有頂層 `.yakuyomi_translated` manifest。
+     *
+     * [onNightMaterials]：寫完回報夜讀要的兩份（json 的文字區、遮罩檔）是不是都照這次的 [analysis] 寫成了（合併輪的交接用：
+     * 夜讀拿的是記憶體裡同一份，寫成了才跟從檔案讀一樣，見 [NightHandoff]）。例外時不叫（呼叫端預設 false）。
      */
     private fun saveMaterials(
         chapterDir: UniFile,
@@ -3307,6 +3691,7 @@ class PageTranslator(private val context: Context) {
         analysis: PageAnalysis,
         method: String,
         originalSaved: Boolean,
+        onNightMaterials: (Boolean) -> Unit = {},
     ): String? {
         return runCatching {
             val base = OriginalMaterial.base(pageName)
@@ -3328,8 +3713,11 @@ class PageTranslator(private val context: Context) {
             }
             // 遮罩 → 獨立無損 PNG 檔（不再 base64 內嵌 json）：換去字法重繪只重寫小 json、遮罩檔不動；省 ~33% 膨脹、讀取走 native stream 不灌 heap。
             val bin = binarizeMask(analysis.mask)
-            compressToFile(dir, "$base$MASK_SUFFIX", bin, Bitmap.CompressFormat.PNG, 100)
-            bin.recycle()
+            val maskOk = try {
+                compressToFile(dir, "$base$MASK_SUFFIX", bin, Bitmap.CompressFormat.PNG, 100)
+            } finally {
+                bin.recycle()
+            }
             // 文字區 → RegionMaterial（四邊形逐行、角度、onArt、原文、譯文、bbox）。
             val regions = analysis.regions.map { region ->
                 RegionMaterial(
@@ -3355,6 +3743,7 @@ class PageTranslator(private val context: Context) {
                 runCatching { dir.findFile(NightTextBoxes.fileName(pageName))?.delete() }
                     .onFailure { logcat(LogPriority.WARN, it) { "刪舊夜讀文字框檔失敗 $pageName（夜讀先看完整素材，無害）" } }
             }
+            onNightMaterials(jsonOk && maskOk)
         }.fold(
             onSuccess = { null },
             onFailure = { e ->
@@ -3380,6 +3769,8 @@ class PageTranslator(private val context: Context) {
      *    冒充這張頁）；遮罩照寫（這頁沒有文字框時跟這個改動之前只存遮罩的頁一樣用）。
      * 不寫完整 json、不存原圖：重繪／還原／升級的工作清單都看完整 json（[NightTextBoxes.materialsJsonName]），這種頁不會被
      * 當成有素材。best-effort，回錯誤訊息（null＝成功），不擋翻譯。呼叫時頁檔已是譯圖（覆蓋之後）、握著頁鎖。
+     * [onNightMaterials]：遮罩與文字框都照這次的 [analysis] 寫成 → true（合併輪的交接用，見 [saveMaterials]）；因為已有完整素材
+     * json 而不寫、讀不到頁檔大小、任一份沒寫成 → false。例外時不叫（呼叫端預設 false）。
      */
     private fun saveNightMaterials(
         chapterDir: UniFile,
@@ -3388,6 +3779,7 @@ class PageTranslator(private val context: Context) {
         analysis: PageAnalysis,
         pageWidth: Int,
         pageHeight: Int,
+        onNightMaterials: (Boolean) -> Unit = {},
     ): String? {
         return runCatching {
             val dir = materialsDir(chapterDir)
@@ -3423,6 +3815,7 @@ class PageTranslator(private val context: Context) {
                 boxesName,
                 NightTextBoxes.encode(pageWidth, pageHeight, pageBytes, maskBytes, quads).toByteArray(),
             )
+            onNightMaterials(maskOk && boxesOk)
             when {
                 !maskOk && !boxesOk -> "夜讀遮罩與文字框都寫檔失敗（不影響翻譯）"
                 !boxesOk -> "夜讀文字框寫檔失敗（不影響翻譯）"
@@ -3460,16 +3853,23 @@ class PageTranslator(private val context: Context) {
         true
     }.getOrDefault(false)
 
-    /** 二值化 seg 遮罩（>127 白 / 否則黑）→ 新 ARGB Bitmap（呼叫端負責 recycle）。getPixels/setPixels 批次，不逐像素。 */
+    /**
+     * 二值化 seg 遮罩（>127 白 / 否則黑）→ 新 ARGB Bitmap（呼叫端負責 recycle）。一列一列 getPixels/setPixels（不逐像素、也不配
+     * 整張的 int 陣列：合併輪每頁多二值化一次給夜讀，見 [NightHandoff]，不想每次多吃一張頁大小的 Java heap）。
+     */
     private fun binarizeMask(mask: Bitmap): Bitmap {
         val w = mask.width
         val h = mask.height
-        val px = IntArray(w * h)
-        mask.getPixels(px, 0, w, 0, 0, w, h)
-        for (i in px.indices) {
-            px[i] = if ((px[i] and 0xFF) > 127) Color.WHITE else Color.BLACK
+        val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val row = IntArray(w)
+        for (y in 0 until h) {
+            mask.getPixels(row, 0, w, 0, y, w, 1)
+            for (i in row.indices) {
+                row[i] = if ((row[i] and 0xFF) > 127) Color.WHITE else Color.BLACK
+            }
+            out.setPixels(row, 0, w, 0, y, w, 1)
         }
-        return Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).apply { setPixels(px, 0, w, 0, 0, w, h) }
+        return out
     }
 
     /** [enterPendingPage] 的結果。 */
