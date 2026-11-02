@@ -23,6 +23,26 @@ enum class NightPageOutcome {
 }
 
 /**
+ * 外部頁來源（合併處理：翻譯落地一頁就送一頁，頁在章開跑之後才陸續可做，見 [ChannelNightFeed]）。[NightPump.run] 帶它時：
+ *  - 主迴圈每一圈先 [poll]（不等待）把新可做的頁依 [order] 排進待做佇列；
+ *  - 待做佇列空、沒有在飛頁、OOM 補跑也做完時改呼叫 [awaitMore] 等新頁，**期間模型組不關**；回 null 才收尾。
+ * 沒帶（null）時行為與以前完全相同。
+ */
+interface NightFeed<P> {
+    /** 頁在章內的順序（初始頁與新頁都用它排序；同一頁要固定）。 */
+    fun order(page: P): Int
+
+    /** 不等待：新可做的頁；沒有＝空。 */
+    fun poll(): List<P>
+
+    /**
+     * 佇列空、沒有在飛、OOM 補跑也做完時呼叫：回新頁（非空），或來源關閉且收尾也沒頁／[shouldStop] 成立時回 null。
+     * 期間模型組不關。
+     */
+    suspend fun awaitMore(shouldStop: () -> Boolean): List<P>?
+}
+
+/**
  * 一頁放行當下拿到的東西。頁內不可變：模型組只在沒有在飛頁時換，所以一頁從頭到尾用同一組。
  * ceiling 不在這裡包：模型組帶 [NightGovernor.forwardHook]，引擎在取全域鎖之前對這條執行緒套、放鎖之後才還原
  * （見 [NightGovernor.lockedForward]）。
@@ -75,6 +95,8 @@ class NightTicket<N> internal constructor(
  *  - **例外隔離**：`estimate` 或頁本身漏出的例外交給 `onError`，不取消其他頁。
  *  - **收尾**：先看在飛、再取佇列——在飛＝0 表示所有頁的本體都結束了（丟回待做發生在歸還名額之前），之後佇列不會再變多，
  *    不會把剛丟回的頁漏掉。
+ *  - **外部頁來源**（帶 [NightFeed]，合併處理）：每圈先收新頁；佇列空、沒有在飛、OOM 補跑也做完時不收工，改等
+ *    [NightFeed.awaitMore]（模型組保持開著），它回 null 才收尾。不帶時與以前逐位元相同。
  *
  * 開模型、關模型、每頁都在 worker 上跑、登記進 governor（套當下模式的 nice），並綁一段 [NightGovernor.Work]
  * （引擎掛鉤靠它找這條執行緒的 slot 與中止條件）。開組（含暖機）的中止條件＝暫停／取消，或開的是 LOCKED 組、還能換組、
@@ -113,6 +135,8 @@ class NightPump<P : Any, N : AutoCloseable>(
      *   → 往外拋。
      * @param estimate 一頁在飛的 heap 預估（bytes）；在 producer 上跑，拋例外 → `onError`、跳過該頁。
      * @param page 做一頁；在 worker 上跑。一般錯誤自己記好回 DONE；不要在裡面 suspend（效能探針量的是同一條執行緒）。
+     * @param feed 外部頁來源（見 [NightFeed]）；null＝只做 [pages]、做完收工（以前的行為）。帶了它時 [pages] 也依
+     *   [NightFeed.order] 排序，[pages] 空也照樣開組、等新頁。
      */
     suspend fun run(
         pages: List<P>,
@@ -122,10 +146,17 @@ class NightPump<P : Any, N : AutoCloseable>(
         onError: (P, Throwable) -> Unit,
         onOomFinal: (P) -> Unit,
         shouldStop: () -> Boolean,
+        feed: NightFeed<P>? = null,
     ) {
-        // 待做佇列依原頁序（丟回待做／補跑的頁插回原位）；worker 也會寫，所以用它自己當鎖。
+        // 待做佇列依原頁序（丟回待做／補跑的頁插回原位）；worker 也會寫，所以用它自己當鎖。有外部頁來源時序＝[NightFeed.order]。
         val queue = PriorityQueue<IndexedValue<P>>(compareBy { it.index })
-        pages.forEachIndexed { i, p -> queue += IndexedValue(i, p) }
+        pages.forEachIndexed { i, p -> queue += IndexedValue(feed?.order(p) ?: i, p) }
+
+        // 外部頁來源：把新到的頁依章內順序排進待做佇列
+        fun enqueueFed(fed: List<P>) {
+            if (feed == null || fed.isEmpty()) return
+            synchronized(queue) { fed.forEach { p -> queue += IndexedValue(feed.order(p), p) } }
+        }
         val oomPages = ArrayList<IndexedValue<P>>() // 在 queue 的鎖下：等主迴圈後補跑的頁
         val oomOnce = HashSet<Int>() // 在 queue 的鎖下：OOM 過一次的頁（再 OOM 就是最終失敗）
         fun hasWork() = synchronized(queue) { queue.isNotEmpty() || oomPages.isNotEmpty() }
@@ -171,9 +202,12 @@ class NightPump<P : Any, N : AutoCloseable>(
                 kind = other
             }
             gate.nets = kind
+            governor.onNetsChanged(kind)
             governor.log("nets open ${kind.tag} ${governor.capacityInfo()} pages=${pages.size}")
             coroutineScope {
                 while (!shouldStop()) {
+                    // 外部頁來源：先收新到的頁（不等待），換組判斷與取頁都看得到它們
+                    if (feed != null) enqueueFed(feed.poll())
                     // 換模型組：只在頁邊界、還有頁要做、而且等在飛頁數歸零才換
                     if (swapEnabled && governor.wantedNets(kind) != kind && hasWork()) {
                         gate.awaitIdle(shouldStop)
@@ -207,6 +241,7 @@ class NightPump<P : Any, N : AutoCloseable>(
                         }
                         kind = k
                         gate.nets = k
+                        governor.onNetsChanged(k)
                         if (k == want) {
                             governor.log("nets swap ${old.tag}→${k.tag} took=${governor.now() - t0}ms")
                         } else {
@@ -236,8 +271,15 @@ class NightPump<P : Any, N : AutoCloseable>(
                                     oomPages.clear()
                                 }
                             }
-                        } ?: break
-                        governor.log("oomRetry ${retry.map { it.value }}")
+                        }
+                        if (retry != null) {
+                            governor.log("oomRetry ${retry.map { it.value }}")
+                            continue
+                        }
+                        // 外部頁來源：等新頁（模型組不關）；來源關閉且沒頁、或被中止 → 收工
+                        if (feed == null) break
+                        val more = feed.awaitMore(shouldStop) ?: break
+                        enqueueFed(more)
                         continue
                     }
 
@@ -306,6 +348,7 @@ class NightPump<P : Any, N : AutoCloseable>(
             }
         } finally {
             nets?.let { n -> withContext(NonCancellable) { onWorker { n.close() } } }
+            governor.onNetsChanged(null)
             if (!gate.idle()) governor.log("LEAK running=${gate.running}")
         }
     }

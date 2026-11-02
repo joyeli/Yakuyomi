@@ -11,6 +11,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.Runnable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -27,8 +28,16 @@ import kotlin.coroutines.CoroutineContext
 
 class NightGovernorTest {
 
-    /** 注入時鐘、優先權設定、tid、heap 的 governor（全在測試排程器上跑）。 */
-    private class Env(scope: TestScope) {
+    /**
+     * 注入時鐘、優先權設定、tid、heap 的 governor（全在測試排程器上跑）。[busyFlow]＝自訂忙碌訊號（null＝用 [busy]）；
+     * [extraReserve]／[preferFree] 同 governor 的建構參數（合併處理的記憶體防護）。
+     */
+    private class Env(
+        scope: TestScope,
+        busyFlow: Flow<Boolean>? = null,
+        extraReserve: () -> Long = { 0L },
+        preferFree: () -> Boolean = { false },
+    ) {
         val busy = MutableStateFlow(false)
         var free = 1024 * MB
         var cap = 2
@@ -38,7 +47,7 @@ class NightGovernorTest {
         var onGc: () -> Unit = {}
         val governor = NightGovernor(
             scope = scope.backgroundScope,
-            busy = busy,
+            busy = busyFlow ?: busy,
             pagesCap = { cap },
             heapFree = { free },
             maxMemory = 512 * MB,
@@ -51,6 +60,8 @@ class NightGovernorTest {
                 gcs++
                 onGc()
             },
+            extraReserve = extraReserve,
+            preferFree = preferFree,
         )
 
         fun enter(tid: Int): NightGovernor.Slot {
@@ -894,6 +905,89 @@ class NightGovernorTest {
         val next = env.governor.openChapter()
         next.admit(10 * MB) { false } shouldNotBe null
         next.admit(10 * MB) { false } shouldNotBe null
+    }
+
+    @Test
+    fun `governor whose busy is always false stays exclusive and admits two pages`() = runTest {
+        // 合併處理專用的那份：忙碌訊號永遠 false＝永遠 EXCLUSIVE（自己的夜讀段從不讓路）
+        val env = Env(this, busyFlow = MutableStateFlow(false))
+        runCurrent()
+        advanceTimeBy(NightGovernor.EXCLUSIVE_HOLD_MS * 3)
+        runCurrent()
+        env.governor.mode.value shouldBe NightGovernor.Mode.EXCLUSIVE
+        val gate = env.governor.openChapter()
+        val a1 = gate.admit(10 * MB) { false }
+        val a2 = gate.admit(10 * MB) { false }
+        a1 shouldNotBe null
+        a2 shouldNotBe null
+        gate.running shouldBe 2
+        env.governor.wantedNets(NetKind.LOCKED) shouldBe NetKind.LOCKED
+        gate.release(a1!!)
+        gate.release(a2!!)
+    }
+
+    @Test
+    fun `without prefer free wanted nets stays locked while exclusive`() = runTest {
+        val env = Env(this, preferFree = { false })
+        runCurrent()
+        env.governor.mode.value shouldBe NightGovernor.Mode.EXCLUSIVE
+        env.governor.wantedNets(NetKind.LOCKED) shouldBe NetKind.LOCKED
+        env.governor.wantedNets(NetKind.FREE) shouldBe NetKind.LOCKED
+    }
+
+    @Test
+    fun `extra reserve blocks a second page that would otherwise fit`() = runTest {
+        // 用量 212 MB：沒有保留時第二頁剛好放得下（512 − (212 + 100) = 200 ≥ 100 + 96）；多留 128 MB 就放不下
+        val plain = Env(this)
+        plain.free = 300 * MB
+        runCurrent()
+        val g0 = plain.governor.openChapter()
+        val p1 = g0.admit(100 * MB) { false }!!
+        val p2 = async { g0.admit(100 * MB) { false } }
+        runCurrent()
+        p2.isCompleted shouldBe true
+        p2.await() shouldNotBe null
+        g0.release(p1)
+        g0.release(p2.await()!!)
+
+        val env = Env(this, extraReserve = { 128 * MB })
+        env.free = 300 * MB
+        runCurrent()
+        val gate = env.governor.openChapter()
+        val first = gate.admit(100 * MB) { false } // 第一頁一律放行
+        first shouldNotBe null
+        val second = async { gate.admit(100 * MB) { false } }
+        advanceTimeBy(5_000)
+        runCurrent()
+        second.isCompleted shouldBe false
+        gate.release(first!!)
+        runCurrent()
+        second.isCompleted shouldBe true
+    }
+
+    @Test
+    fun `prefer free forces free nets even when exclusive`() = runTest {
+        var prefer = true
+        val env = Env(this, preferFree = { prefer })
+        runCurrent()
+        env.governor.mode.value shouldBe NightGovernor.Mode.EXCLUSIVE
+        env.governor.wantedNets(NetKind.LOCKED) shouldBe NetKind.FREE
+        env.governor.wantedNets(NetKind.FREE) shouldBe NetKind.FREE
+        // FREE 組一次只放一頁
+        val gate = env.governor.openChapter()
+        gate.nets = env.governor.wantedNets(NetKind.LOCKED)
+        val a = gate.admit(10 * MB) { false }!!
+        val b = async { gate.admit(10 * MB) { false } }
+        runCurrent()
+        b.isCompleted shouldBe false
+        gate.release(a)
+        runCurrent()
+        b.isCompleted shouldBe true
+        gate.release(b.await()!!)
+
+        prefer = false
+        env.governor.wantedNets(NetKind.LOCKED) shouldBe NetKind.LOCKED
+        env.governor.wantedNets(NetKind.FREE) shouldBe NetKind.LOCKED
     }
 
     @Test

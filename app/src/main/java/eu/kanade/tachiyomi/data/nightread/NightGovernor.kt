@@ -65,6 +65,17 @@ class NightGovernor(
      * 還沒回收的垃圾：不 GC 就把垃圾當成 app 自己的用量（基線）或在飛頁的用量，白白一次只放一頁。
      */
     private val gc: () -> Unit = { Runtime.getRuntime().gc() },
+    /**
+     * 放行第 2 頁起，heap 另外要多留這麼多（bytes）給別人（[ChapterGate.admit] 的 need）。合併處理（翻譯＋夜讀一條線）專用的那份
+     * governor 傳「翻譯中第 2 頁起每頁 56 MB」給同一條線上正在翻的頁（翻譯端沒有 heap 閘，見 CombinedNight.extraReserve）；
+     * 一般夜讀用的那份不傳（0＝行為與以前完全相同）。第一頁一律放行，不受影響。
+     */
+    private val extraReserve: () -> Long = { 0L },
+    /**
+     * true＝模型組一律要 FREE（1 緒、不進鎖），EXCLUSIVE 也一樣（[wantedNets]）：合併處理專用的那份 governor 在系統可用記憶體
+     * 太少時傳 true，別再開多緒那組。一般夜讀用的那份不傳（false＝行為與以前完全相同）。
+     */
+    private val preferFree: () -> Boolean = { false },
 ) {
     enum class Mode(val tag: String) { EXCLUSIVE("EX"), YIELD("YIELD") }
 
@@ -84,6 +95,19 @@ class NightGovernor(
 
     /** 放行／在飛數／模式改變時遞增：等待者比對後重查條件（另有 [POLL_MS] 的輪詢兜底 heap 與暫停旗標這類不發訊號的變化）。 */
     private val signal = MutableStateFlow(0L)
+
+    /**
+     * 目前開著的夜讀模型組（[NightPump] 開好、換好、關掉時用 [onNetsChanged] 更新；null＝沒有開著的）。夜讀消費者只有一條，
+     * 同時最多一組。給 [preferFree] 的提供者判「多緒那組已經開著」（那組的記憶體已經算在系統可用記憶體裡）。
+     */
+    @Volatile
+    var openNets: NetKind? = null
+        private set
+
+    /** [NightPump] 開好（含換組）／關掉模型組時呼叫（關掉傳 null）。 */
+    fun onNetsChanged(kind: NetKind?) {
+        openNets = kind
+    }
 
     init {
         scope.launch {
@@ -208,8 +232,14 @@ class NightGovernor(
     /**
      * 頁邊界要用的模型組：EXCLUSIVE → LOCKED；YIELD 持續 ≥ [SWAP_TO_FREE_AFTER_MS] **且翻譯還在跑** → FREE；其餘維持
      * [current]（短暫的單頁翻譯不值得換一次組，一次約 1–2 s；翻譯已結束、只是在等 3 s 遲滯回 EXCLUSIVE 時也不換）。
+     * [preferFree] 成立時一律 FREE（記憶體不夠開多緒那組）。
      */
-    fun wantedNets(current: NetKind): NetKind = synchronized(lock) {
+    fun wantedNets(current: NetKind): NetKind {
+        if (preferFree()) return NetKind.FREE
+        return wantedNetsLocked(current)
+    }
+
+    private fun wantedNetsLocked(current: NetKind): NetKind = synchronized(lock) {
         when (_mode.value) {
             Mode.EXCLUSIVE -> NetKind.LOCKED
             Mode.YIELD -> if (busyNow && now() - yieldSince >= SWAP_TO_FREE_AFTER_MS) NetKind.FREE else current
@@ -299,7 +329,8 @@ class NightGovernor(
         /**
          * 等到可以放行一頁：在飛數 < 上限，且在飛數＝0（第一頁一律放行，最差就是一次一頁），或以下兩條都成立：
          *  - 靜態預算：在飛頁的預估總和 + [est] ≤ [NightConcurrency.heapBudget]（大頁在 512 MB 上自動退成一次一頁）；
-         *  - 實測：`maxMemory − max(實測用量, 基線 + 在飛預估總和)` ≥ [est] + [NightConcurrency.RESERVE_BYTES]。
+         *  - 實測：`maxMemory − max(實測用量, 基線 + 在飛預估總和)` ≥ [est] + [NightConcurrency.RESERVE_BYTES]（＋[extraReserve]，
+         *    合併處理時留給同時在跑的翻譯）。
          *    剛放行的頁多半還在解碼／推論、尖峰還沒配置出來，實測用量看不到它，所以用「基線 + 在飛預估」補上（已配置的部分
          *    兩邊取大、不重複算）。
          * YIELD 固定一次一頁、只在在飛＝0 時放行，所以不看 heap（翻譯那邊的 heap 靠讓路時丟回非最早的頁放掉）。
@@ -318,7 +349,6 @@ class NightGovernor(
         suspend fun admit(est: Long, shouldStop: () -> Boolean): Admission? {
             val t0 = now()
             val budget = NightConcurrency.heapBudget(maxMemory)
-            val need = est + NightConcurrency.RESERVE_BYTES
             val blockedMs = LongArray(Block.entries.size)
             var lastAt = t0
             var lastBlock: Block? = null
@@ -327,6 +357,8 @@ class NightGovernor(
                 lastBlock?.let { blockedMs[it.ordinal] += t - lastAt }
                 lastAt = t
                 val seen = signal.value
+                // 每次重看都重算：等待期間翻譯中的頁數會變（[extraReserve] 跟著變）
+                val need = est + NightConcurrency.RESERVE_BYTES + extraReserve()
                 val cap = capNow()
                 val free = heapFree()
                 val used = (maxMemory - free).coerceAtLeast(0)
