@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.data.translation.model
 
+import eu.kanade.tachiyomi.data.translation.NightLink
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.manga.model.Manga
 
@@ -31,7 +32,16 @@ data class TranslationItem(
      * 與「整本（pool）暫停」「pool 暫停」是三層獨立的 hold，任一層 hold 住就不跑。跨重啟保留。
      */
     val paused: Boolean = false,
+    /** 翻譯項的合併意圖；夜讀項、重繪項恆為 NONE。 */
+    val nightLink: NightLink = NightLink.NONE,
+    /** 翻譯項：這一輪正在一併產生夜讀版（只在 TRANSLATING 有意義；只翻譯的輪為 false）。 */
+    val nightActive: Boolean = false,
+    /** 夜讀項：有合併工作正在跑，這項等它做完才開始（佇列頁顯示等待說明）。 */
+    val waitingForCombined: Boolean = false,
 ) {
+    /** 翻譯項帶合併意圖（一併產生夜讀版）。 */
+    val withNight: Boolean get() = nightLink != NightLink.NONE
+
     enum class Status {
         QUEUE, // 排隊中
         TRANSLATING, // 翻譯中

@@ -27,6 +27,7 @@ import eu.kanade.tachiyomi.data.saver.Image
 import eu.kanade.tachiyomi.data.saver.ImageSaver
 import eu.kanade.tachiyomi.data.saver.Location
 import eu.kanade.tachiyomi.data.translation.PageTranslator
+import eu.kanade.tachiyomi.data.translation.TranslateTrigger
 import eu.kanade.tachiyomi.data.translation.TranslationEngineConfig
 import eu.kanade.tachiyomi.data.translation.TranslationEngineService
 import eu.kanade.tachiyomi.data.translation.TranslationManager
@@ -634,10 +635,12 @@ class ReaderViewModel @JvmOverloads constructor(
             )
             if (downloaded) {
                 // 背景翻（非 atFront）：當前章已被 onActivated 插隊到最前、優先翻完，下一章接著翻。即時翻預取用即時去字法（預設 AI 去字）。
+                // 觸發來源＝PREFETCH（同即時翻譯：「即時翻譯時一併產生夜讀版」開著時排成翻譯＋夜讀的合併工作）。
                 translationManager.translate(
                     manga,
                     listOf(next),
                     method = translationManager.liveInpaintMethod(),
+                    trigger = TranslateTrigger.PREFETCH,
                 )
             }
         }
@@ -677,8 +680,9 @@ class ReaderViewModel @JvmOverloads constructor(
         // 已整章翻好（理論上線上章必未翻；保險檢查）→ 不重翻。
         if (translationManager.isTranslated(manga, domainChapter)) return
 
-        onlineTriggeredChapterIds.add(chapterId)
-        triggerOnlineLiveTranslate(chapter)
+        // 過完所有 gate 才原子地登記（換章的自動路徑與線上夜讀的補觸發可能同時進來）：搶輸的不再觸發
+        if (!onlineTriggeredChapterIds.add(chapterId)) return
+        triggerOnlineLiveTranslate(chapter, TranslateTrigger.LIVE)
     }
 
     /**
@@ -694,13 +698,16 @@ class ReaderViewModel @JvmOverloads constructor(
      *     走可靠的已下載換頁路徑。
      *
      * CBZ（isFile）即時翻本里程碑不支援 → 停止輪詢、維持線上原圖（下載仍會完成、退出重進可讀已翻 CBZ）。
+     *
+     * [trigger]＝觸發來源（跟著「下載完要翻」標記存，下載完排入時用它決定要不要一併產生夜讀版）：自動路徑（讀到線上章）＝
+     * [TranslateTrigger.LIVE]、長按「開始翻譯這話」＝[TranslateTrigger.MANUAL]。
      */
-    private fun triggerOnlineLiveTranslate(chapter: ReaderChapter) {
+    private fun triggerOnlineLiveTranslate(chapter: ReaderChapter, trigger: TranslateTrigger) {
         val manga = manga ?: return
         val domainChapter = chapter.chapter.toDomainChapter() ?: return
 
-        logcat { "線上即時翻：觸發下載 + 等完成後重載 ${chapter.chapter.url}" }
-        translationManager.markForTranslate(domainChapter.id)
+        logcat { "線上即時翻：觸發下載 + 等完成後重載 ${chapter.chapter.url} trigger=$trigger" }
+        translationManager.markForTranslate(domainChapter.id, trigger)
         downloadManager.downloadChapters(manga, listOf(domainChapter))
 
         viewModelScope.launchIO { awaitDownloadThenReload(chapter, "線上即時翻") }
@@ -1937,8 +1944,8 @@ class ReaderViewModel @JvmOverloads constructor(
     /**
      * 「開始翻譯這話」（reader 頁動作對話框，當前章**未**在翻譯佇列時顯示）——手動觸發，與自動（讀到當前章）
      * 共用同一條可靠路徑：
-     *  - **已下載**：直接把當前章插隊排入翻譯佇列（已包 [TranslatingPageLoader] → [TranslatingPageLoader.onActivated]；
-     *    否則 [TranslationManager.translate] `atFront=true`）。
+     *  - **已下載**：直接把當前章以 [TranslateTrigger.MANUAL] 插隊排入翻譯佇列（[TranslationManager.translate] `atFront=true`；
+     *    已包 [TranslatingPageLoader] 時先 [TranslatingPageLoader.onActivated] 確保換頁觀察者在）。
      *  - **線上（未下載）**：走與自動相同的 [triggerOnlineLiveTranslate]——下載該章、完成後重載進已下載路徑、再排入翻譯。
      *    （取代舊版只 markForTranslate + 下載、同 session 不顯示的做法 → 手動線上翻也會在本 session 顯示。）
      *    手動是明確意圖 → 不過自動的 liveTranslate/分類 gate；但仍登記 [onlineTriggeredChapterIds] 與自動互斥去重。
@@ -1970,24 +1977,23 @@ class ReaderViewModel @JvmOverloads constructor(
                     skipCache = true,
                 )
                 if (isDownloaded) {
-                    // 已下載：插隊排入翻譯佇列。已包裝 → 走 loader 的 onActivated（與自動同入口、冪等）；否則直接 translate。
+                    // 已下載：插隊排入翻譯佇列。已包裝 → 先啟動 loader（冪等）確保「每頁翻好就換」的觀察者在。
                     val pageLoader = readerChapter.pageLoader
-                    if (pageLoader is TranslatingPageLoader) {
-                        pageLoader.onActivated()
-                    } else {
-                        // reader 控制鈕「翻這話」＝即時情境 → 即時去字法（預設 AI 去字，與自動即時翻一致）。
-                        translationManager.translate(
-                            manga,
-                            listOf(domainChapter),
-                            atFront = true,
-                            method = translationManager.liveInpaintMethod(),
-                        )
-                    }
+                    if (pageLoader is TranslatingPageLoader) pageLoader.onActivated()
+                    // 再以手動觸發排入：reader 控制鈕「翻這話」＝即時情境 → 即時去字法（預設 AI 去字，與自動即時翻一致）；
+                    // 觸發來源 MANUAL＝「手動翻譯與夜讀版」選合併時排成翻譯＋夜讀的合併工作（已排著的章只把合併意圖往上調、不調降）。
+                    translationManager.translate(
+                        manga,
+                        listOf(domainChapter),
+                        atFront = true,
+                        method = translationManager.liveInpaintMethod(),
+                        trigger = TranslateTrigger.MANUAL,
+                    )
                 } else {
                     // 線上：走與自動相同的「下載 + 完成後重載進已下載路徑」流程（本 session 也會顯示）。
-                    // 登記去重集合，避免隨後 currChapter flow 的自動路徑重觸發同一章。
+                    // 登記去重集合，避免隨後 currChapter flow 的自動路徑重觸發同一章。觸發來源記 MANUAL（下載完以手動意圖排入）。
                     readerChapter.chapter.id?.let { onlineTriggeredChapterIds.add(it) }
-                    triggerOnlineLiveTranslate(readerChapter)
+                    triggerOnlineLiveTranslate(readerChapter, TranslateTrigger.MANUAL)
                 }
                 eventChannel.send(Event.ChapterTranslateStarted)
             } catch (e: Throwable) {

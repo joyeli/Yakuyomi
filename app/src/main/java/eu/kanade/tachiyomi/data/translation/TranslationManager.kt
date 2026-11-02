@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.data.translation
 
+import android.app.ActivityManager
 import android.content.Context
 import android.os.Build
 import android.os.PowerManager
@@ -10,6 +11,7 @@ import eu.kanade.domain.chapter.model.toSChapter
 import eu.kanade.tachiyomi.crash.TraceLog
 import eu.kanade.tachiyomi.data.download.DownloadCache
 import eu.kanade.tachiyomi.data.download.DownloadProvider
+import eu.kanade.tachiyomi.data.nightread.NetKind
 import eu.kanade.tachiyomi.data.nightread.NightConcurrency
 import eu.kanade.tachiyomi.data.nightread.NightGovernor
 import eu.kanade.tachiyomi.data.nightread.NightPages
@@ -22,6 +24,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -52,6 +55,8 @@ import tachiyomi.source.local.isLocal
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * 翻譯佇列（與下載 worker 解耦）。背景一章一章翻、就地覆蓋（§11），UI 觀察 [queueState]/[isTranslatePaused]/[isNightPaused]。
@@ -76,6 +81,14 @@ import java.io.File
  * **跟隨磁碟實際格式**（CBZ 還是鬆散資料夾由 mihon `saveChaptersAsCBZ` 決定）：
  *  - 鬆散資料夾 → 原地翻（[PageTranslator.translateChapter]，無重壓、無掉檔風險）。
  *  - CBZ → 解壓→翻→重壓回 CBZ，**§11-安全順序**：新 zip 寫好前原檔完好，最後才 delete+rename。
+ *
+ * **合併處理**（翻譯＋夜讀一條線，v2 2026-10-09；純函式與檔名慣例見 [CombinedNight]／[PairHoldFiles]）：翻譯項帶持久化的
+ * 合併意圖（[Entry.nightLink]，排入時依觸發來源 [TranslateTrigger] 與兩個偏好決定、只升不降）。它就是這章唯一的工作：不另建
+ * 夜讀項、佇列一列、一個進度、一個暫停。翻譯那條消費者挑起它時過閘門（[prepareTranslationRound]）就開這一輪的夜讀階段
+ * （[Entry.nightActive]），由 [PageTranslator.translateChapterCombined] 每頁 翻譯 → 落地 → 這頁的夜讀 → 才算完整輸出；夜讀
+ * 用自己的 [combinedGovernor]（永遠不讓路），無關的夜讀項在這一輪期間讓它（不挑新項、正在跑的停在頁邊界）。落地的頁先 hold
+ * （存原圖＋記號，閱讀器等這頁夜讀版好了才換上，[holdChapters]）。每頁夜讀結果一律發 [nightPageEvents]（一般夜讀項也發，
+ * 閱讀器逐頁重畫）。
  *
  * 失敗矩陣（§11）：單章失敗 → 標 ERROR 留佇列可重試、原檔不動；翻成功 → 離開佇列。
  *
@@ -110,8 +123,9 @@ class TranslationManager(private val context: Context) {
     private val nightDrainMutex = Mutex()
 
     /**
-     * 夜讀的模式與放行控制（見 [NightGovernor]）。忙碌訊號＝翻譯入口在跑（[TranslationBusy]）或引擎在建構／暖機
-     * （[TranslationEngineService.loading]）。優先權用 `Process.setThreadPriority(tid, nice)` 改夜讀 worker（同行程可改）。
+     * 一般夜讀項的模式與放行控制（見 [NightGovernor]）。忙碌訊號＝有翻譯入口在跑（[TranslationBusy]，含合併處理的翻譯＋夜讀
+     * 一條線），或引擎在建構／暖機（[TranslationEngineService.loading]）。優先權用 `Process.setThreadPriority(tid, nice)` 改
+     * 夜讀 worker（同行程可改）。
      */
     private val nightGovernor = NightGovernor(
         scope = scope,
@@ -128,6 +142,78 @@ class TranslationManager(private val context: Context) {
         now = SystemClock::elapsedRealtime,
         log = { TraceLog.log("night", it) },
     )
+
+    /**
+     * 合併輪（翻譯＋夜讀一條線）夜讀段專用的放行控制：忙碌訊號永遠 false＝永遠 EXCLUSIVE（自己的夜讀段從不讓路、nice 0）。
+     * 記憶體防護兩道：放行第 2 頁起替翻譯中第 2 頁起的每頁多留 heap（[CombinedNight.extraReserve]，看
+     * [combinedTranslatingPages]）；系統可用記憶體太少時改用單緒不進鎖的模型組（[combinedLowMemory]）。溫控降成 1 頁、OOM 補跑
+     * 上限 1 照舊。紀錄記在 `combined`（跟一般夜讀的 `night` 分開）。
+     */
+    private val combinedGovernor: NightGovernor = NightGovernor(
+        scope = scope,
+        busy = MutableStateFlow(false),
+        pagesCap = { NightConcurrency.pagesCap(translationPreferences.nightReadPageConcurrency.get()) },
+        heapFree = { Runtime.getRuntime().let { it.maxMemory() - (it.totalMemory() - it.freeMemory()) } },
+        maxMemory = Runtime.getRuntime().maxMemory(),
+        thermalThrottled = {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+                context.powerManager.currentThermalStatus >= PowerManager.THERMAL_STATUS_MODERATE
+        },
+        setNice = { tid, nice -> Process.setThreadPriority(tid, nice) },
+        myTid = Process::myTid,
+        now = SystemClock::elapsedRealtime,
+        log = { TraceLog.log("combined", it) },
+        extraReserve = { CombinedNight.extraReserve(combinedTranslatingPages.get()) },
+        preferFree = { combinedLowMemory() },
+    )
+
+    /** 合併輪正在翻譯（進場到落地）的頁數：[PageTranslator.translateChapterCombined] 增減，[combinedGovernor] 的保留量看它。 */
+    private val combinedTranslatingPages = AtomicInteger(0)
+
+    /** 合併輪一旦判定記憶體不足就維持到這一輪結束（否則換成 FREE 組後可用記憶體回升、又換回多緒組，來回開關模型組）。 */
+    @Volatile
+    private var combinedLowMemSticky = false
+
+    @Volatile
+    private var availMemAt = Long.MIN_VALUE / 2
+
+    @Volatile
+    private var availMemCache = Long.MAX_VALUE
+
+    /** 系統可用記憶體（[ActivityManager.MemoryInfo.availMem]），快取 2 s（模型組換組判斷每 50 ms 就可能問一次）。 */
+    private fun availMem(): Long {
+        val now = SystemClock.elapsedRealtime()
+        if (now - availMemAt < AVAIL_MEM_CACHE_MS) return availMemCache
+        val v = runCatching {
+            val info = ActivityManager.MemoryInfo()
+            context.getSystemService(ActivityManager::class.java)?.getMemoryInfo(info)
+            info.availMem.takeIf { it > 0L } ?: Long.MAX_VALUE
+        }.getOrDefault(Long.MAX_VALUE)
+        availMemCache = v
+        availMemAt = now
+        return v
+    }
+
+    /**
+     * 合併輪的夜讀模型組要不要一律用 FREE（[combinedGovernor] 的 preferFree）：系統可用記憶體低於門檻——還沒開多緒（LOCKED）
+     * 那組時是 [CombinedNight.MIN_AVAIL_BYTES]（開組要的量加餘裕）；那組已經開著時它的用量已經算在可用記憶體裡，只比餘裕
+     * [CombinedNight.MIN_AVAIL_LOCKED_OPEN_BYTES]（否則開好就判成不足、白開一次 LOCKED 又中止在飛頁換組）。判定成立後維持到
+     * 這一輪結束（[combinedLowMemSticky]，每輪開夜讀階段時重設）。只有合併輪的夜讀段會問。
+     */
+    private fun combinedLowMemory(): Boolean {
+        if (combinedLowMemSticky) return true
+        val avail = availMem()
+        val need = if (combinedGovernor.openNets == NetKind.LOCKED) {
+            CombinedNight.MIN_AVAIL_LOCKED_OPEN_BYTES
+        } else {
+            CombinedNight.MIN_AVAIL_BYTES
+        }
+        if (avail >= need) return false
+        combinedLowMemSticky = true
+        val mb = 1024 * 1024
+        TraceLog.log("combined", "low mem → FREE avail=${avail / mb}MB need=${need / mb}MB")
+        return true
+    }
 
     /**
      * 合作式中止旗標（兩條消費者各一）：true → 該條正在跑的章在下一頁邊界停下（暫停/取消/清空/改法/總開關關用）。
@@ -152,6 +238,14 @@ class TranslationManager(private val context: Context) {
     @Volatile
     private var restored = false
     private val restoreMutex = Mutex()
+
+    private val _restoreSettled = MutableStateFlow(false)
+
+    /**
+     * 持久佇列已經試著還原過（成功或失敗都算）。還原前 [holdChapters] 是空的、看不出哪些章在 hold：閱讀器在這之前遇到有
+     * hold 記號的頁一律先送原圖、不記成已放行，變成 true 之後再照 [holdChapters] 決定（不在裡面的章重畫成譯圖）。
+     */
+    val restoreSettled: StateFlow<Boolean> = _restoreSettled.asStateFlow()
 
     /**
      * 內部可變佇列項；對外只發 [TranslationItem] 不可變快照。所有欄位存取都在 [lock] 下。
@@ -184,7 +278,60 @@ class TranslationManager(private val context: Context) {
         var paused: Boolean = false,
         /** 夜讀強制重做（見類別說明）。持久化。 */
         var nightForce: Long = NIGHT_NO_FORCE,
+        /** 翻譯項（[isTranslation]）的合併意圖（見 [CombinedNight.linkFor]）：排入時依觸發來源與偏好決定，只升不降。持久化。 */
+        var nightLink: NightLink = NightLink.NONE,
     ) {
+        /**
+         * 翻譯項：這一輪的夜讀階段開著（[prepareTranslationRound] 過了閘門；挑起時重設、這一輪結束時清，夜讀總開關關、夜讀段
+         * 放棄、工作被移除時也清）。合併輪的夜讀段與落地的 hold 在別的執行緒讀，所以 @Volatile。不持久化。
+         */
+        @Volatile
+        var nightActive: Boolean = false
+
+        /**
+         * 翻譯項：剛被挑起、這一輪要不要開夜讀階段還在判（挑起時帶合併意圖就設；[prepareTranslationRound] 判完一定清）。這段 IO
+         * 有數十到數百 ms：期間 hold、佇列快照、「涵蓋」與「合併輪在跑」都當成夜讀階段開著（[stageOn]），否則被 hold 的頁會在這段
+         * 空窗被閱讀器黏著放行（夜讀還沒好就換成譯圖）、佇列與章節列閃回只翻譯、夜讀那條先挑起無關的夜讀項又被叫停。不持久化。
+         */
+        @Volatile
+        var gatePending: Boolean = false
+
+        /** 翻譯項：這一輪夜讀階段開著，或閘門還在判（見 [gatePending]）。 */
+        val stageOn: Boolean get() = nightActive || gatePending
+
+        /**
+         * 翻譯項：這一輪開跑時閘門因為章本身不行而沒過（不是鬆散資料夾、建不出素材夾）。意圖升級或夜讀總開關打開時不重挑
+         * （[CombinedNight.restartForNight] 的 stageBlocked：重挑也開不了夜讀，壓縮檔章還會丟掉整輪進度）。每輪開跑重判。
+         * 在 [lock] 下。不持久化。
+         */
+        var stageBlocked: Boolean = false
+
+        /**
+         * 翻譯項：磁碟上可能有這章的 hold 記號（合併輪開夜讀階段時設；這一輪沒被中止地結束、或 hold 檔被刪時清；還原時合併工作
+         * 一律設）。排隊中的合併工作據此決定 hold 生不生效（[CombinedNight.holdActive]），不必在閱讀器每次解碼時列素材夾。
+         * 在 [lock] 下存取。不持久化。
+         */
+        var mayHaveHolds: Boolean = false
+
+        /** 翻譯項：停下回 QUEUE 後最先被重挑（意圖被升級、夜讀總開關剛打開，見 [CombinedNight.restartForNight]）。在 [lock] 下。 */
+        var restartRound: Boolean = false
+
+        /** 翻譯項：閱讀器單頁操作覆寫了這章正在跑的合併輪的頁，收尾多補掃一次（讀了就清）。不持久化。 */
+        val sweepRequested = AtomicBoolean(false)
+
+        /** 翻譯項：這一輪合併的結果（[translateOne] 寫、這一輪收尾讀）。在 [lock] 下。不持久化。 */
+        var roundResult: CombinedRoundResult? = null
+
+        /**
+         * 翻譯／重繪項：這章原本有沒有夜讀版（修正 #1：被覆寫的夜讀版要補回）。每輪開跑前「或」上磁碟的結果、跨被中止的輪保留
+         * （中止前覆寫掉的頁，下一輪開跑時磁碟上已經看不到它們的夜讀版），這一輪沒被中止地結束、交給 [requeueLostNight] 之後才清。
+         * 不持久化（行程被殺時的那一輪是已知的漏洞）。
+         */
+        var hadNight: Boolean = false
+
+        /** 一般翻譯項（不是重繪、不是夜讀）：只有它帶合併意圖。 */
+        val isTranslation: Boolean get() = !nightRender && reRenderMethod == null
+
         /**
          * 夜讀項正在跑的時候又被要求補頁（[enqueueNight] 的 TRANSLATING 分支、[cancelTranslation]）：這一輪照常做完，
          * 做完不離開佇列、改回 QUEUE 再跑一輪（resume 只補被作廢的頁）。不中斷這一輪：中斷的話在飛的頁丟回待做、下一輪
@@ -229,18 +376,37 @@ class TranslationManager(private val context: Context) {
      */
     private val pendingTranslate = HashMap<Long, Long>()
 
-    /** 標記某章「下載完成後要翻」（線上即時翻 / reader 控制鈕用）。 */
-    fun markForTranslate(chapterId: Long) {
-        synchronized(lock) { pendingTranslate[chapterId] = System.currentTimeMillis() }
+    /**
+     * 「待翻譯」標記各章的觸發來源（合併處理：下載完排入時決定合併意圖，[pendingTranslateTrigger]）。跟 [pendingTranslate]
+     * 同進同出、一起持久化；在 [lock] 下存取。
+     */
+    private val pendingTranslateTriggers = HashMap<Long, TranslateTrigger>()
+
+    /**
+     * 標記某章「下載完成後要翻」（線上即時翻 / reader 控制鈕用）。[trigger]＝觸發來源（自動路徑 [TranslateTrigger.LIVE]、
+     * 閱讀器「開始翻譯這話」[TranslateTrigger.MANUAL]），下載完排入時照它決定要不要一併產生夜讀版。
+     */
+    fun markForTranslate(chapterId: Long, trigger: TranslateTrigger) {
+        synchronized(lock) {
+            pendingTranslate[chapterId] = System.currentTimeMillis()
+            pendingTranslateTriggers[chapterId] = trigger
+        }
         persist()
     }
 
     /** 該章是否被標記為「下載完成後要翻」（[Downloader] 下載完成 hook 查此判斷）。 */
     fun isPendingTranslate(chapterId: Long): Boolean = synchronized(lock) { chapterId in pendingTranslate }
 
+    /** 「下載完要翻」標記的觸發來源；沒記到（舊資料、或標記早於這版）→ [TranslateTrigger.LIVE]。 */
+    fun pendingTranslateTrigger(chapterId: Long): TranslateTrigger =
+        synchronized(lock) { pendingTranslateTriggers[chapterId] } ?: TranslateTrigger.LIVE
+
     /** 清掉某章的「待翻譯」標記（已排入後由 [Downloader] 呼叫，避免殘留）。 */
     fun clearPending(chapterId: Long) {
-        val removed = synchronized(lock) { pendingTranslate.remove(chapterId) != null }
+        val removed = synchronized(lock) {
+            pendingTranslateTriggers.remove(chapterId)
+            pendingTranslate.remove(chapterId) != null
+        }
         if (removed) persist()
     }
 
@@ -361,6 +527,25 @@ class TranslationManager(private val context: Context) {
 
     private val _queueState = MutableStateFlow<List<TranslationItem>>(emptyList())
     val queueState: StateFlow<List<TranslationItem>> = _queueState.asStateFlow()
+
+    private val _holdChapters = MutableStateFlow<Set<Long>>(emptySet())
+
+    /**
+     * hold 生效中的章（合併處理，[CombinedNight.holdActive]：翻譯與夜讀兩個總開關開、這章的翻譯項帶合併意圖，而且翻譯中時這一輪
+     * 夜讀階段開著、排隊中時磁碟上可能有 hold 記號；失敗不算、暫停不影響）。閱讀器據此決定「頁有 hold 記號時繼續送原圖」；章從
+     * 這裡消失＝放行（夜讀總開關關、夜讀段放棄、取消、翻譯總開關關、做完）。每次 [publish] 重算。
+     */
+    val holdChapters: StateFlow<Set<Long>> = _holdChapters.asStateFlow()
+
+    /** 同 [holdChapters] 的單章查詢：不加鎖、不做 IO（解碼執行緒上每頁呼叫）。 */
+    fun isHoldActive(chapterId: Long): Boolean = chapterId in _holdChapters.value
+
+    /**
+     * 每頁夜讀結果（合併輪每頁最多一次，一般夜讀項也每頁發）：閱讀器收到就重畫那頁（修正 #3），合併處理時也靠它放行 hold
+     * （[NightPageEvent.held]）。不 conflate（[MutableSharedFlow.tryEmit]，緩衝 256）。
+     */
+    private val _nightPageEvents = MutableSharedFlow<NightPageEvent>(extraBufferCapacity = 256)
+    val nightPageEvents: SharedFlow<NightPageEvent> = _nightPageEvents.asSharedFlow()
 
     /**
      * 兩個 pool 各自的「使用者暫停」旗標：翻譯／重繪一個、夜讀一個。分開的理由：夜讀一章要好幾分鐘，
@@ -489,9 +674,64 @@ class TranslationManager(private val context: Context) {
         }
     }
 
-    /** 發佈佇列快照。賦值也在 [lock] 內：兩條消費者（夜讀多頁）同時 publish 時，舊快照不會蓋掉新進度。 */
-    private fun publish() {
+    /** 這章的翻譯項（不是重繪、不是夜讀；同章最多一個）。在 [lock] 下。 */
+    private fun translationOfLocked(chapterId: Long): Entry? =
+        entries.firstOrNull { it.isTranslation && it.chapter.id == chapterId }
+
+    /** 這章的夜讀版會由合併工作做（[CombinedNight.covers]）。在 [lock] 下。 */
+    private fun coveredLocked(chapterId: Long): Boolean =
+        translationOfLocked(chapterId)?.let { CombinedNight.covers(it.nightLink, it.status, it.stageOn) } == true
+
+    /**
+     * 有合併輪正在跑（翻譯中而且夜讀階段開著，或剛挑起、閘門還在判）：夜讀那條這段期間不挑新項。閘門沒過時
+     * [startCombinedRound] 叫醒它。在 [lock] 下。
+     */
+    private fun combinedRunningLocked(): Boolean =
+        entries.any { it.isTranslation && it.status == TranslationItem.Status.TRANSLATING && it.stageOn }
+
+    /**
+     * 這章成了合併工作（[t] 帶合併意圖、排隊中或翻譯中）：同章自己的夜讀項收掉——夜讀版由合併工作做，佇列同一話只留一張卡、
+     * 閱讀器只有一個進度，也不會在合併工作暫停時被夜讀那條另外跑起來（開跑會刪 hold 記號、替日文頁做白工）。排隊中／失敗的直接
+     * 移除；正在產生的設夜讀那條的中止旗標並移除（停下時不在佇列＝丟掉，同取消）。「以目前設定重新產生」的夜讀項留著（合併工作
+     * 不帶強制重做）。收掉了就把意圖升成 [NightLink.EXPLICIT]：那個夜讀項本來不看夜讀範圍（手動）或已過範圍（自動），別讓 AUTO
+     * 的範圍檢查把它要的夜讀版弄丟。「下載完要產生夜讀版」標記不動（合併輪做完時照常結清）。夜讀總開關關著不收：合併工作這時
+     * 只會翻譯，夜讀項留著等總開關再開（那時合併工作若還在佇列，開跑過閘門時再收）。在 [lock] 下；回傳收掉幾個。
+     */
+    private fun absorbNightLocked(t: Entry, nightOn: Boolean = nightEnabled()): Int {
+        if (!t.isTranslation || t.nightLink == NightLink.NONE || !nightOn) return 0
+        if (t.status != TranslationItem.Status.QUEUE && t.status != TranslationItem.Status.TRANSLATING) return 0
+        val absorbed = entries.filter {
+            it.nightRender && it.chapter.id == t.chapter.id && it.nightForce == NIGHT_NO_FORCE
+        }
+        if (absorbed.isEmpty()) return 0
+        absorbed.forEach { if (it.status == TranslationItem.Status.TRANSLATING) stopActiveNight = true }
+        entries.removeAll(absorbed)
+        pruneOrphanPausedKeysLocked()
+        t.nightLink = NightLink.EXPLICIT
+        TraceLog.log("combined", "absorbed night entry c=${t.chapter.id} n=${absorbed.size}")
+        return absorbed.size
+    }
+
+    /**
+     * 發佈佇列快照。賦值也在 [lock] 內：兩條消費者（夜讀多頁）同時 publish 時，舊快照不會蓋掉新進度。
+     * 合併處理的衍生狀態也在這裡一起重算（所以總開關、取消、合併輪開始與結束之後都要 publish）：hold 生效的章
+     * （[holdChapters]）、翻譯項這一輪有沒有開夜讀階段（[TranslationItem.nightActive]）、夜讀項是不是在等合併輪
+     * （[TranslationItem.waitingForCombined]）。
+     * [nightOn]／[masterOn]＝夜讀／翻譯總開關（切換的副作用傳切換後的值：那時偏好可能還沒寫進去）。
+     */
+    private fun publish(nightOn: Boolean = nightEnabled(), masterOn: Boolean = masterEnabled()) {
         synchronized(lock) {
+            val holds = HashSet<Long>()
+            for (t in entries) {
+                // 翻譯中看 stageOn：剛挑起、閘門還在判的那段 hold 也要維持（見 [Entry.gatePending]）
+                if (t.isTranslation &&
+                    CombinedNight.holdActive(masterOn, nightOn, t.nightLink, t.status, t.stageOn, t.mayHaveHolds)
+                ) {
+                    holds += t.chapter.id
+                }
+            }
+            _holdChapters.value = holds
+            val combinedRunning = combinedRunningLocked()
             _queueState.value = entries.map {
                 TranslationItem(
                     it.manga,
@@ -502,6 +742,9 @@ class TranslationManager(private val context: Context) {
                     it.effectiveMethod,
                     it.kind,
                     it.paused,
+                    nightLink = if (it.isTranslation) it.nightLink else NightLink.NONE,
+                    nightActive = it.isTranslation && it.status == TranslationItem.Status.TRANSLATING && it.stageOn,
+                    waitingForCombined = it.nightRender && it.status == TranslationItem.Status.QUEUE && combinedRunning,
                 )
             }
         }
@@ -514,15 +757,24 @@ class TranslationManager(private val context: Context) {
 
     /**
      * 挑該類別下一個要跑的章（在 [lock] 下呼叫；[night]：true＝只挑夜讀項、false＝只挑翻譯／重繪項——兩條消費者
-     * 各挑各的，互不相干）。以漫畫為單位：跳過「整本暫停」的漫畫，按**漫畫在佇列的順序**、再按**話號小→大**取
+     * 各挑各的）。以漫畫為單位：跳過「整本暫停」的漫畫，按**漫畫在佇列的順序**、再按**話號小→大**取
      * （同一本接續跑；搶翻/拖曳改變漫畫順序即生效）。無可跑章回 null。
+     * 合併處理：翻譯那條先挑要重挑的項（[Entry.restartRound]，挑起時清掉旗標）；夜讀那條在合併輪跑的期間不挑（讓合併輪的夜讀段
+     * 獨佔夜讀的記憶體與 CPU，這一輪結束時 [ensureNightDrain] 叫醒它）。
      */
     private fun pickNextQueuedLocked(night: Boolean): Entry? {
+        if (night && combinedRunningLocked()) return null
         val active = entries.filter {
             it.status == TranslationItem.Status.QUEUE && it.nightRender == night &&
                 it.poolKey !in pausedMangaKeys && !it.paused
         }
         if (active.isEmpty()) return null
+        if (!night) {
+            active.firstOrNull { it.restartRound }?.let {
+                it.restartRound = false
+                return it
+            }
+        }
         val order = groupOrderLocked()
         return active.minWithOrNull(
             compareBy({ order[it.poolKey] ?: Int.MAX_VALUE }, { it.chapter.chapterNumber }),
@@ -560,7 +812,11 @@ class TranslationManager(private val context: Context) {
     private fun persistLocked() {
         var marks = TranslationStore.PendingMarks()
         val snapshot = synchronized(lock) {
-            marks = TranslationStore.PendingMarks(translate = HashMap(pendingTranslate), night = HashMap(pendingNight))
+            marks = TranslationStore.PendingMarks(
+                translate = HashMap(pendingTranslate),
+                night = HashMap(pendingNight),
+                translateTriggers = HashMap(pendingTranslateTriggers),
+            )
             entries.map {
                 TranslationStore.Saved(
                     mangaId = it.manga.id,
@@ -572,6 +828,7 @@ class TranslationManager(private val context: Context) {
                     nightRender = it.nightRender,
                     paused = it.paused,
                     nightForce = it.nightForce,
+                    nightLink = if (it.isTranslation) it.nightLink else NightLink.NONE,
                 )
             }
         }
@@ -592,49 +849,94 @@ class TranslationManager(private val context: Context) {
      */
     suspend fun ensureRestored() {
         if (!restored) {
-            restoreMutex.withLock {
-                if (!restored) {
-                    val recovered = translationStore.restore()
-                    if (recovered.isNotEmpty()) {
-                        synchronized(lock) {
-                            // 去重鍵＝(章, 工作種類)：同章的翻譯項與夜讀項可並存（先翻、再產夜讀是常態），
-                            // 只比章 id 會讓還原前 race 進來的翻譯項把持久化的夜讀項丟掉（反之亦然）。
-                            val present = entries.mapTo(HashSet()) { it.chapter.id to it.kind }
-                            recovered.forEach { r ->
-                                val entry = Entry(
-                                    r.manga,
-                                    r.chapter,
-                                    status = if (r.errored) {
-                                        TranslationItem.Status.ERROR
-                                    } else {
-                                        TranslationItem.Status.QUEUE
-                                    },
-                                    reRenderMethod = r.reRenderMethod,
-                                    method = r.method,
-                                    nightRender = r.nightRender,
-                                    paused = r.paused,
-                                    nightForce = r.nightForce,
-                                )
-                                if ((entry.chapter.id to entry.kind) !in present) entries.add(entry)
+            try {
+                restoreMutex.withLock {
+                    if (!restored) {
+                        val recovered = translationStore.restore()
+                        if (recovered.isNotEmpty()) {
+                            synchronized(lock) {
+                                // 去重鍵＝(章, 工作種類)：同章的翻譯項與夜讀項可並存（先翻、再產夜讀是常態），
+                                // 只比章 id 會讓還原前 race 進來的翻譯項把持久化的夜讀項丟掉（反之亦然）。
+                                val present = entries.mapTo(HashSet()) { it.chapter.id to it.kind }
+                                // 帶合併意圖的翻譯項所在的章（持久資料裡的、與還原前 race 進來的）：v1 debug 版留下的舊配對夜讀項
+                                // 在這些章丟掉（合併工作會做，[CombinedNight.keepRestoredNightEntry]）
+                                val combinedChapters = HashSet<Long>()
+                                recovered.forEach { r ->
+                                    if (!r.nightRender && r.reRenderMethod == null && r.nightLink != NightLink.NONE) {
+                                        combinedChapters += r.chapter.id
+                                    }
+                                }
+                                entries.forEach {
+                                    if (it.isTranslation && it.nightLink != NightLink.NONE) {
+                                        combinedChapters += it.chapter.id
+                                    }
+                                }
+                                recovered.forEach { r ->
+                                    val keep = CombinedNight.keepRestoredNightEntry(
+                                        r.legacyPaired,
+                                        r.chapter.id in combinedChapters,
+                                    )
+                                    if (r.nightRender && !keep) {
+                                        TraceLog.log("queue", "restore dropped legacy paired night c=${r.chapter.id}")
+                                        return@forEach
+                                    }
+                                    val entry = Entry(
+                                        r.manga,
+                                        r.chapter,
+                                        status = if (r.errored) {
+                                            TranslationItem.Status.ERROR
+                                        } else {
+                                            TranslationItem.Status.QUEUE
+                                        },
+                                        reRenderMethod = r.reRenderMethod,
+                                        method = r.method,
+                                        nightRender = r.nightRender,
+                                        paused = r.paused,
+                                        nightForce = r.nightForce,
+                                        // 合併意圖只有翻譯項有
+                                        nightLink = if (r.nightRender || r.reRenderMethod != null) {
+                                            NightLink.NONE
+                                        } else {
+                                            r.nightLink
+                                        },
+                                    )
+                                    // 合併工作：不知道磁碟上有沒有 hold 記號（上一個行程可能落地了幾頁、夜讀還沒做）→ 當成可能有，
+                                    // 閱讀器先照記號 hold，下一輪開跑時先做那幾頁的夜讀
+                                    if (entry.isTranslation && entry.nightLink != NightLink.NONE) {
+                                        entry.mayHaveHolds = true
+                                    }
+                                    if ((entry.chapter.id to entry.kind) !in present) entries.add(entry)
+                                }
+                                // 同章同時有合併工作與自己的夜讀項（例如這項修正之前的版本排出來的）：收掉夜讀項，佇列同一話一張卡
+                                entries.filter { it.isTranslation && it.nightLink != NightLink.NONE }
+                                    .forEach { absorbNightLocked(it) }
+                                // 還原「整本暫停」：每項各自記它那組 (漫畫, pool)（向後相容：舊資料無此欄→不暫停）。
+                                recovered.filter { it.mangaPaused }
+                                    .forEach { pausedMangaKeys.add(QueuePoolKey(it.manga.id, it.nightRender)) }
+                                // 丟掉的舊配對夜讀項可能是那組唯一的項：別留下沒有項的整本暫停鍵
+                                pruneOrphanPausedKeysLocked()
                             }
-                            // 還原「整本暫停」：每項各自記它那組 (漫畫, pool)（向後相容：舊資料無此欄→不暫停）。
-                            recovered.filter { it.mangaPaused }
-                                .forEach { pausedMangaKeys.add(QueuePoolKey(it.manga.id, it.nightRender)) }
+                            _isTranslatePaused.value = translationStore.restorePaused()
+                            _isNightPaused.value = translationStore.restoreNightPaused()
+                            publish()
+                            publishPaused()
                         }
-                        _isTranslatePaused.value = translationStore.restorePaused()
-                        _isNightPaused.value = translationStore.restoreNightPaused()
-                        publish()
-                        publishPaused()
+                        // 「下載完要翻／要產生夜讀版」標記（行程在下載途中被殺：下載續完時照樣接得上）。太舊的丟掉；還原前剛標的留著。
+                        val marks = translationStore.restorePendingMarks(
+                            System.currentTimeMillis() - PENDING_MARK_TTL_MS,
+                        )
+                        synchronized(lock) {
+                            marks.translate.forEach { (id, at) -> pendingTranslate.putIfAbsent(id, at) }
+                            marks.translateTriggers.forEach { (id, t) -> pendingTranslateTriggers.putIfAbsent(id, t) }
+                            marks.night.forEach { (id, at) -> pendingNight.putIfAbsent(id, at) }
+                        }
+                        restored = true
+                        persist() // 回寫合併後佇列（含還原前 race 進來的新項）
                     }
-                    // 「下載完要翻／要產生夜讀版」標記（行程在下載途中被殺：下載續完時照樣接得上）。太舊的丟掉；還原前剛標的留著。
-                    val marks = translationStore.restorePendingMarks(System.currentTimeMillis() - PENDING_MARK_TTL_MS)
-                    synchronized(lock) {
-                        marks.translate.forEach { (id, at) -> pendingTranslate.putIfAbsent(id, at) }
-                        marks.night.forEach { (id, at) -> pendingNight.putIfAbsent(id, at) }
-                    }
-                    restored = true
-                    persist() // 回寫合併後佇列（含還原前 race 進來的新項）
                 }
+            } finally {
+                // 試過了（成功或失敗）：閱讀器不再把「不知道 hold 狀態」的章當成 hold（見 [restoreSettled]）
+                _restoreSettled.value = true
             }
         }
         // 硬總開關（各自）：master 關時翻譯項只還原快照、**不**自動 drain / 不建引擎（再開時由 [resumeForMasterOn] 續跑）；
@@ -671,21 +973,48 @@ class TranslationManager(private val context: Context) {
      *   新章排到既有排隊項之前；若該章已在佇列（且尚未開始翻）則**移到最前**而非加重複項。
      *   **注意**：只重排 QUEUE 項——正在翻（TRANSLATING）的翻譯/重繪章不會被中途搶占（會翻完當前章才換下一章），
      *   此為已知限制。夜讀項與此無關：它由另一條消費者在自己的執行緒跑，翻譯排入不必等它、也不用搶占它。
+     * @param trigger 觸發來源（合併處理）：配合「手動翻譯與夜讀版」「即時翻譯時一併產生夜讀版」兩個偏好決定這章的合併意圖
+     *   （[CombinedNight.linkFor]）。已在佇列的翻譯項只升不降；正在只翻譯的章被升級時停在頁邊界重挑成合併輪
+     *   （[CombinedNight.restartForNight]，已翻好的頁靠清單續傳）。排入時只記意圖、不查夜讀總開關／模型／資料夾（這裡不是
+     *   suspend、要便宜），真的能不能開夜讀階段在每一輪開跑時才判（[prepareTranslationRound]）。夜讀 pool 的暫停不動
+     *   （合併工作在翻譯 pool）。
      */
-    fun translate(manga: Manga, chapters: List<Chapter>, atFront: Boolean = false, method: String? = null) {
+    fun translate(
+        manga: Manga,
+        chapters: List<Chapter>,
+        atFront: Boolean = false,
+        method: String? = null,
+        trigger: TranslateTrigger,
+    ) {
         if (chapters.isEmpty()) return
         if (!masterEnabled()) return // 硬總開關：關閉時自動/手動翻一律不排入
         // method 非 null＝呼叫端指定去字法（即時翻/reader 情境傳 [liveInpaintMethod]，使用者可自訂、預設 AI 去字）；
         // null＝用設定的去字法（下載時翻、詳情頁手動翻——可慢可高品質）。
         val m = method ?: translationPreferences.inpaintMethod.get()
+        val link = CombinedNight.linkFor(trigger, manualCombined(), translationPreferences.liveTranslateNight.get())
         synchronized(lock) {
+            // 已在佇列的翻譯項：意圖只升不降（重繪項永遠不合併，不碰）；成了合併工作就收掉同章自己的夜讀項
+            // （[absorbNightLocked]，可能再升成 EXPLICIT）。正在只翻譯的章被升級 → 停在頁邊界、馬上重挑成合併輪。
+            // 要在狀態調整（失敗改回排隊）之後呼叫：失敗項不收夜讀項。
+            fun upgradeLink(e: Entry) {
+                if (!e.isTranslation) return
+                val old = e.nightLink
+                e.nightLink = CombinedNight.upgrade(old, link)
+                absorbNightLocked(e)
+                val up = e.nightLink
+                if (CombinedNight.restartForNight(e.status, e.nightActive, old, up, false, e.stageBlocked)) {
+                    restartRoundLocked(e, "link $old→$up")
+                }
+            }
             if (atFront) {
                 // 插隊：依輸入順序，把每章放到佇列最前（已排隊則搬到最前、不加重複）。
                 // 逐章插到 index 0 會使整批反序，故先收集成 batch（保持輸入順序）再一次性插到最前。
                 val batch = mutableListOf<Entry>()
+                val touched = mutableListOf<Entry>()
                 chapters.forEach { chapter ->
                     // 夜讀項不算「同章已排」：它不翻譯，抓到它改 method/搬到最前只會讓這章永遠翻不到。
                     val existing = entries.firstOrNull { it.chapter.id == chapter.id && !it.nightRender }
+                    existing?.let(touched::add)
                     when {
                         // 已在翻的章不動（不中途搶占）；它的 method 已鎖、留原處翻完。
                         existing?.status == TranslationItem.Status.TRANSLATING -> Unit
@@ -698,27 +1027,51 @@ class TranslationManager(private val context: Context) {
                             batch.add(existing)
                         }
                         // 全新章 → 建項加進 batch。
-                        else -> batch.add(Entry(manga, chapter, method = m))
+                        else -> batch.add(Entry(manga, chapter, method = m, nightLink = link).also(touched::add))
                     }
                 }
                 entries.addAll(0, batch)
+                // 結構改完才升級／收夜讀項（收的時候會從 entries 移除夜讀項）
+                touched.forEach(::upgradeLink)
             } else {
                 val ids = chapters.mapTo(HashSet()) { it.id }
                 val present = HashSet<Long>()
+                val touched = mutableListOf<Entry>()
                 entries.forEach {
                     if (!it.nightRender && it.chapter.id in ids) { // 夜讀項不擋翻譯
                         present.add(it.chapter.id)
                         it.paused = false // 明確再排＝解除單章暫停（否則章節列點「翻譯」對被 ⏸ 的章是無聲 no-op）
+                        // 失敗的章再排＝重試（修正：以前只解除暫停、不改回排隊，章節列紅色翻譯鈕點了沒反應）
+                        if (it.status == TranslationItem.Status.ERROR) it.status = TranslationItem.Status.QUEUE
+                        touched += it
                     }
                 }
-                chapters.forEach { if (it.id !in present) entries.add(Entry(manga, it, method = m)) }
+                chapters.filter { it.id !in present }.forEach {
+                    entries.add(Entry(manga, it, method = m, nightLink = link).also(touched::add))
+                }
+                // 走訪 entries 之後才升級／收夜讀項（收的時候會從 entries 移除夜讀項）
+                touched.forEach(::upgradeLink)
             }
         }
+        _isTranslatePaused.value = false // 明確要求翻譯 → 解除翻譯 pool 暫停、直接開跑（對照下載：排入即啟動）
         publish()
-        _isTranslatePaused.value = false // 明確要求翻譯 → 解除翻譯 pool 暫停、直接開跑（對照下載：排入即啟動）；夜讀 pool 不動
         ensureDrain()
         TranslationJob.start(context)
         persist()
+    }
+
+    /** 「手動翻譯與夜讀版」是合併處理（認不得的值一律當分開）。 */
+    private fun manualCombined(): Boolean =
+        translationPreferences.nightManualMode.get() == TranslationPreferences.NIGHT_MANUAL_COMBINED
+
+    /**
+     * 重挑正在跑的翻譯項（在 [lock] 下）：設 [Entry.restartRound]、停在頁邊界回 QUEUE，翻譯那條不 break（除非 pool 被暫停）、
+     * 下一次挑選最先挑它（[pickNextQueuedLocked]）。新的一輪重新判夜讀階段；已翻好的頁靠清單續傳、不重翻。
+     */
+    private fun restartRoundLocked(e: Entry, why: String) {
+        e.restartRound = true
+        stopActiveTranslate = true
+        TraceLog.log("queue", "restart round c=${e.chapter.id} why=$why")
     }
 
     /**
@@ -759,16 +1112,73 @@ class TranslationManager(private val context: Context) {
      * 重做前 reader 照樣顯示舊夜讀版（夜裡不會突然整章變回亮的原圖），每頁照寫入順序換新。
      *
      * IO（判鬆散夾要找章節夾），呼叫端在 IO 跑。回傳是否真的排進去（false＝總開關關、或沒有鬆散夾章——呼叫端據此提示）。
+     *
+     * **合併處理**（翻譯＋夜讀一條線）：
+     *  1. 這章有排隊中或翻譯中的翻譯項，而且它已帶合併意圖 → 意圖升成 [NightLink.EXPLICIT]（正在只翻譯的那輪就重挑成合併輪，
+     *     [CombinedNight.restartForNight]），不建夜讀項（夜讀版由合併工作做）。[force] 時仍另建強制重做的夜讀項（它等合併輪做完
+     *     才跑，少見）。
+     *  2. 否則「手動翻譯與夜讀版」選合併、而且有那個翻譯項、它接下來會跑（沒被任何暫停或總開關擋住）→ 意圖設成
+     *     [NightLink.EXPLICIT]、不建夜讀項，正在只翻譯的那輪重挑。不會跑 → 意圖不動、照分開模式現在就整章做。
+     *  3. 其他情況照現狀建整章夜讀項。
+     * 1、2 成了合併工作時，同章自己的夜讀項一併收掉（[absorbNightLocked]）。
+     * 夜讀 pool 的暫停只在真的建了夜讀項時才解除。
      */
     fun nightRender(manga: Manga, chapters: List<Chapter>, force: Boolean = false): Boolean {
         if (chapters.isEmpty()) return false
         if (!nightEnabled()) return false // 夜讀總開關：關閉時不排入（UI 此時也不畫夜讀按鈕，這是最後一道）
         val loose = chapters.filter { isLooseChapter(manga, it) } // 壓縮章排了也只會紅 ERROR，直接不排（呼叫端另提示）
         if (loose.isEmpty()) return false
-        enqueueNight(manga, loose, force, explicit = true)
+        val combined = manualCombined()
+        val toNight = ArrayList<Chapter>()
+        synchronized(lock) {
+            loose.forEach { ch ->
+                val t = translationOfLocked(ch.id)?.takeIf {
+                    it.status == TranslationItem.Status.QUEUE || it.status == TranslationItem.Status.TRANSLATING
+                }
+                if (t != null && t.nightLink != NightLink.NONE) {
+                    // 1. 已是合併工作：升成明確（同章殘留的夜讀項一併收掉）；只翻譯的那輪重挑
+                    val old = t.nightLink
+                    t.nightLink = NightLink.EXPLICIT
+                    absorbNightLocked(t)
+                    val restart = CombinedNight.restartForNight(
+                        t.status,
+                        t.nightActive,
+                        old,
+                        t.nightLink,
+                        nightSwitchedOn = false,
+                        stageBlocked = t.stageBlocked,
+                    )
+                    if (restart) restartRoundLocked(t, "night request")
+                    if (force) toNight += ch
+                    return@forEach
+                }
+                // 2. 合併模式、這章的翻譯接下來會跑（沒被任何暫停或總開關擋住）→ 翻譯帶上夜讀、不另做會被它作廢的日文頁；
+                //    正在只翻譯的那輪重挑。翻譯排著卻不會跑 → 意圖不動（動了的話這章就算被涵蓋，下面的夜讀項會被
+                //    [enqueueNight] 跳過、什麼都沒排），照分開模式現在就整章做。
+                if (combined && t != null && translationWillRunLocked(ch.id)) {
+                    val old = t.nightLink
+                    t.nightLink = NightLink.EXPLICIT
+                    absorbNightLocked(t)
+                    val restart = CombinedNight.restartForNight(
+                        t.status,
+                        t.nightActive,
+                        old,
+                        t.nightLink,
+                        nightSwitchedOn = false,
+                        stageBlocked = t.stageBlocked,
+                    )
+                    if (restart) restartRoundLocked(t, "night request")
+                    return@forEach
+                }
+                toNight += ch
+            }
+        }
+        if (toNight.isNotEmpty()) {
+            enqueueNight(manga, toNight, force, explicit = true)
+            _isNightPaused.value = false // 明確要求產生夜讀 → 解除夜讀 pool 暫停、直接開跑；翻譯 pool 不動
+        }
         publishPaused()
         publish()
-        _isNightPaused.value = false // 明確要求產生夜讀 → 解除夜讀 pool 暫停、直接開跑；翻譯 pool 不動
         ensureDrain()
         TranslationJob.start(context)
         persist()
@@ -789,6 +1199,8 @@ class TranslationManager(private val context: Context) {
      * [explicit]＝使用者明確要求（[nightRender]：reader、章節多選）：連這些章的單章暫停與這本在夜讀 pool 的整本暫停一起
      * 解除（同 [nightRender] 解除 pool 暫停的道理），否則 drain 永遠挑不到、reader 卻已提示「已排入」。
      * 自動路徑（翻完／下載完／單頁操作後補頁）不傳，不動使用者的暫停。
+     * 合併處理：非 [force] 時跳過被合併工作涵蓋的章（[CombinedNight.covers]：夜讀版由它做），不建夜讀項，免得同章兩張卡。
+     * [force] 照建（合併工作不帶強制重做；它等合併輪做完才跑，少見）。
      * 回傳是否有需要叫醒夜讀那條的變動（全部已在排隊＝false）。
      */
     private fun enqueueNight(
@@ -802,6 +1214,7 @@ class TranslationManager(private val context: Context) {
         var changed = false
         if (explicit && pausedMangaKeys.remove(QueuePoolKey(manga.id, true))) changed = true
         chapters.forEach { ch ->
+            if (!force && coveredLocked(ch.id)) return@forEach
             val entry = existing[ch.id]
             if (explicit && entry?.paused == true) {
                 entry.paused = false
@@ -927,6 +1340,20 @@ class TranslationManager(private val context: Context) {
 
     private fun queueNightAfterPageNow(manga: Manga, chapter: Chapter, hadNight: Boolean) {
         if (!nightEnabled()) return
+        // 合併工作涵蓋這章：它在跑 → 收尾多補掃一次（那頁的夜讀版剛被作廢）；它排著 → 什麼都不做（下一輪開跑時那頁是只做夜讀的頁）
+        val covered = synchronized(lock) {
+            val t = translationOfLocked(chapter.id)
+            if (t == null || !CombinedNight.covers(t.nightLink, t.status, t.stageOn)) {
+                false
+            } else {
+                if (t.status == TranslationItem.Status.TRANSLATING) t.sweepRequested.set(true)
+                true
+            }
+        }
+        if (covered) {
+            TraceLog.log("combined", "page op covered by combined c=${chapter.id}")
+            return
+        }
         val modelsReady = TranslationEngineConfig.detectorResolvable(context) &&
             TranslationEngineConfig.charSegResolvable(context)
         if (!modelsReady) return
@@ -964,6 +1391,17 @@ class TranslationManager(private val context: Context) {
         val include = translationPreferences.liveTranslateCategories.get()
         val exclude = translationPreferences.liveTranslateCategoriesExclude.get()
         return (include.isEmpty() || cats.any { it in include }) && cats.none { it in exclude }
+    }
+
+    /**
+     * 即時翻譯對這本會一併產生夜讀版：夜讀總開關、「即時翻譯時一併產生夜讀版」、夜讀模型齊、夜讀範圍（[nightAutoAllowed]）。
+     * 不含即時翻譯本身的 gate（翻譯總開關、即時翻譯、引擎就緒、即時翻譯分類／來源）——那些呼叫端（閱讀器）自己看。
+     * suspend：分類要查 DB；看模型檔在不在是 IO，呼叫端在 IO 跑。
+     */
+    suspend fun liveNightApplies(manga: Manga): Boolean {
+        if (!nightEnabled() || !translationPreferences.liveTranslateNight.get()) return false
+        if (!nightModelsReady()) return false
+        return nightAutoAllowed(manga)
     }
 
     /** 這本的來源是否在「不自動做夜讀的來源」清單（設定 › 夜讀）。只管自動路徑。 */
@@ -1089,10 +1527,8 @@ class TranslationManager(private val context: Context) {
             } ?: return
             if (entry.reRenderMethod != null) return // 重繪項方法不可改（reRenderMethod 為 val）
             entry.method = method
-            // 正在翻 → 停在頁邊界回 QUEUE、立刻被重挑，以新方法續傳剩餘頁（見上）。只停翻譯那條。
-            if (entry.status == TranslationItem.Status.TRANSLATING) {
-                stopActiveTranslate = true
-            }
+            // 正在翻 → 停在頁邊界回 QUEUE、最先被重挑（[restartRoundLocked]），以新方法續傳剩餘頁（見上）。只停翻譯那條。
+            if (entry.status == TranslationItem.Status.TRANSLATING) restartRoundLocked(entry, "method")
         }
         publish()
         persist()
@@ -1110,8 +1546,9 @@ class TranslationManager(private val context: Context) {
 
     /**
      * reader「中止這話翻譯」：只移除該章的翻譯／重繪項（角落指示器顯示的那些）；同章的夜讀項**不動**——它不是翻譯、
-     * 按鈕文案也沒提它。夜讀項若正在跑則記 [Entry.nightRerun]，這一輪做完再跑一輪（同 [enqueueNight] 的 TRANSLATING
+     * 按鈕文案也沒提它。一般夜讀項若正在跑則記 [Entry.nightRerun]，這一輪做完再跑一輪（同 [enqueueNight] 的 TRANSLATING
      * 分支）：翻到一半被中止的頁已被覆寫、舊夜讀版被 invalidateNightPage 刪掉，再跑一輪 resume 才補得回。
+     * 合併工作被中止：hold 放行（刪 hold 檔），已做好的夜讀版留著（[cancelWhere]）。
      */
     fun cancelTranslation(chapterIds: List<Long>) {
         val ids = chapterIds.toHashSet()
@@ -1127,7 +1564,7 @@ class TranslationManager(private val context: Context) {
 
     private fun cancelWhere(chapterIds: List<Long>, match: (Entry) -> Boolean) {
         val ids = chapterIds.toHashSet()
-        val removed = synchronized(lock) {
+        val (removed, holdCleanup) = synchronized(lock) {
             val hit: (Entry) -> Boolean = { it.chapter.id in ids && match(it) }
             // 正在跑的項被取消 → 它那條消費者的逐頁迴圈下一頁停下、移除
             entries.forEach {
@@ -1135,15 +1572,56 @@ class TranslationManager(private val context: Context) {
             }
             val removed = entries.filter(hit)
             entries.removeAll(hit)
+            val cleanup = dropCombinedHoldsLocked(removed)
             pruneOrphanPausedKeysLocked() // 單章取消把某組刪空 → 那組的整本暫停鍵也丟掉
             dropPendingNightForCancelledLocked(removed)
-            removed
+            removed to cleanup
         }
         publishPaused()
         publish()
         ensureDrain()
         persist()
         releasePendingNight(removed) // 翻譯項被取消、在等它的夜讀標記不再等
+        deleteHoldFilesLater(holdCleanup)
+    }
+
+    /**
+     * 這些合併工作的 hold 不會再有夜讀替它們放行了（在 [lock] 下）：使用者移除了它們（取消、整本取消、清空），或夜讀總開關關了。
+     * 這一輪的夜讀階段關掉（正在跑的那輪夜讀段停、之後落地的頁不 hold），回傳磁碟上可能有 hold 記號的章（呼叫端在鎖外
+     * [deleteHoldFilesLater]：被 hold 的頁改顯示譯圖；已做好的夜讀版留著）。不是合併工作的項略過。
+     */
+    private fun dropCombinedHoldsLocked(items: List<Entry>): List<Pair<Manga, Chapter>> {
+        val cleanup = ArrayList<Pair<Manga, Chapter>>()
+        for (r in items) {
+            if (!r.isTranslation || r.nightLink == NightLink.NONE) continue
+            val mayHave = r.nightActive || r.mayHaveHolds
+            r.nightActive = false
+            r.gatePending = false // 閘門還在判的那一輪也不開（[startCombinedRound] 看這個）
+            r.mayHaveHolds = false
+            if (mayHave) cleanup += r.manga to r.chapter
+        }
+        return cleanup
+    }
+
+    /**
+     * 在 [scope]（IO）刪這些章的 hold 記號與暫存原圖（[PageTranslator.deletePairHoldFiles]）：夜讀不會再替它們放行（取消、清空、
+     * 夜讀總開關關、夜讀段放棄）。馬上返回；找不到章節夾、不是鬆散夾就略過。
+     */
+    private fun deleteHoldFilesLater(chapters: List<Pair<Manga, Chapter>>) {
+        if (chapters.isEmpty()) return
+        scope.launch {
+            chapters.forEach { (manga, chapter) ->
+                try {
+                    val dir = chapterDir(manga, chapter)?.takeIf { it.isDirectory } ?: return@forEach
+                    val n = pageTranslator.deletePairHoldFiles(dir)
+                    if (n > 0) TraceLog.log("combined", "hold files cleared c=${chapter.id} n=$n")
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    logcat(LogPriority.WARN, e) { "清 hold 檔失敗 c=${chapter.id}" }
+                }
+            }
+        }
     }
 
     /**
@@ -1224,6 +1702,7 @@ class TranslationManager(private val context: Context) {
         synchronized(lock) { pausedMangaKeys.remove(QueuePoolKey(mangaId, night)) }
         setPoolPaused(night, false)
         publishPaused()
+        publish()
         ensureDrain()
         TranslationJob.start(context)
         persist()
@@ -1237,7 +1716,7 @@ class TranslationManager(private val context: Context) {
                     (it.status == TranslationItem.Status.QUEUE || it.status == TranslationItem.Status.TRANSLATING)
             }.forEach {
                 it.method = method
-                if (it.status == TranslationItem.Status.TRANSLATING) stopActiveTranslate = true
+                if (it.status == TranslationItem.Status.TRANSLATING) restartRoundLocked(it, "method")
             }
         }
         publish()
@@ -1247,7 +1726,7 @@ class TranslationManager(private val context: Context) {
     /** 整本取消（只該 pool 那組）：移除該組所有章（含正在跑的：停它那條在頁邊界後移除）、清其整本暫停旗標。 */
     fun cancelManga(mangaId: Long, night: Boolean) {
         val key = QueuePoolKey(mangaId, night)
-        val removed = synchronized(lock) {
+        val (removed, holdCleanup) = synchronized(lock) {
             entries.forEach {
                 val runningThis = it.status == TranslationItem.Status.TRANSLATING && it.poolKey == key
                 if (runningThis) setStop(night, true)
@@ -1255,14 +1734,17 @@ class TranslationManager(private val context: Context) {
             val removed = entries.filter { it.poolKey == key }
             entries.removeAll { it.poolKey == key }
             pausedMangaKeys.remove(key)
+            val cleanup = dropCombinedHoldsLocked(removed) // 合併工作被取消：hold 放行
+            pruneOrphanPausedKeysLocked()
             dropPendingNightForCancelledLocked(removed)
-            removed
+            removed to cleanup
         }
         publishPaused()
         publish()
         ensureDrain()
         persist()
         releasePendingNight(removed) // 翻譯項被取消、在等它的夜讀標記不再等
+        deleteHoldFilesLater(holdCleanup)
     }
 
     /** 整本重試（只該 pool 那組）：該組所有 ERROR 章回 QUEUE、解除該 pool 的暫停（總開關關著會留在 QUEUE 等它再開）。 */
@@ -1276,8 +1758,8 @@ class TranslationManager(private val context: Context) {
                     it.paused = false // 明確重試 → 連單章暫停一起解除
                 }
         }
-        publish()
         setPoolPaused(night, false)
+        publish()
         ensureDrain()
         TranslationJob.start(context)
         persist()
@@ -1315,8 +1797,8 @@ class TranslationManager(private val context: Context) {
                 }
                 .mapTo(HashSet()) { it.nightRender }
         }
-        publish()
         kinds.forEach { setPoolPaused(it, false) } // 重試 → 只解除被重試那類 pool 的暫停、直接開跑
+        publish()
         ensureDrain()
         TranslationJob.start(context)
         persist()
@@ -1345,8 +1827,8 @@ class TranslationManager(private val context: Context) {
         synchronized(lock) {
             entries.filter { it.chapter.id == chapterId && it.kind == kind }.forEach { it.paused = false }
         }
-        publish()
         setPoolPaused(kind.night, false)
+        publish()
         if (kind.night) ensureNightDrain() else ensureTranslateDrain()
         TranslationJob.start(context)
         persist()
@@ -1354,16 +1836,20 @@ class TranslationManager(private val context: Context) {
 
     /** 清空佇列（含兩條正在跑的章：各自中止後移除）。 */
     fun clearQueue() {
-        synchronized(lock) {
+        val holdCleanup = synchronized(lock) {
             entries.forEach { if (it.status == TranslationItem.Status.TRANSLATING) setStop(it.nightRender, true) }
             // 使用者清空整個佇列＝這些章什麼都不要了：在等翻譯的夜讀標記一起丟（還在下載、不在佇列裡的章不受影響）
             entries.forEach { pendingNight.remove(it.chapter.id) }
+            // 合併工作沒了：hold 檔（記號、暫存原圖）一起清
+            val cleanup = dropCombinedHoldsLocked(entries.toList())
             entries.clear()
             pausedMangaKeys.clear() // 組都沒了，整本暫停鍵一起清（殘留會 hold 住下次自動排入的章）
+            cleanup
         }
         publishPaused()
         publish()
         persist()
+        deleteHoldFilesLater(holdCleanup)
     }
 
     /**
@@ -1373,6 +1859,7 @@ class TranslationManager(private val context: Context) {
     fun pause(night: Boolean) {
         setPoolPaused(night, true)
         synchronized(lock) { setStop(night, true) }
+        publish()
         persist()
         if (!night) releasePendingNight() // 翻譯被停住：在等它的夜讀標記不再等
     }
@@ -1381,6 +1868,7 @@ class TranslationManager(private val context: Context) {
     fun resume(night: Boolean) {
         if (!kindEnabled(night)) return
         setPoolPaused(night, false)
+        publish()
         if (night) ensureNightDrain() else ensureTranslateDrain()
         TranslationJob.start(context)
         persist()
@@ -1393,6 +1881,8 @@ class TranslationManager(private val context: Context) {
      */
     fun haltForMasterOff() {
         synchronized(lock) { stopActiveTranslate = true }
+        // 合併處理：線不會再動了 → hold 失效、閱讀器改顯示譯圖（記號留在磁碟，總開關再開、這一輪跑起來時照常做）
+        publish(masterOn = false)
         // 主動停前景服務（否則殘留「翻譯中」通知；翻譯 drain 自身已被 master gate 擋住不取新章）——但夜讀那條若還有活就別停。
         // 以「切換後」的開關值判斷（設定頁在 callback 之後才寫 pref，此刻讀 pref 可能還是舊值）。
         if (!hasRunnableWork(master = false, night = nightEnabled())) TranslationJob.stop(context)
@@ -1402,6 +1892,7 @@ class TranslationManager(private val context: Context) {
 
     /** 翻譯總開關開啟：若有排隊的翻譯／重繪章且未（使用者）暫停 → 續跑翻譯那條（drain 的 master gate 此時已放行）。 */
     fun resumeForMasterOn() {
+        publish(masterOn = true) // 合併工作的 hold 又生效
         val hasQueued = synchronized(lock) {
             entries.any {
                 it.status == TranslationItem.Status.QUEUE && !it.nightRender &&
@@ -1439,25 +1930,64 @@ class TranslationManager(private val context: Context) {
      *  - 關 → 正在跑的夜讀項停在頁邊界回 QUEUE **留著**（不標 ERROR、不移除）、消費者因 [nightEnabled] gate 退出、
      *    翻完不再自動排（[queueNightAfter]）；翻譯那條若也沒活才停前景服務；設定 › 夜讀 的舊版頁掃描取消。
      * **不**負責 set pref（呼叫端寫）；**不**動 [_isNightPaused]（與使用者暫停獨立）。
+     *
+     * 合併處理：關 → 正在跑的合併輪關掉夜讀階段（夜讀段停、放掉線位，剩下的頁只翻譯）、hold 失效（閱讀器放行），所有合併工作
+     * 那些章的 hold 檔（記號、暫存原圖）刪掉（夜讀不會跑，暫存原圖不留）；排隊中的合併工作意圖保留，下一輪閘門不過就只翻譯。
+     * 開 → 正在只翻譯、帶合併意圖的那輪重挑成合併輪（[CombinedNight.restartForNight]）。
      */
     fun onNightEnabledChanged(enabled: Boolean) {
         if (enabled) {
+            var absorbed = 0
             val hasQueued = synchronized(lock) {
+                // 合併工作與同章自己的夜讀項（總開關關著時留下的）：夜讀版改由合併工作做（偏好此刻可能還沒寫進去，傳切換後的值）
+                entries.filter { it.isTranslation && it.nightLink != NightLink.NONE }
+                    .forEach { absorbed += absorbNightLocked(it, nightOn = true) }
+                entries.filter {
+                    it.isTranslation &&
+                        CombinedNight.restartForNight(
+                            it.status,
+                            it.nightActive,
+                            it.nightLink,
+                            it.nightLink,
+                            nightSwitchedOn = true,
+                            // 壓縮檔章、建不出素材夾：重挑也開不了夜讀，不丟這一輪的進度
+                            stageBlocked = it.stageBlocked,
+                        )
+                }.forEach { restartRoundLocked(it, "night switched on") }
                 entries.any {
-                    it.status == TranslationItem.Status.QUEUE && it.nightRender &&
-                        it.poolKey !in pausedMangaKeys && !it.paused
+                    it.status == TranslationItem.Status.QUEUE && it.nightRender && it.poolKey !in pausedMangaKeys &&
+                        !it.paused
                 }
             }
+            // hold 照切換後的值重算（偏好此刻可能還沒寫進去）；稍後再照偏好重算一次對齊
+            publish(nightOn = true)
+            reconcileNightSwitchLater()
+            if (absorbed > 0) persist()
             if (hasQueued && !_isNightPaused.value) {
                 ensureNightDrain()
                 TranslationJob.start(context)
             }
         } else {
-            synchronized(lock) { stopActiveNight = true }
+            // 先關掉正在跑的合併輪的夜讀階段（夜讀段停、放掉線位，剩下的頁只翻譯），再 publish：hold 失效、佇列不再顯示「＋夜讀」
+            val holdCleanup = synchronized(lock) {
+                stopActiveNight = true
+                dropCombinedHoldsLocked(entries.filter { it.isTranslation && it.nightLink != NightLink.NONE })
+            }
+            publish(nightOn = false)
+            reconcileNightSwitchLater()
+            deleteHoldFilesLater(holdCleanup)
             // 設定 › 夜讀 的舊版頁掃描也停（大書庫要掃好幾分鐘，關了夜讀就別再佔儲存的 IO）；再開時重掃
             cancelOutdatedNightScan()
             // 以「切換後」的開關值判斷（同 haltForMasterOff）：翻譯那條還有活 → 前景服務留住。
             if (!hasRunnableWork(master = masterEnabled(), night = false)) TranslationJob.stop(context)
+        }
+    }
+
+    /** 夜讀總開關切換後，等偏好寫進去再照偏好重算一次 hold（[onNightEnabledChanged]）。 */
+    private fun reconcileNightSwitchLater() {
+        scope.launch {
+            delay(NIGHT_SWITCH_RECONCILE_MS)
+            publish()
         }
     }
 
@@ -1498,6 +2028,7 @@ class TranslationManager(private val context: Context) {
      * 直到沒有、暫停、或該類別的總開關關。兩條的 active entry／進度 publish／persist／錯誤處理完全一致，差別只在：
      * 挑哪類（[pickNextQueuedLocked]）、看哪個中止旗標（[isStop]）、哪個總開關（[kindEnabled]）、成功後做什麼
      * （翻譯→[translatedIds]+書庫徽章+自動排夜讀；夜讀→[nightDoneIds]）、尾聲要不要釋放翻譯引擎（只有翻譯那條）。
+     * 合併處理：翻譯項開跑前判這一輪要不要開夜讀階段（[prepareTranslationRound]），合併輪的收尾見 [finishCombinedRound]。
      */
     private suspend fun runDrain(night: Boolean) {
         // 翻譯/夜讀都是 CPU 密集（ONNX/NCNN 推論）：螢幕關閉時若不持 WakeLock，CPU 會休眠 → 推論暫停（前景服務只保
@@ -1510,6 +2041,8 @@ class TranslationManager(private val context: Context) {
             setReferenceCounted(false)
             acquire(WAKELOCK_TIMEOUT_MS)
         }
+        // 翻譯那條：被叫停、等著馬上重挑的合併工作（[finishCombinedRound] 回 true）。下一次挑到別的、或迴圈就此結束 → 叫醒夜讀那條
+        var deferredNightWake: Entry? = null
         try {
             // 硬總開關（各自）：關時一律不取新章（一道 gate 收掉所有 drain 來源——還原/下載/手動/重繪/自動夜讀）。
             while (!isPoolPaused(night) && kindEnabled(night)) {
@@ -1523,13 +2056,29 @@ class TranslationManager(private val context: Context) {
                         it.done = 0
                         it.total = 0
                         it.nightRerun = false
+                        it.nightActive = false
+                        // 帶合併意圖的翻譯項：閘門判完之前當成夜讀階段開著（hold 不在這段空窗失效，見 [Entry.gatePending]）
+                        it.gatePending = !night && it.isTranslation && it.nightLink != NightLink.NONE && nightEnabled()
+                        it.stageBlocked = false
+                        it.roundResult = null
+                        it.sweepRequested.set(false) // 新的一輪開跑時重新看磁碟，舊的補掃要求用不到
+                        // hadNight 不在這裡清：被中止的那一輪要帶到下一輪（見 [Entry.hadNight]）
                         setStop(night, false)
                     }
-                } ?: break
+                }
+                // 上一輪是被叫停、等著馬上重挑的合併工作（[finishCombinedRound] 沒叫醒夜讀那條）：結果挑到的不是它（被暫停、
+                // 被取消、總開關關）→ 現在叫醒，別讓無關的夜讀項卡在排隊
+                if (deferredNightWake != null && entry !== deferredNightWake) ensureNightDrain()
+                deferredNightWake = null
+                if (entry == null) break
                 publish()
                 TraceLog.log("queue", "chapter start m=${entry.manga.id} c=${entry.chapter.id} ${entry.chapter.name}")
+                // 翻譯／重繪項開跑前（IO）：記下這章原本有沒有夜讀版（修正 #1），翻譯項再看這一輪要不要開夜讀階段（合併處理）
+                if (!night) prepareTranslationRound(entry)
+                // 這一輪開跑時的夜讀階段（之後被夜讀總開關、取消、夜讀段放棄關掉也照這個值收尾）
+                val combinedThisRound = !night && entry.nightActive
                 val ok = try {
-                    // 翻譯／重繪項算進忙碌訊號（夜讀讓路）；夜讀項自己不算
+                    // 翻譯／重繪項（含合併輪）算進忙碌訊號（一般夜讀項讓路；合併輪自己的夜讀段不看它）；夜讀項自己不算
                     if (night) translateOne(entry) else TranslationBusy.track { translateOne(entry) }
                 } catch (e: CancellationException) {
                     throw e
@@ -1541,6 +2090,12 @@ class TranslationManager(private val context: Context) {
                         entry.nightRerun = false // 例外（缺模型等）再跑一輪也一樣，等使用者重試
                     }
                     nightStorage.chapterChanged(entry.manga, entry.chapter) // 做到一半的頁也可能動了夜讀檔
+                    if (!night) {
+                        val lostAllowed = combinedLostNightAllowed(entry, combinedThisRound)
+                        if (combinedThisRound) finishCombinedRound(entry, ok = false, stopped = false)
+                        // 翻譯／重繪做到一半失敗：覆寫掉的頁的夜讀版也要補回（修正 #1；沒被中止，失敗也算）
+                        requeueLostNight(entry, lostAllowed)
+                    }
                     publish()
                     persist()
                     if (!night) releasePendingNight() // 翻譯沒做成：在等它的夜讀標記不再等
@@ -1554,7 +2109,8 @@ class TranslationManager(private val context: Context) {
                     val rerun = entry.nightRerun
                     entry.nightRerun = false
                     when {
-                        // 被暫停/取消/清空/改法/總開關關打斷：還在佇列(暫停/改法/開關關)→回 QUEUE 等續傳；已被移除(取消/清空)→不動。
+                        // 被暫停/取消/清空/改法/重挑/總開關關打斷：還在佇列(暫停/改法/重挑/開關關)→回 QUEUE 等續傳；
+                        // 已被移除(取消/清空)→不動。
                         isStop(night) -> {
                             if (entries.contains(entry)) entry.status = TranslationItem.Status.QUEUE
                             true
@@ -1573,12 +2129,14 @@ class TranslationManager(private val context: Context) {
                             false
                         }
                         else -> {
-                            // 沒下載 / 沒做成（部分失敗）→ 標 ERROR 留佇列可重試，不誤標「已翻」
+                            // 沒下載 / 沒做成（部分失敗）→ 標 ERROR 留佇列可重試，不誤標「已翻」（合併輪的夜讀頁失敗不算）
                             entry.status = TranslationItem.Status.ERROR
                             false
                         }
                     }
                 }
+                val lostAllowed = !night && combinedLostNightAllowed(entry, combinedThisRound)
+                if (combinedThisRound && finishCombinedRound(entry, ok, stopped)) deferredNightWake = entry
                 if (stopped) {
                     publish()
                     persist()
@@ -1599,19 +2157,27 @@ class TranslationManager(private val context: Context) {
                     } else {
                         _translatedIds.update { it + entry.chapter.id }
                         translationCache.invalidate(entry.manga.id) // 已翻章數變 → 失效該本、刷新書庫徽章
-                        // 頁圖剛被覆寫、舊夜讀版已被 invalidateNightPage 刪掉 → 這章的 session「已有夜讀版」作廢、
-                        // 並叫章節列重掃磁碟（否則指示器留在 DONE、夜讀模式卻端出原圖）；接著自動排的夜讀項會再把它做回來。
-                        _nightDoneIds.update { it - entry.chapter.id }
-                        _nightVersion.update { it + 1 }
-                        TraceLog.log("queue", "chapter done m=${entry.manga.id} c=${entry.chapter.id}")
-                        // 翻譯/重繪成功 → 開關開著就接一個夜讀項（排佇列尾；重繪後頁圖 mtime 變新，舊夜讀檔會被判過期重做），
-                        // 並叫醒夜讀那條（它可能早因沒事做退出了）。
-                        if (queueNightAfter(entry)) {
-                            TraceLog.log("queue", "night queued m=${entry.manga.id} c=${entry.chapter.id}")
-                            ensureNightDrain()
+                        if (combinedThisRound) {
+                            // 合併輪：夜讀版這一輪已經一起做了（「已有夜讀版」與章節列重掃在 [finishCombinedRound]），不另排夜讀項
+                            TraceLog.log("queue", "chapter done m=${entry.manga.id} c=${entry.chapter.id} combined")
+                        } else {
+                            // 頁圖剛被覆寫、舊夜讀版已被 invalidateNightPage 刪掉 → 這章的 session「已有夜讀版」作廢、
+                            // 並叫章節列重掃磁碟（否則指示器留在 DONE、夜讀模式卻端出原圖）；接著自動排的夜讀項會再把它做回來。
+                            _nightDoneIds.update { it - entry.chapter.id }
+                            _nightVersion.update { it + 1 }
+                            TraceLog.log("queue", "chapter done m=${entry.manga.id} c=${entry.chapter.id}")
+                            // 翻譯/重繪成功 → 開關開著就接一個夜讀項（排佇列尾；重繪後頁圖 mtime 變新，舊夜讀檔會被判過期重做），
+                            // 並叫醒夜讀那條（它可能早因沒事做退出了）。
+                            if (queueNightAfter(entry)) {
+                                TraceLog.log("queue", "night queued m=${entry.manga.id} c=${entry.chapter.id}")
+                                ensureNightDrain()
+                            }
                         }
                     }
                 }
+                // 修正 #1：翻譯／重繪覆寫了頁圖（舊夜讀版被作廢），這章原本有夜讀版 → 補排夜讀（成功或部分失敗都算）。合併輪的夜讀段
+                // 開到最後的不必（夜讀版這一輪已經一起做了）
+                if (!night) requeueLostNight(entry, lostAllowed)
                 publish()
                 persist()
             }
@@ -1629,8 +2195,259 @@ class TranslationManager(private val context: Context) {
             }
         } finally {
             if (wakeLock.isHeld) wakeLock.release()
+            // 等著重挑的合併工作沒被挑回來就結束了（翻譯 pool 暫停、總開關關）：夜讀那條沒人叫醒，這裡叫
+            if (deferredNightWake != null) ensureNightDrain()
             // 這條收工（佇列空/暫停/總開關關）且另一條也沒活 → 停背景心跳（沒事做就別每 15 分醒來）。
             if (!hasPendingWork()) TranslationHeartbeatJob.stop(context)
+        }
+    }
+
+    /**
+     * 翻譯／重繪項剛被挑起（TRANSLATING）、開跑之前（IO，在翻譯那條上）：
+     *  - 記下這章原本有沒有夜讀版（[Entry.hadNight]，修正 #1：覆寫會作廢夜讀版，這輪結束時補排；夜讀總開關關著不查）。
+     *  - 翻譯項帶合併意圖 → [startCombinedRound] 判這一輪要不要開夜讀階段。
+     * 任何一步出錯只記一行，不擋翻譯本身（這一輪只翻譯）。不管怎麼結束，[Entry.gatePending] 都在這裡清掉；判完沒開夜讀階段
+     * 就叫醒夜讀那條（閘門判定期間它不挑新項）。
+     */
+    private suspend fun prepareTranslationRound(entry: Entry) {
+        try {
+            val nightOn = nightEnabled()
+            val link = synchronized(lock) { if (entry.isTranslation) entry.nightLink else NightLink.NONE }
+            // 合併工作一律找章節夾：夜讀關著時也要知道是不是鬆散夾（[Entry.stageBlocked]），上一輪留下的 hold 記號也要清
+            val needDir = nightOn || link != NightLink.NONE
+            val dir = if (needDir) chapterDir(entry.manga, entry.chapter)?.takeIf { it.isDirectory } else null
+            val had = nightOn && dir != null && chapterHasNightBeforePage(dir)
+            // 「或」上：前一輪被中止前覆寫掉的頁，磁碟上已經看不到它們的夜讀版（見 [Entry.hadNight]）
+            synchronized(lock) { entry.hadNight = entry.hadNight || had }
+            if (link != NightLink.NONE) startCombinedRound(entry, link, dir, nightOn)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            logcat(LogPriority.WARN, e) { "翻譯開跑前的夜讀準備失敗 c=${entry.chapter.id}（只翻譯）" }
+        } finally {
+            // 閘門沒判完（例外、被取消）：當成這一輪沒開夜讀階段。hold 記號留在磁碟，[Entry.mayHaveHolds] 跟著清（不然只翻譯的
+            // 這一輪會一直 hold 著那幾頁）；閱讀器會把它們放行成譯圖，下一個合併輪開跑時那幾頁照計畫補做夜讀
+            val dangling = synchronized(lock) {
+                if (!entry.gatePending) return@synchronized false
+                entry.gatePending = false
+                if (!entry.nightActive) entry.mayHaveHolds = false
+                true
+            }
+            if (dangling) {
+                publish()
+                ensureNightDrain()
+            }
+        }
+    }
+
+    /**
+     * 合併處理：帶合併意圖的翻譯項這一輪要不要開夜讀階段（IO：建素材夾、查分類）。[dir]＝已找好的鬆散章節夾（null＝不是鬆散夾、
+     * 沒下載）；[nightOn]＝夜讀總開關。
+     *  - 閘門過了（[CombinedNight.canRunNightStage]）→ [Entry.nightActive]、[Entry.mayHaveHolds]；同章自己的夜讀項收掉
+     *    （[absorbNightLocked]）；夜讀那條正在跑別的夜讀項 → 停在頁邊界回排隊（進度保留），之後這一輪結束前它不挑新項
+     *    （[pickNextQueuedLocked]）。記一行 `round start … night=on`。
+     *  - 沒過 → 這一輪只翻譯（意圖保留），記原因；章本身不行（不是鬆散夾、建不出素材夾）記進 [Entry.stageBlocked]（這一輪不因
+     *    意圖升級或夜讀打開而重挑）；磁碟上可能有這章的 hold 記號 → 刪掉（夜讀不會替它們放行）；叫醒夜讀那條；判定期間有閱讀器
+     *    單頁操作要求補掃 → 改走一般補排。
+     * 已不在翻譯中（被取消）或意圖在 IO 期間被清掉 → 不開。兩種結果都清 [Entry.gatePending]（與 nightActive 同一把鎖）。
+     */
+    private suspend fun startCombinedRound(entry: Entry, link: NightLink, dir: UniFile?, nightOn: Boolean) {
+        val models = nightOn && nightModelsReady()
+        val canStore = models && dir != null && canStoreNightFiles(dir, entry.chapter)
+        val inScope = link == NightLink.EXPLICIT || (canStore && nightAutoAllowed(entry.manga))
+        if (CombinedNight.canRunNightStage(link, nightOn, models, dir != null, canStore, inScope)) {
+            val started = synchronized(lock) {
+                // 判定期間被取消、意圖被清、夜讀總開關被關（[dropCombinedHoldsLocked] 清了 gatePending）→ 不開
+                if (entry.status != TranslationItem.Status.TRANSLATING || entry !in entries ||
+                    entry.nightLink == NightLink.NONE || !entry.gatePending
+                ) {
+                    return@synchronized false
+                }
+                entry.nightActive = true
+                entry.mayHaveHolds = true
+                entry.gatePending = false
+                absorbNightLocked(entry)
+                // 讓路：無關的夜讀項正在跑 → 停在頁邊界回排隊（兩組夜讀模型同時開、兩章夜讀同時佔 heap 都放不下）
+                if (entries.any { it.nightRender && it.status == TranslationItem.Status.TRANSLATING }) {
+                    stopActiveNight = true
+                }
+                true
+            }
+            if (!started) return
+            combinedLowMemSticky = false
+            TraceLog.log("combined", "round start c=${entry.chapter.id} link=$link night=on")
+            publish()
+            persist()
+            return
+        }
+        val why = when {
+            !nightOn -> "night disabled"
+            !models -> "night models missing"
+            dir == null -> "not a loose folder"
+            !canStore -> "cannot create ${NightPages.DIR}"
+            else -> "outside night scope"
+        }
+        // 章本身不行：不是鬆散夾（夜讀開關無關，章節夾一律有找）、或夜讀開著時建不出素材夾
+        val blocked = dir == null || (models && !canStore)
+        TraceLog.log("combined", "round start c=${entry.chapter.id} link=$link night=off why=$why blocked=$blocked")
+        val clear = synchronized(lock) {
+            entry.stageBlocked = blocked
+            entry.gatePending = false
+            entry.mayHaveHolds.also { entry.mayHaveHolds = false }
+        }
+        publish()
+        ensureNightDrain()
+        if (clear && dir != null) {
+            val n = pageTranslator.deletePairHoldFiles(dir)
+            if (n > 0) TraceLog.log("combined", "hold files cleared c=${entry.chapter.id} n=$n")
+        }
+        // 判定期間閱讀器單頁操作覆寫了這章的頁、當成合併輪會補掃：這一輪只翻譯，改走一般補排
+        if (entry.sweepRequested.getAndSet(false)) queueNightAfterPageNow(entry.manga, entry.chapter, hadNight = true)
+    }
+
+    /**
+     * 合併輪的參數（[PageTranslator.translateChapterCombined]）：夜讀段用 [combinedGovernor]、頁數上限照「同時處理頁數」偏好，
+     * 夜讀還要不要做＝這一輪夜讀階段開著（工作被移除、夜讀總開關關、夜讀段放棄時清）而且夜讀總開關開。
+     */
+    private fun combinedParams(entry: Entry): CombinedNightParams {
+        val chapterId = entry.chapter.id
+        return CombinedNightParams(
+            governor = combinedGovernor,
+            nightCap = NightConcurrency.pagesCap(translationPreferences.nightReadPageConcurrency.get()),
+            translatingPages = combinedTranslatingPages,
+            nightWanted = { entry.nightActive && nightEnabled() },
+            sweepRequested = { entry.sweepRequested.getAndSet(false) },
+            onPageFinal = { page, result, held ->
+                _nightPageEvents.tryEmit(NightPageEvent(chapterId, page, result, held))
+            },
+            onStageOff = { reason -> onCombinedStageOff(entry, reason) },
+        )
+    }
+
+    /**
+     * 合併輪的夜讀段放棄（開不起來、模型缺、建不出素材夾、版本記號寫不出來；不是被要求停）：這一輪後面只翻譯——關掉夜讀階段、
+     * hold 失效（閱讀器放行）、刪這章的 hold 檔。不讓工作失敗。
+     */
+    private fun onCombinedStageOff(entry: Entry, reason: String) {
+        synchronized(lock) {
+            entry.nightActive = false
+            entry.mayHaveHolds = false
+        }
+        TraceLog.log("combined", "stage off c=${entry.chapter.id} why=$reason")
+        publish()
+        deleteHoldFilesLater(listOf(entry.manga to entry.chapter))
+    }
+
+    /**
+     * 這一輪結束時要不要讓修正 #1（[requeueLostNight]）補排夜讀：只翻譯的輪一律可以；合併輪只在夜讀段中途停了（有開、沒開到最後）
+     * 時可以——開到最後的夜讀版這一輪已經一起做了。例外結束的合併輪（沒有結果）當成中途停了。在 [finishCombinedRound] 清掉結果
+     * 之前呼叫。
+     */
+    private fun combinedLostNightAllowed(entry: Entry, combinedThisRound: Boolean): Boolean {
+        if (!combinedThisRound) return true
+        val r = synchronized(lock) { entry.roundResult }
+        val stageRan = r?.stageRan ?: true
+        val stageCompleted = r?.stageCompleted ?: false
+        return stageRan && !stageCompleted
+    }
+
+    /**
+     * 合併輪結束（任何原因）的收尾（IO，在翻譯那條上）。共通：清掉 [Entry.nightActive] 與這一輪的結果、叫醒夜讀那條（被擋著的
+     * 一般夜讀項接著跑）。
+     *  - 被中止（[stopped]：暫停、重挑、總開關關、取消）：[Entry.mayHaveHolds] 保持（被 hold 的頁還在等，下一輪先做）。
+     *  - 沒被中止：這章剩下的 hold 檔全刪（被丟下的頁放行）；夜讀段開到最後而且有夜讀版 → [nightDoneIds] 加這章，否則拿掉；
+     *    [nightVersion] 加 1；這一輪有夜讀版做好 → [nightChapterDone]；翻譯做成而且夜讀段開到最後 → 「下載完要產生夜讀版」
+     *    標記功成身退；翻譯做成但夜讀段沒開到最後 → 標記照 [releasePendingNight] 現在處理（排整章夜讀，或做不了就丟掉）。
+     * 呼叫端之後照常 publish／persist。
+     * 回傳 true＝被叫停、等著馬上重挑，這裡沒叫醒夜讀那條（叫醒了它開組沒多久又要讓開）：呼叫端在下一次挑到的不是它、或迴圈就此
+     * 結束時叫醒（[runDrain] 的 deferredNightWake；否則翻譯 pool 剛好被暫停時，無關的夜讀項會一直卡在排隊）。
+     */
+    private fun finishCombinedRound(entry: Entry, ok: Boolean, stopped: Boolean): Boolean {
+        val r = synchronized(lock) {
+            val result = entry.roundResult
+            entry.roundResult = null
+            entry.nightActive = false
+            entry.gatePending = false
+            result
+        }
+        val chapterId = entry.chapter.id
+        if (stopped) {
+            TraceLog.log(
+                "combined",
+                "round stopped c=$chapterId translated=${r?.translated ?: 0} night=${r?.nightDone ?: 0}",
+            )
+            // 馬上要重挑的（意圖升級、夜讀剛打開、改去字法）先不叫醒夜讀那條，交給呼叫端
+            if (synchronized(lock) { entry.restartRound && entry in entries }) return true
+            ensureNightDrain()
+            return false
+        }
+        clearHoldFilesNow(entry)
+        synchronized(lock) { entry.mayHaveHolds = false }
+        val stageCompleted = r?.stageCompleted == true
+        if (stageCompleted && hasNightPages(entry.manga, entry.chapter)) {
+            _nightDoneIds.update { it + chapterId }
+        } else {
+            _nightDoneIds.update { it - chapterId }
+        }
+        _nightVersion.update { it + 1 }
+        if ((r?.nightDone ?: 0) > 0) _nightChapterDone.tryEmit(chapterId)
+        if (ok && stageCompleted) {
+            synchronized(lock) { settlePendingNightLocked(chapterId) }
+        } else if (ok) {
+            releasePendingNight(listOf(entry))
+        }
+        // 最後一次補掃之後才有閱讀器單頁操作覆寫這章的頁（那頁的夜讀版剛被作廢）：這一輪已經收不到，照一般路徑補排
+        if (entry.sweepRequested.getAndSet(false)) {
+            try {
+                queueNightAfterPageNow(entry.manga, entry.chapter, hadNight = true)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                logcat(LogPriority.WARN, e) { "合併輪收尾補排夜讀失敗 c=$chapterId" }
+            }
+        }
+        TraceLog.log(
+            "combined",
+            "round end c=$chapterId ok=$ok translated=${r?.translated ?: 0} night=${r?.nightDone ?: 0} " +
+                "nightFailed=${r?.nightFailed ?: 0} completed=$stageCompleted",
+        )
+        ensureNightDrain()
+        return false
+    }
+
+    /**
+     * 修正 #1：翻譯／重繪項這輪結束（成功或失敗，沒被中止）而且這章原本有夜讀版（[Entry.hadNight]）→ 覆寫掉的頁的夜讀版被作廢了，
+     * 走 [enqueueNight] 的自動路徑補排（不看「自動產生夜讀版」、不看夜讀範圍、不動暫停：這是維護已有的夜讀版；仍要夜讀總開關、
+     * 夜讀模型、鬆散夾、素材夾）。還原原圖的重繪也算（其他頁還是暗的）。與 [queueNightAfter] 同時成立時 [enqueueNight] 本身冪等。
+     * [allowed]＝false（合併輪的夜讀段開到最後，見 [combinedLostNightAllowed]）→ 只清記錄不補排。在翻譯那條上（IO）。
+     */
+    private fun requeueLostNight(entry: Entry, allowed: Boolean) {
+        // 這輪沒被中止地結束了：讀完就清，下一輪（失敗重試）開跑時重新看磁碟
+        val had = synchronized(lock) { entry.hadNight.also { entry.hadNight = false } }
+        if (!had || !allowed) return
+        try {
+            if (!nightEnabled() || !nightModelsReady()) return
+            val dir = chapterDir(entry.manga, entry.chapter)?.takeIf { it.isDirectory } ?: return
+            if (!canStoreNightFiles(dir, entry.chapter)) return
+            if (enqueueNight(entry.manga, listOf(entry.chapter))) {
+                TraceLog.log("queue", "night requeued after overwrite m=${entry.manga.id} c=${entry.chapter.id}")
+            }
+            ensureNightDrain()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            logcat(LogPriority.WARN, e) { "覆寫後補排夜讀失敗 c=${entry.chapter.id}" }
+        }
+    }
+
+    /** 合併輪沒被中止地結束（[finishCombinedRound]，IO）：這章剩下的 hold 檔（記號、暫存原圖）刪掉。出錯只記一行。 */
+    private fun clearHoldFilesNow(entry: Entry) {
+        try {
+            val dir = chapterDir(entry.manga, entry.chapter)?.takeIf { it.isDirectory } ?: return
+            val n = pageTranslator.deletePairHoldFiles(dir)
+            if (n > 0) TraceLog.log("combined", "hold files cleared c=${entry.chapter.id} n=$n")
+        } catch (e: Throwable) {
+            logcat(LogPriority.WARN, e) { "清 hold 檔失敗 c=${entry.chapter.id}" }
         }
     }
 
@@ -1668,7 +2485,19 @@ class TranslationManager(private val context: Context) {
                 entry.nightForce.coerceAtLeast(0L) to started
             }
             if (started) persist()
-            return pageTranslator.renderNightChapter(dir, nightGovernor, onProgress, shouldStop, forceBefore) > 0
+            val chapterId = entry.chapter.id
+            // 每頁夜讀結果確定 → 推給閱讀器（逐頁重畫）；一般夜讀項沒有 hold 可放行
+            val onPageFinal: (String, NightPageResult) -> Unit = { page, result ->
+                _nightPageEvents.tryEmit(NightPageEvent(chapterId, page, result, held = false))
+            }
+            return pageTranslator.renderNightChapter(
+                dir,
+                nightGovernor,
+                onProgress,
+                shouldStop,
+                forceBefore,
+                onPageFinal = onPageFinal,
+            ) > 0
         }
         val method = entry.reRenderMethod
         return if (method != null) {
@@ -1684,8 +2513,22 @@ class TranslationManager(private val context: Context) {
             }
         } else if (dir.isDirectory) {
             // entry.method＝排入當下擷取（可在排隊時經 setItemMethod 改）；傳給引擎用、不再讀全域 pref。
-            pageTranslator.translateChapter(dir, entry.method, onProgress, shouldStop) { name ->
-                _donePageEvents.tryEmit(entry.chapter.id to name) // 每翻好一頁就推給即時翻 loader 即時重畫該頁
+            // 每翻好一頁就推給即時翻 loader 即時重畫該頁（合併輪被 hold 的頁 loader 自己不換）
+            val chapterId = entry.chapter.id
+            val onPageDone: (String) -> Unit = { name -> _donePageEvents.tryEmit(chapterId to name) }
+            if (entry.nightActive) {
+                // 合併輪：每頁 翻譯 → 落地 → 夜讀 → 完整輸出（一條線，見 [PageTranslator.translateChapterCombined]）
+                val r = pageTranslator.translateChapterCombined(
+                    dir,
+                    entry.method,
+                    combinedParams(entry),
+                    onProgress,
+                    shouldStop,
+                    onPageDone,
+                )
+                synchronized(lock) { entry.roundResult = r }
+            } else {
+                pageTranslator.translateChapter(dir, entry.method, onProgress, shouldStop, onPageDone = onPageDone)
             }
             pageTranslator.isChapterTranslated(dir)
         } else {
@@ -1858,8 +2701,10 @@ class TranslationManager(private val context: Context) {
         scope = scope,
         runningNightChapters = {
             synchronized(lock) {
-                entries.filter { it.nightRender && it.status == TranslationItem.Status.TRANSLATING }
-                    .mapTo(HashSet()) { it.chapter.id }
+                entries.filter {
+                    it.status == TranslationItem.Status.TRANSLATING &&
+                        (it.nightRender || (it.isTranslation && it.nightActive))
+                }.mapTo(HashSet()) { it.chapter.id }
             }
         },
         queuedMangas = { synchronized(lock) { entries.map { it.manga } } },
@@ -1976,16 +2821,17 @@ class TranslationManager(private val context: Context) {
             val running = entries.filter { it.nightRender && it.status == TranslationItem.Status.TRANSLATING }
                 .mapTo(HashSet()) { it.chapter.id }
             stillThere.forEach { t ->
-                val chapters = t.chapters.filter { it.id !in running }
+                // 正在產生的章不動；被合併工作涵蓋的章也不排（合併的夜讀段本來就把舊規則的頁當成不新鮮）
+                val chapters = t.chapters.filter { it.id !in running && !coveredLocked(it.id) }
                 if (chapters.isEmpty()) return@forEach
                 enqueueNight(t.manga, chapters, explicit = true)
                 count += chapters.size
             }
         }
         if (count == 0) return 0
+        _isNightPaused.value = false
         publishPaused()
         publish()
-        _isNightPaused.value = false
         ensureDrain()
         TranslationJob.start(context)
         persist()
@@ -2098,6 +2944,12 @@ class TranslationManager(private val context: Context) {
 
         /** [Entry.nightForce]：已要求強制重做、下一輪開跑時記下時間。 */
         private const val NIGHT_FORCE_PENDING = 0L
+
+        /** 系統可用記憶體的快取時間（[availMem]）。 */
+        private const val AVAIL_MEM_CACHE_MS = 2_000L
+
+        /** 夜讀總開關切換後，等偏好寫進去再照偏好重算一次 hold（[onNightEnabledChanged]）。 */
+        private const val NIGHT_SWITCH_RECONCILE_MS = 500L
 
         /** 沒有夜讀版（沒下載／壓縮檔章／沒有素材夾）的摘要。 */
         private val NO_NIGHT = NightPages.ChapterSummary(NightPages.ChapterState.NONE, outdated = false)

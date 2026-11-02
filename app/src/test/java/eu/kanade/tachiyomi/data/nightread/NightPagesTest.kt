@@ -288,6 +288,45 @@ class NightPagesTest {
     }
 
     @Test
+    fun `閱讀器名單多收 hold 記號與原圖素材：summarize availability resolveName 結果不變`() {
+        val hold = "012.jpg.pairhold"
+        val holdTemp = "013.jpg.pairhold-temp"
+        val orig = "012.orig.jpg"
+        val origLegacy = "013.orig.webp"
+        val extras = listOf(hold, holdTemp, orig, origLegacy)
+        // 閱讀器名單會收它們；暫存、遮罩、json、進行中記號不收
+        extras.forEach { NightPages.isReaderListed(it) shouldBe true }
+        listOf(std, more, l1, legacy, "012.jpg.night.rules1").forEach { NightPages.isReaderListed(it) shouldBe true }
+        listOf("$std.tmp", "012.orig.jpg.tmp", "012.orig.jpg.wip", "012.mask.png", "012.json", "012.nightboxes.json")
+            .forEach { NightPages.isReaderListed(it) shouldBe false }
+
+        val cases = listOf(
+            emptySet<String>(),
+            setOf(std),
+            setOf(std, more, "012.jpg.night.rules1"),
+            setOf(l1, l2),
+            setOf(legacy),
+            setOf(more),
+        )
+        for (base in cases) {
+            val withExtras = base + extras
+            NightPages.summarize(withExtras) shouldBe NightPages.summarize(base)
+            NightPages.availability(true, withExtras) shouldBe NightPages.availability(true, base)
+            for (p in listOf(page, "013.jpg")) {
+                NightLevel.entries.forEach { lv ->
+                    NightPages.resolveName(withExtras, p, lv) shouldBe NightPages.resolveName(base, p, lv)
+                }
+            }
+            NightPages.leftovers(withExtras) shouldBe NightPages.leftovers(base)
+        }
+        // 記號與原圖素材都不是夜讀檔、也不是規則版本記號
+        extras.forEach {
+            NightPages.isNightArtifact(it) shouldBe false
+            NightPages.isRulesStamp(it) shouldBe false
+        }
+    }
+
+    @Test
     fun `偏好對應：l2＝標準、l3＝更多；舊值 l1 protect＝標準、aggressive＝更多；其餘＝標準`() {
         NightLevel.fromPref("l2") shouldBe NightLevel.STANDARD
         NightLevel.fromPref("l3") shouldBe NightLevel.MORE

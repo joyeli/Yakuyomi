@@ -1733,4 +1733,6 @@
     <string name="pref_nightread_clear_read">Clear night versions of read chapters</string>
     <string name="pref_nightread_clear_all">Clear all night versions</string>
     <string name="pref_nightread_clear_nothing">Nothing to clear</string>
+    <!-- Yakuyomi: combined translation + night reading (Settings › Translation / Night reading, queue, reader) -->
+    <string name="translation_status_translating_with_night">Translating + night pages</string>
 </resources>

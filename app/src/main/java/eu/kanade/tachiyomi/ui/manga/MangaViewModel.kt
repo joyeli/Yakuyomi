@@ -37,6 +37,7 @@ import eu.kanade.tachiyomi.data.download.model.Download
 import eu.kanade.tachiyomi.data.nightread.NightPages
 import eu.kanade.tachiyomi.data.track.EnhancedTracker
 import eu.kanade.tachiyomi.data.track.TrackerManager
+import eu.kanade.tachiyomi.data.translation.TranslateTrigger
 import eu.kanade.tachiyomi.data.translation.TranslationCache
 import eu.kanade.tachiyomi.data.translation.TranslationEngineConfig
 import eu.kanade.tachiyomi.data.translation.TranslationManager
@@ -874,7 +875,8 @@ class MangaViewModel(
                 )
                 return@launchIO
             }
-            translationManager.translate(manga, toTranslate)
+            // 手動觸發：「手動翻譯與夜讀版」選合併時這幾章一併產生夜讀版（要不要合併由 TranslationManager 決定）
+            translationManager.translate(manga, toTranslate, trigger = TranslateTrigger.MANUAL)
         }
     }
 

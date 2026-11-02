@@ -25,4 +25,19 @@ class TranslationStoreMarksTest {
         val raw = setOf("12:100", "abc:100", "13", "14:", ":100", "15:xyz", "16:200")
         TranslationStore.decodeMarks(raw, notBefore = 0L) shouldBe mapOf(12L to 100L, 16L to 200L)
     }
+
+    @Test
+    fun `下載完要翻的觸發來源存了再讀回來一樣`() {
+        val triggers = TranslateTrigger.entries.mapIndexed { i, t -> (i + 1).toLong() to t }.toMap()
+        TranslationStore.decodeTriggers(TranslationStore.encodeTriggers(triggers)) shouldBe triggers
+        TranslationStore.decodeTriggers(TranslationStore.encodeTriggers(emptyMap())) shouldBe emptyMap()
+        // 舊資料沒有這個 key
+        TranslationStore.decodeTriggers(null) shouldBe emptyMap()
+    }
+
+    @Test
+    fun `觸發來源格式不對或名稱認不得的略過`() {
+        val raw = setOf("12:LIVE", "x:LIVE", "13:", "14:NOPE", "15", ":MANUAL", "16:live")
+        TranslationStore.decodeTriggers(raw) shouldBe mapOf(12L to TranslateTrigger.LIVE)
+    }
 }

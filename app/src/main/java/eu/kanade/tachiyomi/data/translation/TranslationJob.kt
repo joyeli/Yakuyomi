@@ -129,11 +129,12 @@ class TranslationJob(context: Context, workerParams: WorkerParameters) : Corouti
         val running = items.filter { it.status == TranslationItem.Status.TRANSLATING }
         val active = running.firstOrNull { it.kind != TranslationItem.Kind.NIGHT } ?: running.firstOrNull()
         val cover = active?.let { getMangaIcon(it.manga) }
-        // 正在跑的是夜讀項 → 標題「夜讀版」（它不是翻譯，別寫「翻譯中」）；翻譯/重繪 → 「翻譯中」；
-        // 沒有進行中的項（只剩排隊項，可能全是夜讀）→ 中性的「佇列」。圖示共用。
+        // 正在跑的是夜讀項 → 標題「夜讀版」（它不是翻譯，別寫「翻譯中」）；合併輪（翻譯＋夜讀一條線）→ 「翻譯＋夜讀中」；
+        // 翻譯/重繪 → 「翻譯中」；沒有進行中的項（只剩排隊項，可能全是夜讀）→ 中性的「佇列」。圖示共用。
         val title = when {
             active == null -> MR.strings.label_translation_queue
             active.kind == TranslationItem.Kind.NIGHT -> MR.strings.queue_kind_nightread
+            active.nightActive -> MR.strings.translation_status_translating_with_night
             else -> MR.strings.translation_status_translating
         }
         return applicationContext.notificationBuilder(Notifications.CHANNEL_TRANSLATOR_PROGRESS) {

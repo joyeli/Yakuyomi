@@ -8,6 +8,7 @@ import eu.kanade.tachiyomi.data.cache.ChapterCache
 import eu.kanade.tachiyomi.data.download.model.Download
 import eu.kanade.tachiyomi.data.library.LibraryUpdateNotifier
 import eu.kanade.tachiyomi.data.notification.NotificationHandler
+import eu.kanade.tachiyomi.data.translation.TranslateTrigger
 import eu.kanade.tachiyomi.data.translation.TranslationManager
 import eu.kanade.tachiyomi.network.HttpException
 import eu.kanade.tachiyomi.source.UnmeteredSource
@@ -441,6 +442,13 @@ class Downloader(
                     atFront = pending,
                     // pending＝reader 即時翻/控制鈕觸發的線上章 → 用即時翻去字法（獨立 pref，預設同為 AI 去字）；自動下載時翻（!pending）用設定去字法。
                     method = if (pending) translationManager.liveInpaintMethod() else null,
+                    // 觸發來源（合併處理決定要不要一併產生夜讀版）：標記時記下的來源（即時翻／閱讀器「開始翻譯這話」），
+                    // 否則是下載時翻譯（跟「手動翻譯與夜讀版」的設定）。
+                    trigger = if (pending) {
+                        translationManager.pendingTranslateTrigger(download.chapter.id)
+                    } else {
+                        TranslateTrigger.DOWNLOAD
+                    },
                 )
                 if (pending) translationManager.clearPending(download.chapter.id)
             } else if (translationManager.autoNightEligible() &&

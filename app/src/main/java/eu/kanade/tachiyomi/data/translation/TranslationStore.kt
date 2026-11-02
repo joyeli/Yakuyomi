@@ -45,20 +45,9 @@ class TranslationStore(
             // 標記存成字串集合（不是 String）：還原佇列時 `as? String` 自然略過
             putStringSet(KEY_PENDING_TRANSLATE, encodeMarks(marks.translate))
             putStringSet(KEY_PENDING_NIGHT, encodeMarks(marks.night))
+            putStringSet(KEY_PENDING_TRANSLATE_TRIGGER, encodeTriggers(marks.translateTriggers))
             items.forEachIndexed { index, it ->
-                val obj = TranslationObject(
-                    it.mangaId,
-                    it.chapterId,
-                    index,
-                    it.method,
-                    it.reRenderMethod,
-                    it.errored,
-                    it.mangaPaused,
-                    it.nightRender,
-                    it.paused,
-                    it.nightForce,
-                )
-                putString(index.toString(), json.encodeToString(obj))
+                putString(index.toString(), encodeObject(json, it, index))
             }
         }
     }
@@ -67,7 +56,7 @@ class TranslationStore(
     suspend fun restore(): List<Restored> {
         val objs = preferences.all.values
             .mapNotNull { it as? String }
-            .mapNotNull { deserialize(it) }
+            .mapNotNull { decodeObject(json, it) }
             .sortedBy { it.order }
         if (objs.isEmpty()) return emptyList()
 
@@ -87,6 +76,8 @@ class TranslationStore(
                     o.nightRender,
                     o.paused,
                     o.nightForce,
+                    NightLink.fromCode(o.nightLink),
+                    legacyPaired = isLegacyPaired(o.pairRole),
                 ),
             )
         }
@@ -99,24 +90,29 @@ class TranslationStore(
     /** 還原夜讀 pool 的暫停狀態（沒存過＝false；升級前的持久資料無此 key → 不暫停）。 */
     fun restoreNightPaused(): Boolean = preferences.getBoolean(KEY_PAUSED_NIGHT, false)
 
-    /** 還原「下載完要翻／要產生夜讀版」標記，只留標記時間晚於 [notBefore]（epoch ms）的。沒存過＝空。 */
-    fun restorePendingMarks(notBefore: Long): PendingMarks = PendingMarks(
-        translate = decodeMarks(preferences.getStringSet(KEY_PENDING_TRANSLATE, null), notBefore),
-        night = decodeMarks(preferences.getStringSet(KEY_PENDING_NIGHT, null), notBefore),
-    )
+    /**
+     * 還原「下載完要翻／要產生夜讀版」標記，只留標記時間晚於 [notBefore]（epoch ms）的。沒存過＝空。
+     * 「下載完要翻」的觸發來源只留還在 [PendingMarks.translate] 裡的章（舊資料沒有這個 key → 空，用的時候當即時翻譯）。
+     */
+    fun restorePendingMarks(notBefore: Long): PendingMarks {
+        val translate = decodeMarks(preferences.getStringSet(KEY_PENDING_TRANSLATE, null), notBefore)
+        return PendingMarks(
+            translate = translate,
+            night = decodeMarks(preferences.getStringSet(KEY_PENDING_NIGHT, null), notBefore),
+            translateTriggers = decodeTriggers(preferences.getStringSet(KEY_PENDING_TRANSLATE_TRIGGER, null))
+                .filterKeys { it in translate },
+        )
+    }
 
-    /** 「下載完要翻」[translate]、「下載完要產生夜讀版」[night] 兩組標記：章 id → 標記時間（epoch ms）。 */
+    /**
+     * 「下載完要翻」[translate]、「下載完要產生夜讀版」[night] 兩組標記：章 id → 標記時間（epoch ms）。
+     * [translateTriggers]：「下載完要翻」各章的觸發來源（合併處理決定合併意圖用；沒記到的章當即時翻譯）。
+     */
     data class PendingMarks(
         val translate: Map<Long, Long> = emptyMap(),
         val night: Map<Long, Long> = emptyMap(),
+        val translateTriggers: Map<Long, TranslateTrigger> = emptyMap(),
     )
-
-    private fun deserialize(string: String): TranslationObject? =
-        try {
-            json.decodeFromString<TranslationObject>(string)
-        } catch (e: Exception) {
-            null
-        }
 
     /** [save] 的輸入：[TranslationManager] 從內部 Entry 攤平來（只帶 id 與方法/狀態；順序由 [save] 用 list index 補）。 */
     data class Saved(
@@ -133,6 +129,8 @@ class TranslationStore(
         val paused: Boolean = false,
         /** 夜讀強制重做（-1＝否；0＝已要求未開跑；>0＝那一輪開跑時間，見 TranslationManager.Entry.nightForce）。 */
         val nightForce: Long = -1L,
+        /** 翻譯項的合併意圖（翻譯＋夜讀一條線）。 */
+        val nightLink: NightLink = NightLink.NONE,
     )
 
     /** [restore] 的輸出：已把 id 解析回 domain 物件，交給 [TranslationManager] 重建 Entry。 */
@@ -146,6 +144,12 @@ class TranslationStore(
         val nightRender: Boolean = false,
         val paused: Boolean = false,
         val nightForce: Long = -1L,
+        val nightLink: NightLink = NightLink.NONE,
+        /**
+         * 夜讀項是合併處理 v1 的 debug 版留下的配對項（舊欄位 [TranslationObject.pairRole] 是 1 或 2）。[TranslationManager] 還原時
+         * 據此決定要不要留它（[CombinedNight.keepRestoredNightEntry]）。
+         */
+        val legacyPaired: Boolean = false,
     )
 
     companion object {
@@ -161,16 +165,66 @@ class TranslationStore(
                 if (at < notBefore) null else id to at
             }.toMap()
 
+        /**
+         * 「下載完要翻」各章的觸發來源存成「章id:來源名」字串集合（[TranslateTrigger.name]）。
+         * 標記本身與時間仍在 [KEY_PENDING_TRANSLATE]，這裡只是附帶的來源。
+         */
+        internal fun encodeTriggers(triggers: Map<Long, TranslateTrigger>): Set<String> =
+            triggers.entries.mapTo(HashSet()) { (id, t) -> "$id:${t.name}" }
+
+        /** [encodeTriggers] 的反向；null＝空，格式不對或來源名認不得的略過。 */
+        internal fun decodeTriggers(raw: Set<String>?): Map<Long, TranslateTrigger> =
+            raw.orEmpty().mapNotNull { s ->
+                val id = s.substringBefore(':').toLongOrNull() ?: return@mapNotNull null
+                val name = s.substringAfter(':', "")
+                val trigger = TranslateTrigger.entries.firstOrNull { it.name == name } ?: return@mapNotNull null
+                id to trigger
+            }.toMap()
+
+        /** 一個佇列項 → 存進 SharedPreferences 的 JSON（[order]＝佇列位置）。 */
+        internal fun encodeObject(json: Json, saved: Saved, order: Int): String = json.encodeToString(
+            TranslationObject(
+                saved.mangaId,
+                saved.chapterId,
+                order,
+                saved.method,
+                saved.reRenderMethod,
+                saved.errored,
+                saved.mangaPaused,
+                saved.nightRender,
+                saved.paused,
+                saved.nightForce,
+                saved.nightLink.code,
+                // 舊欄位一律寫 0（預設值不輸出＝等於省略），見 [TranslationObject.pairRole]
+                pairRole = 0,
+            ),
+        )
+
+        /**
+         * 舊欄位 [TranslationObject.pairRole] 的代碼是不是合併處理 v1 的配對角色（1＝跟著翻譯、2＝只做已定案頁）。其他值（0、
+         * 認不得的）→ false，照一般夜讀項還原。
+         */
+        internal fun isLegacyPaired(code: Int): Boolean = code == 1 || code == 2
+
+        /** [encodeObject] 的反向；解不開（壞資料）→ null。沒有新欄位的舊 JSON 照樣解得開（新欄位用預設值）。 */
+        internal fun decodeObject(json: Json, raw: String): TranslationObject? =
+            try {
+                json.decodeFromString<TranslationObject>(raw)
+            } catch (e: Exception) {
+                null
+            }
+
         private const val KEY_PAUSED = "paused"
         private const val KEY_PAUSED_NIGHT = "paused_night"
         private const val KEY_PENDING_TRANSLATE = "pending_translate"
         private const val KEY_PENDING_NIGHT = "pending_night"
+        private const val KEY_PENDING_TRANSLATE_TRIGGER = "pending_translate_trigger"
     }
 }
 
 /** 翻譯佇列項的序列化形狀（對照 DownloadStore 的 DownloadObject）。 */
 @Serializable
-private data class TranslationObject(
+internal data class TranslationObject(
     val mangaId: Long,
     val chapterId: Long,
     val order: Int,
@@ -184,4 +238,11 @@ private data class TranslationObject(
     val paused: Boolean = false,
     /** 夜讀強制重做（無此欄的舊 JSON＝不強制）。 */
     val nightForce: Long = -1L,
+    /** 翻譯項的合併意圖代碼（[NightLink.code]；無此欄的舊 JSON＝0＝只翻譯，認不得的代碼還原時也當只翻譯）。 */
+    val nightLink: Int = 0,
+    /**
+     * **舊欄位，只留著讀**：合併處理 v1 的 debug 版替夜讀項寫的配對角色代碼（0＝一般、1＝跟著翻譯、2＝只做已定案頁）。現在一律
+     * 寫 0（預設值不輸出）；還原時只用來認出舊的配對夜讀項（[TranslationStore.isLegacyPaired]）。
+     */
+    val pairRole: Int = 0,
 )

@@ -1,6 +1,8 @@
 package eu.kanade.tachiyomi.data.nightread
 
 import com.hippo.unifile.UniFile
+import eu.kanade.tachiyomi.data.translation.OriginalMaterial
+import eu.kanade.tachiyomi.data.translation.PairHoldFiles
 import li.joye.yakuyomi.nightread.NightRead
 import li.joye.yakuyomi.nightread.NightTier
 
@@ -393,15 +395,34 @@ object NightPages {
     }
 
     /**
+     * 閱讀器 loader 用的列目錄（[Index] 存的就是這份）：[listFinal] 的全部，再加合併處理（翻譯＋夜讀一條線）要看的兩種檔——
+     * hold 記號（[PairHoldFiles.isMarker]：`<頁檔名>.pairhold`／`.pairhold-temp`）與原圖素材（[OriginalMaterial.isOriginalMaterial]：
+     * `<base>.orig.<副檔名>` 與舊版 `.orig.webp`）。一樣一次 listFiles。暫存、遮罩、json 不收。
+     * [summarize]／[availability]／[resolveName] 只認夜讀檔與記號，多收的這兩種不影響它們的結果（NightPagesTest 驗）。
+     */
+    fun listForReader(chapterDir: UniFile): Map<String, UniFile> {
+        val dir = chapterDir.findFile(DIR)?.takeIf { it.isDirectory } ?: return emptyMap()
+        return dir.listFiles().orEmpty()
+            .mapNotNull { f -> f.name?.takeIf { isReaderListed(it) }?.let { it to f } }
+            .toMap()
+    }
+
+    /** [listForReader] 收哪些檔名（純函式）：夜讀最終檔、規則版本記號、hold 記號、原圖素材。 */
+    fun isReaderListed(name: String): Boolean =
+        isFinalNightFile(name) || isRulesStamp(name) || PairHoldFiles.isMarker(name) ||
+            OriginalMaterial.isOriginalMaterial(name)
+
+    /**
      * 夜讀版 [night]（完成標記，[markerName]）是否比成品頁 [page] 新（不比它舊就算新鮮）。
      * 用修改時間而非內容雜湊：頁圖每次覆寫都會更新 mtime，而夜讀版一定在覆寫之後才產生；比對雜湊得整張讀進來、划不來。
      */
     fun isFresh(night: UniFile, page: UniFile): Boolean = night.lastModified() >= page.lastModified()
 
     /**
-     * 一章 `.yakuyomi/` 的夜讀檔名快取（name → UniFile），給 reader 的 loader 用：每次解碼都 findFile 在非主要儲存上
-     * 等於每次列整個資料夾，這裡列一次就重用。快取可能過期（佇列剛產出新頁、或重新產生時刪了舊檔）：呼叫端在
-     * 「這頁查不到可送的檔」時探一次 std、在開檔失敗時 [invalidate] 後重列（見 `NightPageStreams`）。執行緒安全（整份換掉）。
+     * 一章 `.yakuyomi/` 的檔名快取（name → UniFile，內容＝[listForReader]：夜讀最終檔、規則版本記號、hold 記號、原圖素材），
+     * 給 reader 的 loader 用：每次解碼都 findFile 在非主要儲存上等於每次列整個資料夾，這裡列一次就重用。快取可能過期（佇列剛產出
+     * 新頁、或重新產生時刪了舊檔、翻譯剛落地寫了 hold 記號）：呼叫端在「這頁查不到可送的檔」時探一次 std、在開檔失敗時
+     * [invalidate] 後重列、hold 生效的章每次解碼前重列（見 `NightPageStreams`）。執行緒安全（整份換掉）。
      */
     class Index {
         private class Snapshot(val dir: UniFile, val files: Map<String, UniFile>)
@@ -421,9 +442,9 @@ object NightPages {
             return refresh(chapterDir)
         }
 
-        /** 重列一次 `.yakuyomi/` 並換掉快取，回傳新檔名表。 */
+        /** 重列一次 `.yakuyomi/`（[listForReader]）並換掉快取，回傳新檔名表。 */
         fun refresh(chapterDir: UniFile): Map<String, UniFile> {
-            val files = listFinal(chapterDir)
+            val files = listForReader(chapterDir)
             snapshot = Snapshot(chapterDir, files)
             return files
         }

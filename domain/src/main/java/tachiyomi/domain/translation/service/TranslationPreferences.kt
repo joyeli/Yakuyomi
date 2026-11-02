@@ -21,8 +21,10 @@ class TranslationPreferences(
     private val cipher: StringCrypto = crypto ?: IdentityCrypto
 
     /**
-     * 全域翻譯總開關（預設開）。關閉＝**自動翻譯一律不做**：下載時翻譯（[translationEnabled]）與即時翻譯
-     * （[liveTranslate]）都被 gate 掉、引擎不預暖；設定頁其餘翻譯選項變灰。手動翻譯不受此限。
+     * 全域翻譯總開關（預設開）。這是**硬總開關**：關閉時自動與手動翻譯（下載時翻譯 [translationEnabled]、即時翻譯
+     * [liveTranslate]、章節列翻譯鈕／多選／閱讀器「開始翻譯這話」、重繪）**一律不排入**，翻譯佇列也不跑、引擎不預暖
+     * （TranslationManager 的 translate／reRender 與 drain 都會擋）；設定 › 翻譯 整頁收起只剩快速上手與這個開關。
+     * 夜讀有自己的總開關 [nightReadEnabled]，不受這個開關影響。
      */
     val translationMasterEnabled = preferenceStore.getBoolean("translation_master_enabled", true)
 
@@ -148,8 +150,44 @@ class TranslationPreferences(
      * **與翻譯就緒無關**：isReady 不看它、夜讀模型缺也不影響翻譯；缺模型時只有夜讀那個工作標 ERROR。
      * **不進 configSignature**：它只決定「翻完要不要多排一個工作」，不影響翻譯引擎的建構參數 → 切換不需重建引擎。
      * 舊章補做走章節多選「產生夜讀版」；reader 端要不要顯示夜讀版由 ReaderPreferences.nightReadMode 決定（沒夜讀版就顯示正常版）。
+     * 2026-10-08 起管兩條自動路徑：「下載完、沒排翻譯」與「翻譯做完、這一輪沒有一併產生夜讀版」——分開模式
+     * （[nightManualMode]＝separate）的手動／下載時翻譯、沒開「即時翻譯時一併產生」（[liveTranslateNight]）的即時翻譯，
+     * 以及合併意圖的章這一輪閘門沒過（夜讀範圍外等）。一併產生了夜讀版的那一輪（合併輪）不看這項。
      */
     val nightReadGenerate = preferenceStore.getBoolean("pref_translation_nightread", false)
+
+    // ── 翻譯＋夜讀合併處理（2026-10-08）：兩頁（設定 › 翻譯、設定 › 夜讀）共用同一個偏好物件，改一邊另一邊自然跟著變。 ──
+    // 兩項都不看 [nightReadGenerate]；夜讀總開關關、夜讀模型缺、章不是鬆散資料夾時一律不配對（只翻譯）。
+    // 改這些偏好沒有任何副作用（不重排、不重繪、不改已排的項），只影響之後排入的章。
+
+    /**
+     * 手動翻譯（章節列翻譯鈕、多選翻譯、閱讀器「開始翻譯這話」）**以及下載時翻譯**要不要一併產生夜讀版：
+     * [NIGHT_MANUAL_SEPARATE]（預設＝現狀：翻譯與夜讀各自排）／[NIGHT_MANUAL_COMBINED]（同章配對：每頁翻譯與夜讀版都好了
+     * 閱讀器才換上新圖，白天也一樣）。手動觸發算明確要求、不看夜讀的分類／來源排除；下載時翻譯算自動路徑、要過夜讀範圍。
+     * 消費端：認不得的值一律當 separate。
+     */
+    val nightManualMode = preferenceStore.getString("translation_night_manual_mode", NIGHT_MANUAL_SEPARATE)
+
+    /**
+     * 即時翻譯（含跨章預取、線上章下載完成的即時路徑）**一律**一併產生夜讀版（預設關＝現狀）。開著時與閱讀器是不是
+     * 夜讀模式無關；算自動路徑、要過夜讀的分類／來源排除。只在 [liveTranslate] 開時有意義（設定頁在即時翻譯關時停用）。
+     */
+    val liveTranslateNight = preferenceStore.getBoolean("translation_live_night", false)
+
+    /**
+     * 夜讀模式下，還沒有夜讀版（目前檔位）的頁先壓暗顯示（預設開）。**只影響顯示**（閱讀器的 ColorMatrix），絕不寫檔；
+     * 夜讀版做好、換上後就不再壓暗。分開模式的章、從沒產生過夜讀版的章、彩頁略過的頁都適用。
+     */
+    val nightDimPending = preferenceStore.getBoolean("nightread_dim_pending", true)
+
+    /**
+     * 「標準」檔位的壓暗程度（變暗 %，0–90，間隔 5；預設 50）：畫面亮度乘以 `1 − 值/100`。
+     * 兩檔分開設定是因為「標準」與「更多」做好的夜讀版暗度不同，壓暗要跟換上後的暗度接近。消費端讀出來一律夾到 0–90。
+     */
+    val nightDimStandard = preferenceStore.getInt("nightread_dim_standard", 50)
+
+    /** 「更多」檔位的壓暗程度（變暗 %，0–90；預設 65，比「標準」暗）。消費端讀出來一律夾到 0–90。 */
+    val nightDimMore = preferenceStore.getInt("nightread_dim_more", 65)
 
     // ── 夜讀（設定 › 夜讀 頁）：以下只管**自動**路徑（下載完／翻完後），手動月亮鈕與 reader 長壓不查。 ──
 
@@ -289,6 +327,12 @@ class TranslationPreferences(
         const val DEFAULT_LIVE_INPAINT_METHOD = "auto_whole"
         const val DEFAULT_OCR_CONCURRENCY = "auto" // auto=硬體核數（多數手機8核）；真機 8.9s→4.8s 快46%
         const val DEFAULT_COLOR_MODE = "auto" // auto=依背景亮度判黑/白字
+
+        /** [nightManualMode] 的值：分開處理（預設＝現狀）。 */
+        const val NIGHT_MANUAL_SEPARATE = "separate"
+
+        /** [nightManualMode] 的值：合併處理（翻譯與夜讀配對、兩樣都好才換上）。 */
+        const val NIGHT_MANUAL_COMBINED = "combined"
     }
 }
 

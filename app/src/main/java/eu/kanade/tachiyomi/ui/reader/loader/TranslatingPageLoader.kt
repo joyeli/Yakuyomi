@@ -5,6 +5,7 @@ import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.data.database.models.toDomainChapter
 import eu.kanade.tachiyomi.data.download.DownloadProvider
 import eu.kanade.tachiyomi.data.translation.PageTranslator
+import eu.kanade.tachiyomi.data.translation.TranslateTrigger
 import eu.kanade.tachiyomi.data.translation.TranslationManager
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.model.Page
@@ -178,11 +179,13 @@ internal class TranslatingPageLoader(
             }
             // 整章排入受管理佇列（背景翻、可暫停/取消/重試、清單顯示翻譯中）。atFront＝true：正在讀的章插隊到最前。
             // 即時翻用即時去字法（預設 AI 去字），與下載/手動翻的去字法分開＝弱機可單獨改回 boxfill 求低延遲。
+            // 觸發來源＝LIVE：「即時翻譯時一併產生夜讀版」開著時排成翻譯＋夜讀的合併工作（每頁翻好接著做夜讀，兩樣都好才換）。
             translationManager.translate(
                 manga,
                 listOf(domainChapter),
                 atFront = true,
                 method = translationManager.liveInpaintMethod(),
+                trigger = TranslateTrigger.LIVE,
             )
             startQueueObserver()
         }
