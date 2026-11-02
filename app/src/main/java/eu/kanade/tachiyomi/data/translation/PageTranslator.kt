@@ -17,9 +17,11 @@ import eu.kanade.tachiyomi.data.nightread.NightLevel
 import eu.kanade.tachiyomi.data.nightread.NightNetsHolder
 import eu.kanade.tachiyomi.data.nightread.NightPageOutcome
 import eu.kanade.tachiyomi.data.nightread.NightPages
+import eu.kanade.tachiyomi.data.nightread.NightPendingEncodes
 import eu.kanade.tachiyomi.data.nightread.NightPerfProbe
 import eu.kanade.tachiyomi.data.nightread.NightPump
 import eu.kanade.tachiyomi.data.nightread.NightTicket
+import eu.kanade.tachiyomi.data.nightread.NightWorkers
 import eu.kanade.tachiyomi.data.nightread.SharedNightDetector
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -52,6 +54,7 @@ import li.joye.yakuyomi.engine.Renderer
 import li.joye.yakuyomi.engine.TextLine
 import li.joye.yakuyomi.engine.TextRegion
 import li.joye.yakuyomi.nightread.NightReadParams
+import li.joye.yakuyomi.nightread.NightTier
 import logcat.LogPriority
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.system.logcat
@@ -60,6 +63,7 @@ import tachiyomi.i18n.MR
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executor
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.abs
 
@@ -1376,6 +1380,8 @@ class PageTranslator(private val context: Context) {
                 base = nightBaseParams(),
                 skipColor = translationPreferences.nightReadSkipColor.get(),
                 webpFmt = nightWebpFormat(),
+                // 合併輪的編碼交給編碼執行緒（S5）；分開模式（一般夜讀項）照舊在 worker 上編碼
+                encoder = NightWorkers.encodePool,
                 onFinal = { name, result ->
                     val held = holds.release(name)
                     night.onPageFinal(name, result, held)
@@ -1595,6 +1601,11 @@ class PageTranslator(private val context: Context) {
         val base: NightReadParams,
         val skipColor: Boolean,
         val webpFmt: Bitmap.CompressFormat,
+        /**
+         * 每檔的編碼與寫暫存交給哪裡（軌道 B2 的 S5，[NightRound]）：合併輪＝[NightWorkers.encodePool]，重繪交出一檔就接著合成
+         * 下一檔；null＝在重繪那條執行緒上依序編碼（一般夜讀項，分開模式不變）。
+         */
+        val encoder: Executor? = null,
         /** 一頁結果確定（做好／彩頁略過／失敗）。 */
         private val onFinal: (String, NightPageResult) -> Unit = { _, _ -> },
         /** 一頁過期（產生期間頁圖被覆寫，留待之後重做）。 */
@@ -1770,6 +1781,10 @@ class PageTranslator(private val context: Context) {
      *  6. 寫目前的規則版本記號、刪同頁舊記號（[writeRulesStamp]）。寫不出來＝記錯、整章標失敗（[NightChapter.result]），
      *     這頁的夜讀版照樣能看、但會顯示「可更新」，重試時重做。
      * **本函式不 suspend**：效能探針的 `thr=` 量的是同一條執行緒。
+     *
+     * **編碼**（軌道 B2 的 S5）：[NightChapter.encoder] 非 null 時改用 [NightReadRenderer.renderTiersOwning]，每檔交給編碼執行緒
+     * （[NightRound.write] 拿走 Bitmap），[NightRound.commit]／[NightRound.discard] 先等編碼做完；編碼失敗在換檔時才拋（照樣刪暫存、
+     * 記錯）。
      */
     private fun renderNightPage(
         job: NightJob,
@@ -1778,7 +1793,8 @@ class PageTranslator(private val context: Context) {
     ): NightPageOutcome {
         val img = job.img
         val name = job.name
-        val round = NightRound(chapter.matDir, name, chapter.webpFmt)
+        val owning = chapter.encoder != null
+        val round = NightRound(chapter.matDir, name, chapter.webpFmt, chapter.encoder?.let { NightPendingEncodes(it) })
         try {
             val bounds = job.bounds ?: probeNightBounds(img) ?: throw IllegalStateException("頁圖解碼失敗")
             // 過期競態的前置快照：decode 前記成品頁 (mtime, size)，寫完後再比（見下）。
@@ -1870,44 +1886,73 @@ class PageTranslator(private val context: Context) {
                 var shareCheck: NightShareCheck.Side? = null
                 var shareChecked = false
                 // 引擎一次分析、產品兩檔（[NightLevel.engineTiers]＝L2、L3）依序交 ARGB_8888（>3.5 MPx 自動縮、輸出縮後
-                // 尺寸）；sink 回傳後引擎就 recycle，所以這裡在 sink 裡寫完。page 與 inpaint 所有權不變：inpaint 在這次呼叫
-                // （與 debug 比對）一結束就 recycle（引擎重繪前已轉成自己的遮罩），page 下面自己 recycle。
+                // 尺寸）。一般夜讀項（[owning]＝false）：sink 回傳後引擎就 recycle，所以在 sink 裡寫完；合併輪（true，S5）：
+                // sink 把 Bitmap 交給編碼執行緒（[NightRound.write] 拿走所有權）就回傳。page 與 inpaint 所有權不變：inpaint 在
+                // 這次呼叫（與 debug 比對）一結束就 recycle，page 下面自己 recycle。
                 // 偵測與人物分割同時跑（S11，ticket.inferenceBranch：多緒組＝governor 的分支執行緒，FREE 組＝null 依序）；
                 // 兩邊的 checkpoint 可能在兩條執行緒上同時問。
                 val rendered = try {
-                    val ok = NightReadRenderer.renderTiers(
-                        page,
-                        detect = { b ->
-                            ticket.checkpoint()
-                            if (shared != null && NightShareCheck.pending()) {
-                                val (d, borrowed) = shared.detectReport(b)
-                                if (borrowed && NightShareCheck.claim()) {
-                                    shareCheck = NightShareCheck.Side().also { it.recordDetection(d) }
-                                }
-                                d
-                            } else {
-                                nets.detect(b)
+                    val detect: (Bitmap) -> Detection = { b ->
+                        ticket.checkpoint()
+                        if (shared != null && NightShareCheck.pending()) {
+                            val (d, borrowed) = shared.detectReport(b)
+                            if (borrowed && NightShareCheck.claim()) {
+                                shareCheck = NightShareCheck.Side().also { it.recordDetection(d) }
                             }
-                        },
-                        segment = { b ->
-                            ticket.checkpoint()
-                            nets.segmenter.segment(b)
-                        },
-                        base = chapter.base,
-                        stats = stats,
-                        extraLines = extra,
-                        inpaintMask = inpaint,
-                        // 重繪前檢查點：只問要不要繼續，不動任何檔（舊檔留到換檔那一刻，見寫入順序）
-                        beforeRender = { ticket.keep() },
-                        tiers = NightLevel.engineTiers,
-                        inferenceBranch = ticket.inferenceBranch,
-                    ) { tier, bmp ->
-                        shareCheck?.recordTier(tier, bmp)
-                        // 1. 與前一檔相同（bmp == null；只會是更多）不存；有圖的檔位一律只寫暫存
-                        if (bmp != null) {
-                            val level = checkNotNull(NightLevel.ofTier(tier)) { "引擎交回非產品檔位 ${tier.key}" }
+                            d
+                        } else {
+                            nets.detect(b)
+                        }
+                    }
+                    val segment: (Bitmap) -> BooleanArray = { b ->
+                        ticket.checkpoint()
+                        nets.segmenter.segment(b)
+                    }
+                    val sink: (NightTier, Bitmap?) -> Unit = { tier, bmp ->
+                        // 1. 與前一檔相同（bmp == null；只會是更多）不存；有圖的檔位一律只寫暫存。[owning] 時這張歸這裡：
+                        // 交給 round.write（它拿走）之前出錯要自己回收
+                        if (bmp == null) {
+                            shareCheck?.recordTier(tier, null)
+                        } else {
+                            val level = try {
+                                shareCheck?.recordTier(tier, bmp)
+                                checkNotNull(NightLevel.ofTier(tier)) { "引擎交回非產品檔位 ${tier.key}" }
+                            } catch (t: Throwable) {
+                                if (owning) bmp.recycle()
+                                throw t
+                            }
                             round.write(level, bmp)
                         }
+                    }
+                    // 重繪前檢查點：只問要不要繼續，不動任何檔（舊檔留到換檔那一刻，見寫入順序）
+                    val ok = if (owning) {
+                        NightReadRenderer.renderTiersOwning(
+                            page,
+                            detect = detect,
+                            segment = segment,
+                            base = chapter.base,
+                            stats = stats,
+                            extraLines = extra,
+                            inpaintMask = inpaint,
+                            beforeRender = { ticket.keep() },
+                            tiers = NightLevel.engineTiers,
+                            inferenceBranch = ticket.inferenceBranch,
+                            sink = sink,
+                        )
+                    } else {
+                        NightReadRenderer.renderTiers(
+                            page,
+                            detect = detect,
+                            segment = segment,
+                            base = chapter.base,
+                            stats = stats,
+                            extraLines = extra,
+                            inpaintMask = inpaint,
+                            beforeRender = { ticket.keep() },
+                            tiers = NightLevel.engineTiers,
+                            inferenceBranch = ticket.inferenceBranch,
+                            sink = sink,
+                        )
                     }
                     val check = shareCheck
                     if (ok && check != null) {
@@ -1916,7 +1961,7 @@ class PageTranslator(private val context: Context) {
                     }
                     ok
                 } catch (t: Throwable) {
-                    // 2. 交檔途中出錯：這一輪的暫存全刪、舊檔沒動（推論階段出錯時本來就沒寫任何檔）
+                    // 2. 交檔途中出錯：這一輪的暫存全刪（先等交出去的編碼做完）、舊檔沒動（推論階段出錯時本來就沒寫任何檔）
                     round.discard()
                     throw t
                 } finally {
@@ -1941,8 +1986,8 @@ class PageTranslator(private val context: Context) {
                 deleteNightFiles(chapter.matDir, NightPages.artifactNames(name))
                 return nightPageStale(chapter, name)
             }
-            // 4. 換檔：刪舊 std→more（std 刪不掉就停）→ 新 more 改名 → 新 std 改名（完成標記）。舊檔刪不掉＝放棄這頁、記錯、
-            // 下次再做。
+            // 4. 換檔：（先等編碼做完）刪舊 std→more（std 刪不掉就停）→ 新 more 改名 → 新 std 改名（完成標記）。舊檔刪不掉＝
+            // 放棄這頁、記錯、下次再做。
             if (!round.commit()) {
                 round.discard()
                 TraceLog.log("night", "$name CLEAR FAILED old night files kept")
@@ -1973,7 +2018,8 @@ class PageTranslator(private val context: Context) {
             }
             val scaled = stats.scaledTo?.let { "${it.first}x${it.second}" } ?: "-"
             val line = "detect=${stats.detectMs}ms mask=${stats.maskMs}ms render=${stats.renderMs}ms " +
-                "decode=${decodeMs}ms encode=${round.encodeMs}ms tiers=[${stats.tierMs.orEmpty()}] " +
+                "decode=${decodeMs}ms encode=${round.encodeMs}ms encWait=${round.encodeWaitMs}ms " +
+                "tiers=[${stats.tierMs.orEmpty()}] " +
                 "files=${round.written()} scaledTo=$scaled extraLines=$extraCount($extraFrom) inpaint=$inpaintDims"
             val perf = "${ticket.describe()} ${probe.finish(context)} stages=[${stats.stagesMs.orEmpty()}]"
             logcat { "夜讀 $name $line $perf" }
@@ -2133,41 +2179,91 @@ class PageTranslator(private val context: Context) {
     /**
      * 一頁一輪的夜讀寫檔帳（只在一條 worker 上用）：[write] 把每個檔位寫成暫存（舊檔不動），[commit] 才一口氣換檔，
      * 失敗時 [discard] 刪掉這一輪的暫存（與換檔途中已改名的 more），不留半套。
+     *
+     * [encodes] 非 null（合併輪，軌道 B2 的 S5）：[write] 把「壓成無損 WebP」交給編碼執行緒就回傳，而且**拿走 Bitmap 的所有權**
+     * （壓完或交不出去都由這裡回收）；壓好的位元組先留在記憶體（每檔約 1 MB），[commit] 等編碼都做完、才寫暫存再換檔（寫檔
+     * 很快，重的是壓縮；暫存在換檔前才寫，完成標記 std 的修改時間就一定晚於呼叫端做完過期檢查的那一刻）。編碼失敗在 [commit]
+     * 拋出第一個（跟在這條執行緒上寫時拋的一樣）。[discard] 也先等編碼做完。
+     * null（一般夜讀項，分開模式不變）：在呼叫執行緒上依序壓好、寫暫存才回傳，Bitmap 不歸這裡（引擎交完就回收）。
      */
     private inner class NightRound(
         private val matDir: UniFile,
         private val page: String,
         private val format: Bitmap.CompressFormat,
+        private val encodes: NightPendingEncodes? = null,
     ) {
+        private val lock = Any()
+
         /** 已寫好暫存、還沒改名的檔位。 */
         private val tmps = ArrayList<NightLevel>(2)
 
         /** 換檔途中已改成最終名的 more（std 改名失敗時要拆掉，免得變成孤兒）。 */
         private val finals = ArrayList<String>(1)
+
+        /** 寫成的檔位（log 用）。 */
         private val levels = ArrayList<String>(2)
 
-        /** 這一輪編碼＋寫檔的總耗時（ms）。 */
-        var encodeMs = 0L
-            private set
+        /** 編碼執行緒壓好、還沒寫成暫存的位元組（依交出的順序）。在 [lock] 下。 */
+        private val encoded = LinkedHashMap<NightLevel, ByteArray>(2)
+
+        /** 交出去的檔位（依順序）。 */
+        private val handed = ArrayList<NightLevel>(2)
+        private var syncMs = 0L
+
+        /** 這一輪編碼＋寫檔的總耗時（ms；交給編碼執行緒時＝那邊壓的合計＋換檔時寫暫存的時間）。 */
+        val encodeMs: Long get() = (encodes?.workMs ?: 0L) + syncMs
+
+        /** [commit]／[discard] 等編碼做完等了多久（ms；在呼叫執行緒上）。 */
+        val encodeWaitMs: Long get() = encodes?.waitMs ?: 0L
 
         fun write(level: NightLevel, bmp: Bitmap) {
+            val q = encodes
+            if (q == null) {
+                val t = SystemClock.elapsedRealtime()
+                tmps += level // 先記帳再寫：寫到一半失敗也要被 discard 清掉
+                writeNightAtomic(matDir, NightPages.levelName(page, level), bmp, format, commit = false)
+                levels += level.fileKey
+                syncMs += SystemClock.elapsedRealtime() - t
+                return
+            }
+            handed += level
+            q.submit(onRejected = { bmp.recycle() }) {
+                try {
+                    val bytes = encodeNight(bmp, format)
+                    synchronized(lock) { encoded[level] = bytes }
+                } finally {
+                    bmp.recycle()
+                }
+            }
+        }
+
+        /** 等交出去的編碼都做完；有失敗就拋第一個。做完把壓好的依交出順序寫成暫存（[tmps]）。 */
+        private fun flushEncodes() {
+            val q = encodes ?: return
+            q.awaitAll()?.let { throw it }
             val t = SystemClock.elapsedRealtime()
-            tmps += level // 先記帳再寫：寫到一半失敗也要被 discard 清掉
-            writeNightAtomic(matDir, NightPages.levelName(page, level), bmp, format, commit = false)
-            levels += level.fileKey
-            encodeMs += SystemClock.elapsedRealtime() - t
+            for (level in handed) {
+                val bytes = synchronized(lock) { encoded.remove(level) } ?: continue
+                tmps += level // 先記帳再寫：寫到一半失敗也要被 discard 清掉
+                writeNightBytes(matDir, NightPages.levelName(page, level), bytes)
+                levels += level.fileKey
+            }
+            handed.clear()
+            syncMs += SystemClock.elapsedRealtime() - t
         }
 
         /**
-         * 換檔：刪這頁舊的 std→more（std 先刪，reader 立刻退回三檔格式／舊版單檔／原圖、不會把新 more 配上舊 std）→ 新 more
-         * 暫存改名 → 新 std 暫存改名（完成標記）。舊檔刪不掉 → 回 false（呼叫端 [discard]、記錯）；改名失敗拋
-         * [IllegalStateException]（呼叫端 catch 後 [discard]）。三檔格式與舊版單檔不在這裡刪（std 落地、再驗過期之後才刪）。
+         * 換檔：（交給編碼執行緒的先等做完、寫成暫存）刪這頁舊的 std→more（std 先刪，reader 立刻退回三檔格式／舊版單檔／原圖、
+         * 不會把新 more 配上舊 std）→ 新 more 暫存改名 → 新 std 暫存改名（完成標記）。舊檔刪不掉 → 回 false（呼叫端 [discard]、
+         * 記錯）；編碼、寫暫存、改名失敗拋 [IllegalStateException]（呼叫端 catch 後 [discard]）。三檔格式與舊版單檔不在這裡刪
+         * （std 落地、再驗過期之後才刪）。
          * **舊 std 刪不掉就停、不碰舊 more**（`stopOnFailure`）：否則這頁剩下「舊 std、沒有 more」——更多會退到標準（L2），
          * 而舊 std 不比頁圖舊、被當成新鮮，之後一般的產生都跳過這頁，直到手動「以目前設定重新產生」。停在這裡則舊的兩檔
          * 原封不動（照舊顯示）；std 刪掉了、more 刪不掉時，more 沒了 std 就是孤兒（reader 不認、下次開跑清掉），這頁也
          * 沒有完成標記、下次照樣重做。
          */
         fun commit(): Boolean {
+            flushEncodes()
             check(NightLevel.STANDARD in tmps) { "夜讀標準檔沒寫出來" }
             if (!deleteNightFiles(matDir, NightPages.currentNames(page), stopOnFailure = true)) return false
             for (level in tmps.filter { it != NightLevel.STANDARD }) {
@@ -2182,8 +2278,14 @@ class PageTranslator(private val context: Context) {
             return true
         }
 
-        /** 刪掉這一輪的暫存與換檔途中已改名的 more（best-effort）。可重複呼叫。 */
+        /**
+         * 刪掉這一輪的暫存與換檔途中已改名的 more（best-effort）；交給編碼執行緒的先等做完（失敗不管）、壓好的位元組丟掉。
+         * 可重複呼叫。
+         */
         fun discard() {
+            encodes?.awaitAll()
+            synchronized(lock) { encoded.clear() }
+            handed.clear()
             tmps.forEach { level ->
                 runCatching { matDir.findFile(NightPages.tmpName(NightPages.levelName(page, level)))?.delete() }
             }
@@ -2379,6 +2481,34 @@ class PageTranslator(private val context: Context) {
             throw IllegalStateException("夜讀版暫存為空")
         }
         if (commit) commitNightTmp(matDir, finalName)
+    }
+
+    /**
+     * 同 [writeNightAtomic]（停在暫存、不改名），寫的是已經壓好的位元組（合併輪交給編碼執行緒壓的，[NightRound]）。寫不出來、
+     * 寫完找不到或是空檔 → 刪暫存、拋 [IllegalStateException]（訊息同 [writeNightAtomic]）。
+     */
+    private fun writeNightBytes(matDir: UniFile, finalName: String, bytes: ByteArray) {
+        val tmpName = NightPages.tmpName(finalName)
+        if (bytes.isEmpty() || !overwriteBytes(matDir, tmpName, bytes)) {
+            runCatching { matDir.findFile(tmpName)?.delete() }
+            throw IllegalStateException("夜讀版寫檔失敗")
+        }
+        val tmp = matDir.findFile(tmpName) ?: throw IllegalStateException("夜讀版暫存檔寫完卻找不到")
+        if (tmp.length() <= 0L) {
+            runCatching { tmp.delete() }
+            throw IllegalStateException("夜讀版暫存為空")
+        }
+    }
+
+    /**
+     * 跟 [writeNightAtomic] 同樣的格式與品質把夜讀檔壓進記憶體（合併輪的編碼執行緒用）。壓不出來（含記憶體不足：
+     * 同 [compressToFile] 收成失敗）→ 拋 [IllegalStateException]（訊息同 [writeNightAtomic] 寫檔失敗）。
+     */
+    private fun encodeNight(bmp: Bitmap, format: Bitmap.CompressFormat): ByteArray {
+        val out = java.io.ByteArrayOutputStream(1 shl 20)
+        val ok = runCatching { bmp.compress(format, nightQuality(format), out) }.getOrDefault(false)
+        check(ok && out.size() > 0) { "夜讀版寫檔失敗" }
+        return out.toByteArray()
     }
 
     /**

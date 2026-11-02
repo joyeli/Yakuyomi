@@ -118,4 +118,22 @@ object NightWorkers {
             Thread(r, "yaku-night-b-${seq.incrementAndGet()}").apply { priority = Thread.NORM_PRIORITY }
         }.apply { allowCoreThreadTimeOut(true) }
     }
+
+    /**
+     * 合併輪夜讀的編碼執行緒（`yaku-night-enc-N`，軌道 B2 的 S5）：重繪每合成好一檔就交給這裡壓成無損 WebP、寫暫存檔
+     * （[NightPendingEncodes]），重繪接著合成下一檔。每頁在飛時最多兩件（標準、更多），[NightConcurrency.MAX_PAGES] 條就夠；
+     * 排隊也不會卡死（工作只寫檔，不等別的東西）。不登記進 governor：合併輪的夜讀不讓路（EXCLUSIVE），編碼跟以前在 worker 上
+     * 一樣以一般優先權跑。分開模式（一般夜讀項）不用它，照舊在 worker 上依序編碼。
+     */
+    val encodePool: Executor by lazy {
+        ThreadPoolExecutor(
+            NightConcurrency.MAX_PAGES,
+            NightConcurrency.MAX_PAGES,
+            30,
+            TimeUnit.SECONDS,
+            LinkedBlockingQueue(),
+        ) { r ->
+            Thread(r, "yaku-night-enc-${seq.incrementAndGet()}").apply { priority = Thread.NORM_PRIORITY }
+        }.apply { allowCoreThreadTimeOut(true) }
+    }
 }
