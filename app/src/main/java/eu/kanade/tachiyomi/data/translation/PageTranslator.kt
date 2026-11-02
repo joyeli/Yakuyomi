@@ -19,6 +19,7 @@ import eu.kanade.tachiyomi.data.nightread.NightPages
 import eu.kanade.tachiyomi.data.nightread.NightPerfProbe
 import eu.kanade.tachiyomi.data.nightread.NightPump
 import eu.kanade.tachiyomi.data.nightread.NightTicket
+import eu.kanade.tachiyomi.data.nightread.SharedNightDetector
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
@@ -32,7 +33,9 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import li.joye.yakuyomi.engine.CharSegmenter
+import li.joye.yakuyomi.engine.Detection
 import li.joye.yakuyomi.engine.Detector
+import li.joye.yakuyomi.engine.DetectorConfig
 import li.joye.yakuyomi.engine.Inpainter
 import li.joye.yakuyomi.engine.NcnnFlavor
 import li.joye.yakuyomi.engine.NcnnForwardAbortedException
@@ -1481,11 +1484,25 @@ class PageTranslator(private val context: Context) {
             )
     }
 
-    /** 夜讀一章用的模型組（偵測器＋人物分割），整章所有頁共用；換組＝整組關掉再開（見 [NightPump]）。 */
-    private class NightNets(val detector: Detector, val segmenter: CharSegmenter) : AutoCloseable {
+    /**
+     * 夜讀一章用的模型組（偵測＋人物分割），整章所有頁共用；換組＝整組關掉再開（見 [NightPump]）。
+     *
+     * [detect]＝這組的偵測：自己的 [Detector]，或（合併輪的多緒組）[shared]——每次先借翻譯引擎那顆偵測器、借不到用自己的
+     * （S1，[SharedNightDetector]）。[ownsDetector]＝開組時偵測器是不是自己的（false＝借翻譯引擎的，關組時不碰它；之後借不到
+     * 而建的那顆由 [shared] 自己關）。[detectorPath]＝偵測模型 `.param`（debug 一次性比對用）。
+     */
+    private class NightNets(
+        val detect: (Bitmap) -> Detection,
+        val segmenter: CharSegmenter,
+        val ownsDetector: Boolean,
+        val detectorPath: String,
+        val shared: SharedNightDetector<Bitmap, Detection, Detector>? = null,
+        private val detector: Detector? = null,
+    ) : AutoCloseable {
         override fun close() {
             runCatching { segmenter.close() }
-            runCatching { detector.close() }
+            runCatching { shared?.close() }
+            runCatching { detector?.close() }
         }
     }
 
@@ -1604,17 +1621,38 @@ class PageTranslator(private val context: Context) {
         }
         val seg = NightReadRenderer.charSegmenter(yoloParam, csegParam, flavor)
             ?: throw IllegalStateException(context.stringResource(MR.strings.nightread_missing_models))
-        val detector = try {
-            Detector(detectorPath, flavor = flavor)
-        } catch (t: Throwable) {
-            seg.close()
-            throw t
+        // S1：合併輪的多緒組（DEFAULT，與翻譯引擎的偵測器同一種建法）可以借翻譯引擎那顆偵測器——開組當下借得到（引擎已載入、
+        // 同一份 .param、檔案沒換過）就不建自己的、也不暖機；借不到照舊建自己的並暖機。之後每次偵測都先借（借不到才用自己的、
+        // 必要時才建），見 [SharedNightDetector]。FREE 組（1 緒、緒數載入時就定死）一律自己建，不共用。
+        val shareable = combined && kind == NetKind.LOCKED
+        val lendable = shareable && engineService.canLendDetector(detectorPath)
+        val detector = if (lendable) {
+            null
+        } else {
+            try {
+                Detector(detectorPath, flavor = flavor)
+            } catch (t: Throwable) {
+                seg.close()
+                throw t
+            }
         }
         if (kind == NetKind.LOCKED) {
             seg.warmUp()
-            detector.warmUp()
+            detector?.warmUp()
         }
-        return NightNets(detector, seg)
+        if (!shareable) {
+            val own = checkNotNull(detector)
+            return NightNets(own::detect, seg, ownsDetector = true, detectorPath = detectorPath, detector = own)
+        }
+        val shared = SharedNightDetector<Bitmap, Detection, Detector>(
+            borrow = { b -> engineService.detectWithLease(b, DetectorConfig(), detectorPath) },
+            openOwn = { Detector(detectorPath, flavor = NcnnFlavor.DEFAULT) },
+            runOwn = { d, b -> d.detect(b) },
+            own = detector,
+            log = { TraceLog.log("combined", it) },
+        )
+        TraceLog.log("combined", "nets detector=${if (lendable) "shared" else "own"}")
+        return NightNets(shared::detect, seg, ownsDetector = !lendable, detectorPath = detectorPath, shared = shared)
     }
 
     /**
@@ -1735,17 +1773,29 @@ class PageTranslator(private val context: Context) {
                 )
                 inpaint?.let { inpaintDims = "${it.width}x${it.height}" }
                 val nets = ticket.nets
+                val shared = nets.shared
+                // debug 一次性比對（S1）：這個行程第一頁「偵測是借翻譯引擎的」夜讀頁 → 記下偵測與兩檔，畫完用自己建的偵測器
+                // 再做一次比（[verifySharedDetector]）。偵測在頁的執行緒上（分割才在分支上），sink 也是，所以不必同步。
+                var shareCheck: NightShareCheck.Side? = null
                 // 引擎一次分析、產品兩檔（[NightLevel.engineTiers]＝L2、L3）依序交 ARGB_8888（>3.5 MPx 自動縮、輸出縮後
                 // 尺寸）；sink 回傳後引擎就 recycle，所以這裡在 sink 裡寫完。page 與 inpaint 所有權不變：inpaint 在這次呼叫
-                // 一結束就 recycle（引擎重繪前已轉成自己的遮罩），page 下面自己 recycle。
+                // （與 debug 比對）一結束就 recycle（引擎重繪前已轉成自己的遮罩），page 下面自己 recycle。
                 // 偵測與人物分割同時跑（S11，ticket.inferenceBranch：多緒組＝governor 的分支執行緒，FREE 組＝null 依序）；
                 // 兩邊的 checkpoint 可能在兩條執行緒上同時問。
                 val rendered = try {
-                    NightReadRenderer.renderTiers(
+                    val ok = NightReadRenderer.renderTiers(
                         page,
                         detect = { b ->
                             ticket.checkpoint()
-                            nets.detector.detect(b)
+                            if (shared != null && NightShareCheck.pending()) {
+                                val (d, borrowed) = shared.detectReport(b)
+                                if (borrowed && NightShareCheck.claim()) {
+                                    shareCheck = NightShareCheck.Side().also { it.recordDetection(d) }
+                                }
+                                d
+                            } else {
+                                nets.detect(b)
+                            }
                         },
                         segment = { b ->
                             ticket.checkpoint()
@@ -1760,12 +1810,16 @@ class PageTranslator(private val context: Context) {
                         tiers = NightLevel.engineTiers,
                         inferenceBranch = ticket.inferenceBranch,
                     ) { tier, bmp ->
+                        shareCheck?.recordTier(tier, bmp)
                         // 1. 與前一檔相同（bmp == null；只會是更多）不存；有圖的檔位一律只寫暫存
                         if (bmp != null) {
                             val level = checkNotNull(NightLevel.ofTier(tier)) { "引擎交回非產品檔位 ${tier.key}" }
                             round.write(level, bmp)
                         }
                     }
+                    val check = shareCheck
+                    if (ok && check != null) verifySharedDetector(name, page, nets, chapter.base, extra, inpaint, check)
+                    ok
                 } catch (t: Throwable) {
                     // 2. 交檔途中出錯：這一輪的暫存全刪、舊檔沒動（推論階段出錯時本來就沒寫任何檔）
                     round.discard()
@@ -1852,6 +1906,48 @@ class PageTranslator(private val context: Context) {
             chapter.error("$name\t例外 ${t.javaClass.simpleName}: ${t.message}")
             chapter.pageFinal(name, NightPageResult.FAILED)
             return NightPageOutcome.DONE
+        }
+    }
+
+    /**
+     * debug 一次性比對（S1）：[shared] 是這頁用借來的偵測器做出來的偵測與兩檔；這裡用自己建的偵測器（同一個 `.param`、
+     * [NcnnFlavor.DEFAULT]、`DetectorConfig()`）對同一張頁、同一份文字框與遮罩再做一次（不寫檔），比行數、行框、textMask、
+     * 兩檔像素，記 `verify=same|diff`（只有雜湊與計數）。任何例外只記 `verify=error`，不影響這頁。多花一次偵測＋分割＋重繪
+     * （手機約 10–15 s）和一顆偵測器的原生記憶體（約 0.4 GB，做完就關），只在 debug 建置、每個行程一次。
+     */
+    private fun verifySharedDetector(
+        name: String,
+        page: Bitmap,
+        nets: NightNets,
+        base: NightReadParams,
+        extra: List<TextLine>,
+        inpaint: Bitmap?,
+        shared: NightShareCheck.Side,
+    ) {
+        try {
+            val own = NightShareCheck.Side()
+            val t0 = SystemClock.elapsedRealtime()
+            Detector(nets.detectorPath, flavor = NcnnFlavor.DEFAULT).use { tmp ->
+                NightReadRenderer.renderTiers(
+                    page,
+                    detect = { b -> tmp.detect(b).also { own.recordDetection(it) } },
+                    segment = { b -> nets.segmenter.segment(b) },
+                    base = base,
+                    extraLines = extra,
+                    inpaintMask = inpaint,
+                    tiers = NightLevel.engineTiers,
+                    inferenceBranch = null,
+                ) { tier, bmp -> own.recordTier(tier, bmp) }
+            }
+            val verdict = if (shared.sameAs(own)) "same" else "diff"
+            TraceLog.log(
+                "combined",
+                "$name verify=$verdict took=${SystemClock.elapsedRealtime() - t0}ms " +
+                    "shared[${shared.summary()}] own[${own.summary()}]",
+            )
+            if (verdict == "diff") logcat(LogPriority.WARN) { "夜讀共用偵測器比對不同 $name" }
+        } catch (t: Throwable) {
+            TraceLog.log("combined", "$name verify=error ${t.javaClass.simpleName}: ${t.message}")
         }
     }
 

@@ -13,6 +13,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import li.joye.yakuyomi.engine.Detection
+import li.joye.yakuyomi.engine.DetectorConfig
+import li.joye.yakuyomi.engine.InternalEngineApi
 import li.joye.yakuyomi.engine.PageResult
 import li.joye.yakuyomi.engine.TranslationEngine
 import li.joye.yakuyomi.engine.Yakuyomi
@@ -45,6 +48,10 @@ import java.util.concurrent.atomic.AtomicInteger
  *   即時翻關 / 真記憶體壓力（onTrimMemory）/ 即時翻關時佇列清空。
  *
  * **記憶體**：warm 引擎在常駐期間持有 ~100MB native；上述三觸發任一發生即釋放，下次呼叫再 lazy 重建。
+ *
+ * **借偵測器給夜讀（S1）**：合併輪的夜讀（多緒組）每次偵測先經 [detectWithLease] 借這顆引擎的偵測器（同一份 `.param`、
+ * 檔案自建引擎後沒換過），帶 `DetectorConfig()` 預設值跑；借用以一次偵測為單位（[lease]）。關引擎的三條路徑（設定簽章變了的
+ * 重建、onTrimMemory、佇列清空／即時翻關）都先停借、等借出的那次偵測做完才關；等不到就這次不關（同在飛頁不歸零時）。
  */
 class TranslationEngineService(private val context: Context) {
 
@@ -75,6 +82,12 @@ class TranslationEngineService(private val context: Context) {
 
     /** 上次建引擎時的設定簽章（含去字法）；與當前簽章不同 → 設定/去字法改過 → 重建。只在 [mutex] 下讀寫。 */
     private var builtSignature: String? = null
+
+    /** 借給夜讀的那顆引擎：引擎＋它的偵測模型路徑＋建引擎當下那個模型檔的戳記（之後檔被換過就不借）。 */
+    private class Lent(val engine: TranslationEngine, val detectorPath: String?, val detectorStamp: ModelStamp?)
+
+    /** 夜讀借偵測器的租約（S1，見類別說明）。建好引擎時 publish、[closeEngine] 時 publish(null)。 */
+    private val lease = EngineLease<Lent>()
 
     /** 引擎是否正在建構（載入 ~100MB native）：給 reader 角落指示器顯示「引擎載入中…」。建構期間 true、完成/失敗轉 false。 */
     private val _loading = MutableStateFlow(false)
@@ -181,7 +194,7 @@ class TranslationEngineService(private val context: Context) {
      * 延後重建到 idle；只有 inFlight==0 才安全關舊重建。本呼叫者此刻尚未 inFlight++（在鎖下、緊接 ensureEngine 之後才 ++），
      * 故此處讀到的 inFlight 反映的是**其他**在飛頁；持鎖期間沒有新頁能註冊，故 inFlight==0 判定後關閉是安全的。
      */
-    private fun ensureEngine(methodRaw: String): TranslationEngine? {
+    private suspend fun ensureEngine(methodRaw: String): TranslationEngine? {
         val signature = configSignature(methodRaw)
         val current = engine
         if (current != null && signature == builtSignature) return current
@@ -189,6 +202,11 @@ class TranslationEngineService(private val context: Context) {
         // 需重建（簽章變）或首建。有現成引擎但別的頁在飛 → 不能關（use-after-close）→ 先用現有引擎服務本頁、延後重建。
         if (current != null && inFlight.get() > 0) {
             logcat(LogPriority.DEBUG) { "延後重建引擎：有 ${inFlight.get()} 頁在飛，本頁先用現有 warm 引擎" }
+            return current
+        }
+        // 夜讀正借著偵測器（一次偵測）：停借、等它還（最多 NIGHT_LEASE_WAIT_MS）；等不到同上，先用現有引擎、延後重建
+        if (current != null && !drainNightLeases()) {
+            logcat(LogPriority.DEBUG) { "延後重建引擎：夜讀還借著偵測器，本頁先用現有 warm 引擎" }
             return current
         }
         // inFlight==0（或還沒建過）→ 安全關舊重建（釋放舊 native session 才不疊加 ~100MB）。
@@ -215,6 +233,9 @@ class TranslationEngineService(private val context: Context) {
             runCatching { built.warmUp() }
                 .onSuccess { warmedUp = true }
                 .onFailure { logcat(LogPriority.WARN, it) { "引擎暖機失敗，退回第一頁序列化保險" } }
+            // 建好、暖好才借給夜讀（偵測器是 DEFAULT 組、前向在全域鎖內串行，沒暖成也不會撞冷 Net 的併發）
+            val detPath = built.detectorModelPath
+            lease.publish(Lent(built, detPath, ModelStamp.of(detPath)))
             built
         } catch (e: Throwable) {
             logcat(LogPriority.ERROR, e) { "建翻譯引擎失敗" }
@@ -265,13 +286,17 @@ class TranslationEngineService(private val context: Context) {
      */
     private fun settingsFields(): List<String> = EngineConfigMapping.signatureFields(translationPreferences)
 
-    /** 釋放引擎的原生資源（3 顆 ONNX session）。僅在 [mutex] 下呼叫。 */
+    /**
+     * 釋放引擎的原生資源（3 顆 ONNX session）。僅在 [mutex] 下呼叫；有引擎時呼叫端要先 [drainNightLeases]（或
+     * [EngineLease.beginClose] 回 0）——夜讀借出的那次偵測還在跑就關＝use-after-close。
+     */
     private fun closeEngine() {
         try {
             engine?.close()
         } catch (e: Throwable) {
             logcat(LogPriority.WARN, e) { "關閉翻譯引擎時例外" }
         }
+        lease.publish(null)
         engine = null
         builtSignature = null
         _warm.value = false
@@ -288,7 +313,12 @@ class TranslationEngineService(private val context: Context) {
         while (inFlight.get() > 0 && spins++ < 1500) delay(20)
         // ★ 只有 inFlight==0 才關——即使上限到了仍有頁在飛也**不**關（否則 native session 被關掉、在飛頁 use-after-close crash）。
         if (inFlight.get() == 0) {
-            closeEngine()
+            // 夜讀借著偵測器（一次偵測）→ 停借、等它還；等不到這次不關（同在飛頁）
+            if (drainNightLeases()) {
+                closeEngine()
+            } else {
+                logcat(LogPriority.WARN) { "shutdown 略過關閉：夜讀還借著偵測器（避免 use-after-close，引擎續 warm）" }
+            }
         } else {
             logcat(LogPriority.WARN) { "shutdown 略過關閉：仍有 ${inFlight.get()} 頁在飛（避免 use-after-close，引擎續 warm）" }
         }
@@ -324,9 +354,14 @@ class TranslationEngineService(private val context: Context) {
     fun shutdownBlocking() {
         if (mutex.tryLock()) {
             try {
-                // 有頁在飛就別關（非 suspend、不能等）——留給下次觸發或翻完後再關，避免 use-after-close。
+                // 有頁在飛、或夜讀借著偵測器就別關（非 suspend、不能等）——留給下次觸發或翻完後再關，避免 use-after-close。
                 if (inFlight.get() == 0) {
-                    closeEngine()
+                    if (lease.beginClose() == 0) {
+                        closeEngine()
+                    } else {
+                        lease.cancelClose()
+                        TraceLog.log("svc", "shutdownBlocking skipped: night detector lease n=${lease.outstanding}")
+                    }
                 } else {
                     logcat(LogPriority.DEBUG) { "shutdownBlocking 略過：有頁在飛（記憶體回收稍後重試）" }
                 }
@@ -336,5 +371,47 @@ class TranslationEngineService(private val context: Context) {
         } else {
             logcat(LogPriority.DEBUG) { "shutdownBlocking 略過：引擎生命週期鎖忙（記憶體回收稍後重試）" }
         }
+    }
+
+    /**
+     * 關引擎前停借、等夜讀借出的那次偵測做完（S1）。已經沒借出＝立刻 true（之後維持停借，直到 [closeEngine] 的 publish(null)
+     * 或新引擎 publish）。等了 [NIGHT_LEASE_WAIT_MS] 還沒還 → 恢復借出、回 false（呼叫端這次不關）。只在 [mutex] 下呼叫。
+     */
+    private suspend fun drainNightLeases(): Boolean {
+        val n = lease.beginClose()
+        if (n == 0) return true
+        TraceLog.log("svc", "close waits night detector lease n=$n")
+        if (lease.awaitDrained(NIGHT_LEASE_WAIT_MS)) return true
+        lease.cancelClose()
+        TraceLog.log("svc", "close skipped: night detector lease still out n=${lease.outstanding}")
+        return false
+    }
+
+    /**
+     * 夜讀（合併輪的多緒組）借常駐引擎的偵測器跑一次偵測（S1）：引擎已建好、沒在關、它的偵測模型就是 [paramPath]、而且檔案
+     * 自建引擎後沒換過（[ModelStamp]）才借；帶 [cfg]（夜讀一律 `DetectorConfig()`）。借不到回 null（呼叫端用自己的偵測器）。
+     * 借用期間（這一次偵測，含等 NCNN 全域鎖）關引擎的路徑都會等它；偵測拋的例外照樣往外拋（租約照還）。
+     * 不碰 [mutex]、可在夜讀 worker 上直接呼叫（不 suspend），可多頁同時借。
+     */
+    @OptIn(InternalEngineApi::class)
+    fun detectWithLease(page: Bitmap, cfg: DetectorConfig, paramPath: String): Detection? {
+        val stamp = ModelStamp.of(paramPath) ?: return null
+        val lent = lease.acquire { it.detectorPath == paramPath && it.detectorStamp == stamp } ?: return null
+        try {
+            return lent.engine.detectWith(page, cfg)
+        } finally {
+            lease.release()
+        }
+    }
+
+    /** 現在借不借得到 [paramPath] 這顆偵測器（不借；開組時決定要不要先建自己的、回合邊界決定要不要收掉自己的）。 */
+    fun canLendDetector(paramPath: String): Boolean {
+        val stamp = ModelStamp.of(paramPath) ?: return false
+        return lease.available { it.detectorPath == paramPath && it.detectorStamp == stamp }
+    }
+
+    private companion object {
+        /** 關引擎時等夜讀還偵測器的上限：一次偵測（含等全域鎖、鎖上可能有一頁去字）通常 1–3 s。 */
+        const val NIGHT_LEASE_WAIT_MS = 15_000L
     }
 }
